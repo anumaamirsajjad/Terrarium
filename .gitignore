@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environment
+.env
+.env.local
+
+# Data — never commit the cube or raw imagery
+data/raw/
+data/interim/
+data/processed/
+*.zarr/
+*.duckdb
+*.tif
+*.nc
+
+# Models
+*.txt.model
+models/
+
+# Node / frontend
+node_modules/
+web/dist/
+web/.vite/
+*.log
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

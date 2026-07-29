@@ -1,0 +1,81 @@
+[project]
+name = "terrarium"
+version = "0.1.0"
+description = "Neighbourhood-scale digital twin for simulating climate interventions"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+
+dependencies = [
+    # --- API layer ---
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    # --- State Cube: geospatial ingest + array storage ---
+    "xarray>=2024.10",
+    "odc-stac>=0.3.10",
+    "pystac-client>=0.8",
+    "planetary-computer>=1.0",
+    "rioxarray>=0.17",
+    "zarr>=2.18,<3",
+    "duckdb>=1.1",
+    "geopandas>=1.0",
+    "shapely>=2.0",
+    # --- Physics Core: thermal emulator ---
+    "lightgbm>=4.5",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "scikit-learn>=1.5",
+    "numba>=0.66.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "httpx>=0.27",          # FastAPI TestClient transport
+    "ruff>=0.7",
+    "mypy>=1.13",
+]
+
+[project.scripts]
+terrarium-api = "terrarium.api.main:run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/terrarium"]
+# Tests live beside the modules they cover; keep them out of the built wheel.
+exclude = ["**/test_*.py", "**/conftest.py"]
+
+# ---------------------------------------------------------------- tooling ---
+
+[tool.pytest.ini_options]
+testpaths = ["src/terrarium"]
+python_files = ["test_*.py"]
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ANN", "RUF"]
+ignore = ["ANN401"]  # allow typing.Any where genuinely needed
+
+[tool.ruff.lint.per-file-ignores]
+"**/test_*.py" = ["ANN201", "ANN001"]  # test functions need no return annotations
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["terrarium"]
+mypy_path = "src"
+strict = true
+# Geospatial stack ships incomplete stubs; don't fail the build on them.
+[[tool.mypy.overrides]]
+module = ["odc.*", "pystac_client.*", "planetary_computer.*", "lightgbm.*", "rioxarray.*"]
+ignore_missing_imports = true
