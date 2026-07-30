@@ -84,7 +84,7 @@ export default function App() {
 
               <dt>Analysis grid</dt>
               <dd>
-                {status.data.tile.crs} @ {status.data.tile.resolution_m}&nbsp;m
+                {status.data.tile.crs} @ {status.data.tile.target_resolution_m}&nbsp;m
               </dd>
             </dl>
           </div>

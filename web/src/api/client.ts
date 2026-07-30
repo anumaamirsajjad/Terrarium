@@ -15,7 +15,8 @@ export interface TileInfo {
   /** WGS84 [longitude, latitude] */
   centroid: [number, number];
   crs: string;
-  resolution_m: number;
+  /** The analysis grid every source is resampled into, not any source's native GSD. */
+  target_resolution_m: number;
 }
 
 export interface HealthResponse {
