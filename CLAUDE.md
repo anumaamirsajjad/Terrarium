@@ -39,14 +39,29 @@ Data flows strictly downward. Nothing in a lower layer imports from a higher one
 
 Turns messy external reality into **one analysis-ready xarray Dataset** on a fixed grid.
 
-- `ingest/` talks to the outside world: STAC search, COG reads, OSM/vector pulls. This is
-  the *only* place network I/O is allowed.
+- `ingest/` talks to the outside world: STAC search, COG reads, plain HTTP fetches,
+  OSM/vector pulls. This is the *only* place network I/O is allowed.
 - `state/` owns the canonical grid definition, alignment/reprojection, the Zarr store, and
   the DuckDB catalogue of what has been ingested.
 - Output contract: every variable shares one CRS, one resolution, one bounding box, one
   set of coordinates. If two layers don't align, that is a `state/` bug, not a core bug.
 
 The cube is the **single source of truth**. A physics core never re-reads a GeoTIFF.
+
+**The cube has a time axis, and not everything sits on it.** `Dims` in `state/cube.py`
+declares which axes each variable actually varies along — `(time, y, x)` for per-window
+composites, `(y, x)` for genuinely static layers, `(time,)` for values that vary between
+windows but not across the tile. Broadcasting a single reanalysis number across 40,602
+pixels would imply a spatial signal nobody measured; do not do it to make shapes match.
+
+One time step is one **seasonal window** — a summer (Apr–Jun) or winter (Nov–Jan) of a
+given year, defined by `SeasonWindow` in `config.py` and driven by `window_years`. The
+`time` coordinate is the window's *midpoint*, which no satellite ever flew over; the
+`window` and `season` coordinates carry the meaning and are what you cite.
+
+Cores still consume one composite. `state.cube.select_window(cube, label)` returns that
+2-D view, and choosing the window is the **caller's** job — that is what kept the time
+dimension out of `cores/`.
 
 ### Layer 2 — Physics Core (`cores/`)
 
@@ -123,8 +138,20 @@ Microsoft Planetary Computer, anonymous access with request signing via
   urban-form proxy, but it is not terrain height
 - `esa-worldcover` — land cover classification, 10 m native
 
-Later phases add Open-Meteo (meteorology), WorldPop (population), OSM via Overpass
-(emissions inventory) and OpenAQ (air validation) — all keyless and free.
+Two sources are **not** on Planetary Computer and arrive over plain HTTP, still keyless
+and free:
+
+- **Open-Meteo** ERA5 archive — air temperature, wind and humidity, sampled at the ~10:30
+  local overpass hour and reduced by median over the window, matching how the LST
+  composite is built
+- **WorldPop** 2020 constrained, 100 m — population. Downloaded once into `data/raw/` and
+  cached, because the server does not support HTTP range requests and so cannot be read
+  in place. It also drops connections mid-transfer, so the download verifies
+  `Content-Length` before renaming into place — a short read yields a valid-looking
+  GeoTIFF with rows missing
+
+Later phases add OSM via Overpass (emissions inventory) and OpenAQ (air validation) —
+also keyless and free.
 
 These are *source* resolutions. Everything is resampled onto the single analysis grid —
 **100 m**, `Tile.target_resolution_m` in `config.py` — which is what every physics core
@@ -133,8 +160,17 @@ assumes. Do not confuse the two: `NATIVE_RESOLUTION_M` describes the inputs,
 = 40,602 pixels**.
 
 Resampling method is a property of the variable's *meaning*, declared once in
-`state/cube.py`: nearest for anything whose values are labels (land cover classes, QA
-bitmasks), bilinear for anything measured on a continuous scale.
+`state/cube.py`:
+
+- **nearest** for *labels* — land cover classes, QA bitmasks. Averaging class 10 with
+  class 50 gives class 30, which is a lie.
+- **bilinear** for *intensive* measurements — a temperature or an index means the same
+  thing whatever the pixel's area.
+- **sum** for *extensive* ones — population is a head count per cell, not a rate.
+  Interpolating it invents or destroys people: on the real WorldPop raster, bilinear
+  loses 26 % of the tile's residents. Phase 8 divides cooling by that number.
+
+Meteorology declares `None`: nothing is resampled onto a dimension that does not exist.
 
 ---
 
@@ -152,8 +188,9 @@ terrarium/
 │   │   ├── client.py       #   PC STAC search, signing, odc-stac load
 │   │   └── pipeline.py     #   masking, unit conversion, cube assembly
 │   ├── state/              # the cube: grid, alignment, Zarr, DuckDB catalog
-│   │   ├── grid.py         #   canonical CRS / resolution / transform
-│   │   ├── cube.py         #   variable + resampling contract; validate, summarise
+│   │   ├── grid.py         #   canonical CRS / resolution / transform (spatial only)
+│   │   ├── cube.py         #   variable + dims + resampling contract; validate,
+│   │   │                   #   summarise, select_window
 │   │   └── store.py        #   Zarr + DuckDB persistence
 │   ├── cores/              # ← PURE. no I/O, no network, no globals.
 │   │   ├── base.py         #   Intervention, CoreResult, DeltaStats, Core protocol
@@ -167,6 +204,7 @@ terrarium/
 │       └── schemas/        #   Pydantic request/response contracts
 ├── web/                    # React + Vite + MapLibre + deck.gl
 ├── data/                   # gitignored: raw/ interim/ processed/
+│                           #   raw/pak_ppp_2020_constrained.tif (WorldPop, cached)
 │                           #   processed/cube.zarr, terrarium.duckdb, thermal.txt
 ├── scripts/                # one-off CLI entrypoints. I/O around the cores lives here.
 │   ├── build_tile.py       #   full ingest -> State Cube, with a build report
@@ -261,18 +299,22 @@ uv run pytest                    # tests
 uv run ruff check src/ scripts/  # lint
 uv run mypy                      # types
 
-uv run python scripts/build_tile.py       # ingest -> State Cube (needs network, ~2 min)
-uv run python scripts/inspect_cube.py     # what is actually in the built cube
-uv run python scripts/preview_cube.py     # PNG renders for visual alignment checks
-uv run python scripts/train_thermal.py    # train + blocked CV + worked intervention
+uv run python scripts/build_tile.py       # ingest -> State Cube (needs network)
+                                          #   ~70 s per window; --years 2024 for a fast
+                                          #   two-window smoke test
+uv run python scripts/inspect_cube.py     # what is in the cube, incl. the tree-vs-built
+                                          #   LST contrast per window; --per-window
+uv run python scripts/preview_cube.py     # PNG renders; one --window per run
+uv run python scripts/train_thermal.py    # train + blocked CV + worked intervention,
+                                          #   on one --window (default: earliest summer)
 
 cd web && npm install && npm run dev      # frontend on :5173
 ```
 
 ## Conventions for working in this repo
 
-- Check `config.py` before hardcoding any constant — the bbox, CRS, and resolution live
-  there and nowhere else.
+- Check `config.py` before hardcoding any constant — the bbox, CRS, resolution, and the
+  seasonal window definitions live there and nowhere else.
 - When adding a dependency, add it to `pyproject.toml`, never `pip install` into the venv.
   If it is imported directly rather than pulled in transitively, say so in a comment.
 - If a change makes a core impure, stop and reconsider the design.
@@ -281,7 +323,10 @@ cd web && npm install && npm run dev      # frontend on :5173
   city changes; a threshold derived from the cube does not. The thermal core's acceptance
   band is built this way, after a literature band gave a false failure.
 - Keep a known-good Zarr. Planetary Computer drops connections, and never rebuild the
-  night before a demo.
+  night before a demo. Build to `--out` a new path rather than over the good one.
+- **A remote fetch that succeeds is not a fetch that completed.** WorldPop's server
+  truncates transfers without raising; verify the length and write through a `.partial`
+  rename, so a short read can never be mistaken for a cache hit.
 - Report validation honestly, including when it is unflattering, and label what a number
   does **not** prove. Spatially blocked CV shows the model generalises across space; it
   says nothing about whether it predicts the effect of a change.

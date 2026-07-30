@@ -6,11 +6,14 @@ here. Nothing else in the codebase should hardcode a bounding box, CRS, or pixel
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from datetime import date
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -54,6 +57,76 @@ LAHORE = Tile(
 
 ACTIVE_TILE = LAHORE
 
+# ------------------------------------------------------------ seasonal windows ---
+
+
+class Season(StrEnum):
+    """The two windows per year the cube composites over (D10).
+
+    Summer is what the thermal core cares about — the pre-monsoon heat peak. Winter is
+    ingested now rather than later because it is when Lahore's inversion traps pollution,
+    so the air core lands without forcing a second expansion of the ingest.
+    """
+
+    SUMMER = "summer"
+    WINTER = "winter"
+
+
+# (start month, start day, end month, end day). Winter's end month is *lower* than its
+# start month, which is how `season_windows` knows it runs into the following year.
+SEASON_SPANS: dict[Season, tuple[int, int, int, int]] = {
+    Season.SUMMER: (4, 1, 6, 30),  # Apr-Jun: pre-monsoon, hot and clear
+    Season.WINTER: (11, 1, 1, 31),  # Nov-Jan: inversion season
+}
+
+
+class SeasonWindow(BaseModel):
+    """One composite window: a season of one year, and the dates it covers."""
+
+    model_config = ConfigDict(frozen=True)
+
+    label: str
+    season: Season
+    start: date
+    end: date
+
+    @property
+    def stac_datetime(self) -> str:
+        """The window as a STAC datetime interval."""
+        return f"{self.start.isoformat()}/{self.end.isoformat()}"
+
+    @property
+    def midpoint(self) -> date:
+        """The window's centre. This is the cube's `time` coordinate value.
+
+        A composite has no single acquisition date, so the coordinate is deliberately the
+        window's midpoint rather than any real overpass — the `window` coordinate carries
+        the label you should actually cite.
+        """
+        return self.start + (self.end - self.start) / 2
+
+
+def season_windows(years: Sequence[int]) -> tuple[SeasonWindow, ...]:
+    """Every seasonal window for the given years, ordered by start date.
+
+    Winter is labelled by the year it *starts* in: `2024-winter` is Nov 2024 to Jan 2025.
+    Labelling it by the January would split one continuous cold season across two labels.
+    """
+    windows: list[SeasonWindow] = []
+    for year in sorted(years):
+        for season, (m0, d0, m1, d1) in SEASON_SPANS.items():
+            end_year = year + 1 if m1 < m0 else year
+            windows.append(
+                SeasonWindow(
+                    label=f"{year}-{season}",
+                    season=season,
+                    start=date(year, m0, d0),
+                    end=date(end_year, m1, d1),
+                )
+            )
+    return tuple(sorted(windows, key=lambda w: w.start))
+
+
 # --------------------------------------------------------------- data sources ---
 
 # Planetary Computer collection IDs. See CLAUDE.md > Data source.
@@ -61,6 +134,12 @@ COLLECTION_SENTINEL2 = "sentinel-2-l2a"
 COLLECTION_LANDSAT = "landsat-c2-l2"
 COLLECTION_DEM = "cop-dem-glo-30"
 COLLECTION_WORLDCOVER = "esa-worldcover"
+
+# Not STAC collections: these two are plain HTTP, outside Planetary Computer. Both are
+# keyless and free (D13). They are named here anyway so `VariableSpec.source_collection`
+# stays a single vocabulary rather than sprouting a second field.
+SOURCE_OPEN_METEO = "open-meteo"
+SOURCE_WORLDPOP = "worldpop"
 
 # Native ground sample distance of each source, in metres, *before* resampling onto
 # the target grid. Kept separate from Tile.target_resolution_m so the two concepts
@@ -97,19 +176,22 @@ class Settings(BaseSettings):
     # STAC catalogue. See CLAUDE.md > Data source.
     stac_url: str = "https://planetarycomputer.microsoft.com/api/stac/v1"
 
-    # Search window for imagery, as a STAC datetime interval. Lahore's pre-monsoon
-    # dry season: hot, clear, and the period the thermal core actually cares about.
-    search_start: str = "2024-04-01"
-    search_end: str = "2024-06-30"
+    # Years to build seasonal windows for. Each year contributes a summer and a winter
+    # window (D10), so this is 2 x len(window_years) time slices. Two years is the
+    # minimum that makes the time dimension mean anything; more is a build-time cost,
+    # not a code change.
+    window_years: list[int] = Field(default=[2023, 2024])
     # Scene-level cloud cover ceiling, percent. Applied as a STAC query filter.
     max_cloud_cover: float = 20.0
-    # Cap on scenes composited per collection, least-cloudy first.
+    # Cap on scenes composited per collection *per window*, least-cloudy first.
     #
-    # Lahore's dry season yields ~49 usable Sentinel-2 scenes; compositing all of them
-    # means ~300 COG reads and over an hour of warping, during which the Planetary
-    # Computer SAS tokens minted at search time expire and the load fails mid-flight. A
-    # median over the clearest handful is both faster and no less representative.
-    max_scenes_per_collection: int = 8
+    # Compositing every usable scene means hundreds of COG reads and over an hour of
+    # warping, during which the Planetary Computer SAS tokens minted at search time
+    # expire and the load fails mid-flight. A median over the clearest handful is both
+    # faster and no less representative. Raised from 8 now that windows are ~3 months
+    # rather than one 3-month range standing in for the whole cube: a per-window cap of 8
+    # was leaving most of a season's clear scenes on the floor.
+    max_scenes_per_collection: int = 14
     # Attempts per collection before giving up and leaving its variables unpopulated.
     # Planetary Computer reads fail transiently often enough (DNS blips, dropped TLS
     # connections mid-tile) that a single attempt makes builds needlessly flaky.
@@ -118,12 +200,30 @@ class Settings(BaseSettings):
     ingest_attempts: int = 4
     ingest_retry_delay_s: float = 10.0
 
+    # Open-Meteo's ERA5 reanalysis archive. Keyless, free for non-commercial use.
+    open_meteo_url: str = "https://archive-api.open-meteo.com/v1/archive"
+    # WorldPop 2020 constrained (building-settlement-mapped), 100 m, Pakistan. 33 MB and
+    # static, so it is downloaded once into data/raw and reused. The server does not
+    # support HTTP range requests, which rules out reading it in place via /vsicurl.
+    worldpop_url: str = (
+        "https://data.worldpop.org/GIS/Population/Global_2000_2020_Constrained"
+        "/2020/BSGM/PAK/pak_ppp_2020_constrained.tif"
+    )
+    worldpop_cache: Path = DATA_DIR / "raw" / "pak_ppp_2020_constrained.tif"
+    # Ceiling on any single plain-HTTP fetch. The retry wrapper handles the rest.
+    http_timeout_s: float = 300.0
+
     zarr_store: Path = DATA_DIR / "processed" / "cube.zarr"
     duckdb_path: Path = DATA_DIR / "processed" / "terrarium.duckdb"
 
     @property
     def tile(self) -> Tile:
         return ACTIVE_TILE
+
+    @property
+    def windows(self) -> tuple[SeasonWindow, ...]:
+        """The cube's time axis: every seasonal window, ascending by start date."""
+        return season_windows(self.window_years)
 
 
 @lru_cache(maxsize=1)

@@ -1,30 +1,47 @@
 """Source-by-source ingest onto the canonical grid.
 
-Each `_ingest_*` function owns one collection: it searches, masks, converts raw digital
+Each `_ingest_*` function owns one source: it searches, masks, converts raw digital
 numbers into physical units, composites over time, and returns grid-aligned DataArrays
 keyed by cube variable name. Reprojection and resampling are delegated to odc-stac via
 the geobox, using the method each variable declares in `state.cube`.
 
+Sources split in two. **Temporal** ones (Sentinel-2, Landsat, meteorology) are run once
+per seasonal window and produce one slice each; **static** ones (DEM, land cover,
+population) are run once for the whole cube, because nothing about them varies between
+windows and re-fetching them per window would multiply the build time for identical
+numbers.
+
 A source that fails is logged and skipped, not fatal. A cube missing its DEM is still a
 useful cube; a build that dies because one collection was briefly unavailable is not.
+Failure is isolated *per window*, too: one cloudy winter must not cost you the summers.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import time
+import urllib.parse
+import urllib.request
 from collections.abc import Callable
+from functools import partial
+from pathlib import Path
 from time import sleep
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
+import rioxarray
 import xarray as xr
+from rasterio.enums import Resampling as RioResampling
 
 from terrarium.config import (
     COLLECTION_DEM,
     COLLECTION_LANDSAT,
     COLLECTION_SENTINEL2,
     COLLECTION_WORLDCOVER,
+    SOURCE_OPEN_METEO,
+    SOURCE_WORLDPOP,
+    SeasonWindow,
     Settings,
 )
 from terrarium.ingest.client import (
@@ -36,6 +53,8 @@ from terrarium.ingest.client import (
 )
 from terrarium.state.cube import (
     VARIABLES_BY_NAME,
+    Dims,
+    VariableSpec,
     empty_cube,
     enforce_valid_range,
     validate_cube,
@@ -101,30 +120,47 @@ def _search(
     settings: Settings,
     collection_id: str,
     *,
-    dated: bool = True,
+    window: SeasonWindow | None = None,
     cloud_filtered: bool = True,
 ) -> SearchResult:
+    """Search one collection, restricted to `window` if the source varies over time."""
     return search_collection(
         catalog,
         collection_id,
         settings.tile.bbox,
-        datetime=f"{settings.search_start}/{settings.search_end}" if dated else None,
+        datetime=window.stac_datetime if window is not None else None,
         max_cloud_cover=settings.max_cloud_cover if cloud_filtered else None,
     )
 
 
-def _record(result: SearchResult, n_composited: int) -> SourceRecord:
+def _record(
+    result: SearchResult, n_composited: int, window: SeasonWindow | None = None
+) -> SourceRecord:
     return SourceRecord(
         collection_id=result.collection_id,
         n_found=result.n_found,
         n_kept=result.n_kept,
         n_composited=n_composited,
         max_cloud_cover=result.max_cloud_cover,
+        window=None if window is None else window.label,
     )
 
 
 def _capped(result: SearchResult, settings: Settings) -> SearchResult:
     return select_clearest(result, settings.max_scenes_per_collection)
+
+
+def _resampling(name: str) -> str:
+    """The odc-stac resampling name a gridded variable declares.
+
+    Meteorology declares `None` because it never touches the grid, so a source asking for
+    a method by variable name is asking about a raster — and if that variable has no
+    method, the spec and the ingestor disagree and the build should say so.
+    """
+    method = VARIABLES_BY_NAME[name].resampling
+    if method is None:
+        raise ValueError(f"{name} declares no resampling method; it is not a gridded variable")
+    return method.value
 
 
 def _s2_offset_dn(result: SearchResult) -> float:
@@ -147,12 +183,12 @@ def _s2_offset_dn(result: SearchResult) -> float:
 
 
 def _ingest_sentinel2(
-    catalog: pystac_client.Client, settings: Settings, grid: Grid
+    catalog: pystac_client.Client, settings: Settings, grid: Grid, window: SeasonWindow
 ) -> tuple[dict[str, xr.DataArray], SourceRecord]:
-    """NDVI, NDBI and broadband albedo from cloud-masked Sentinel-2 L2A."""
-    found = _search(catalog, settings, COLLECTION_SENTINEL2)
+    """NDVI, NDBI and broadband albedo from cloud-masked Sentinel-2 L2A, one window."""
+    found = _search(catalog, settings, COLLECTION_SENTINEL2, window=window)
     result = _capped(found, settings)
-    record = _record(found, len(result.items))
+    record = _record(found, len(result.items), window)
     if not result.items:
         return {}, record
 
@@ -161,7 +197,7 @@ def _ingest_sentinel2(
         bands=S2_BANDS,
         grid=grid,
         # SCL is a class code: averaging it would invent classes that mean nothing.
-        resampling={"*": VARIABLES_BY_NAME["ndvi"].resampling.value, "SCL": "nearest"},
+        resampling={"*": _resampling("ndvi"), "SCL": "nearest"},
         groupby="solar_day",
     )
 
@@ -210,10 +246,10 @@ def _ingest_sentinel2(
 
 
 def _ingest_landsat(
-    catalog: pystac_client.Client, settings: Settings, grid: Grid
+    catalog: pystac_client.Client, settings: Settings, grid: Grid, window: SeasonWindow
 ) -> tuple[dict[str, xr.DataArray], SourceRecord]:
-    """Land surface temperature from cloud-masked Landsat 8/9 Collection 2 Level-2."""
-    result = _search(catalog, settings, COLLECTION_LANDSAT)
+    """Mid-morning land surface temperature from Landsat 8/9 C2 L2, one window."""
+    result = _search(catalog, settings, COLLECTION_LANDSAT, window=window)
 
     thermal_items = [
         item
@@ -226,7 +262,7 @@ def _ingest_landsat(
 
     found = result.model_copy(update={"items": thermal_items})
     result = _capped(found, settings)
-    record = _record(found, len(result.items))
+    record = _record(found, len(result.items), window)
     if not result.items:
         return {}, record
 
@@ -235,7 +271,7 @@ def _ingest_landsat(
         bands=LANDSAT_BANDS,
         grid=grid,
         # QA_PIXEL is a bitmask; interpolating it would scramble every flag.
-        resampling={"lwir11": VARIABLES_BY_NAME["lst_c"].resampling.value, "qa_pixel": "nearest"},
+        resampling={"lwir11": _resampling("lst_c"), "qa_pixel": "nearest"},
         groupby="solar_day",
     )
 
@@ -252,7 +288,7 @@ def _ingest_dem(
     catalog: pystac_client.Client, settings: Settings, grid: Grid
 ) -> tuple[dict[str, xr.DataArray], SourceRecord]:
     """Elevation from Copernicus DEM GLO-30. Static, so no date or cloud filter."""
-    result = _search(catalog, settings, COLLECTION_DEM, dated=False, cloud_filtered=False)
+    result = _search(catalog, settings, COLLECTION_DEM, cloud_filtered=False)
     record = _record(result, len(result.items))
     if not result.items:
         return {}, record
@@ -261,7 +297,7 @@ def _ingest_dem(
         result.items,
         bands=("data",),
         grid=grid,
-        resampling=VARIABLES_BY_NAME["elevation_m"].resampling.value,
+        resampling=_resampling("elevation_m"),
         groupby="solar_day",
     )
     return {"elevation_m": _collapse_time(raw["data"]).astype("float32")}, record
@@ -271,7 +307,7 @@ def _ingest_worldcover(
     catalog: pystac_client.Client, settings: Settings, grid: Grid
 ) -> tuple[dict[str, xr.DataArray], SourceRecord]:
     """ESA WorldCover class codes. Categorical — nearest neighbour, never interpolated."""
-    result = _search(catalog, settings, COLLECTION_WORLDCOVER, dated=False, cloud_filtered=False)
+    result = _search(catalog, settings, COLLECTION_WORLDCOVER, cloud_filtered=False)
 
     # WorldCover ships one map per epoch (v100 = 2020, v200 = 2021). Mixing epochs makes
     # no sense for a snapshot of land cover, and there is no valid way to reduce class
@@ -286,7 +322,7 @@ def _ingest_worldcover(
         result.items,
         bands=("map",),
         grid=grid,
-        resampling=VARIABLES_BY_NAME["landcover"].resampling.value,
+        resampling=_resampling("landcover"),
         groupby="solar_day",
     )
 
@@ -296,6 +332,199 @@ def _ingest_worldcover(
         # they do not overlap, so the last slice after mosaicking is the whole epoch.
         data = data.isel(time=-1)
     return {"landcover": data.fillna(0).astype("uint8")}, record
+
+
+# --- Open-Meteo (meteorology) ----------------------------------------------------
+
+# Landsat crosses Lahore at ~10:30 local, so 10:00 is the nearest whole hour the
+# reanalysis publishes. Sampling the daily mean instead would describe a different time
+# of day than the surface temperature it is meant to explain.
+OVERPASS_HOUR = 10
+# Open-Meteo's hourly field name -> our cube variable name.
+METEO_FIELDS: dict[str, str] = {
+    "temperature_2m": "air_temp_c",
+    "wind_speed_10m": "wind_speed_ms",
+    "relative_humidity_2m": "relative_humidity_pct",
+}
+
+
+def _fetch_open_meteo(settings: Settings, window: SeasonWindow) -> dict[str, list[float | None]]:
+    """Hourly reanalysis for the tile centre over one window. Keyless and free (D13).
+
+    `timezone=auto` makes the returned timestamps *local*, which is what lets us pick the
+    overpass hour by string match rather than juggling Pakistan's UTC+5 offset here.
+    """
+    lon, lat = settings.tile.centroid
+    query = urllib.parse.urlencode(
+        {
+            "latitude": lat,
+            "longitude": lon,
+            "start_date": window.start.isoformat(),
+            "end_date": window.end.isoformat(),
+            "hourly": ",".join(METEO_FIELDS),
+            # Default is km/h; the cube declares m/s.
+            "wind_speed_unit": "ms",
+            "timezone": "auto",
+        }
+    )
+    url = f"{settings.open_meteo_url}?{query}"
+    with urllib.request.urlopen(url, timeout=settings.http_timeout_s) as response:
+        payload = json.load(response)
+
+    hourly: dict[str, list[float | None]] = payload["hourly"]
+    return hourly
+
+
+def _ingest_meteorology(
+    catalog: pystac_client.Client, settings: Settings, grid: Grid, window: SeasonWindow
+) -> tuple[dict[str, xr.DataArray], SourceRecord]:
+    """One meteorology value per window, at the overpass hour.
+
+    Reduced by **median over the window's days**, deliberately matching how the LST
+    composite is built — pairing a median surface temperature with a mean air temperature
+    would put the two variables on different days of the same window.
+
+    Scalars, not maps: one reanalysis point cannot resolve anything inside a 20 km tile,
+    and painting it across 40,602 pixels would imply a spatial signal that was never
+    measured. See `Dims.TIME` in `state/cube.py`.
+    """
+    hourly = _fetch_open_meteo(settings, window)
+    stamps = [str(t) for t in hourly["time"]]
+    at_overpass = [i for i, t in enumerate(stamps) if t.endswith(f"T{OVERPASS_HOUR:02d}:00")]
+
+    arrays: dict[str, xr.DataArray] = {}
+    for field, name in METEO_FIELDS.items():
+        series = [hourly[field][i] for i in at_overpass]
+        finite = [float(v) for v in series if v is not None]
+        arrays[name] = xr.DataArray(np.float32(np.median(finite) if finite else np.nan))
+
+    logger.info(
+        "%s %s: %d overpass hours from %d hourly records",
+        SOURCE_OPEN_METEO,
+        window.label,
+        len(at_overpass),
+        len(stamps),
+    )
+    return arrays, SourceRecord(
+        collection_id=SOURCE_OPEN_METEO,
+        n_found=len(stamps),
+        n_kept=len(at_overpass),
+        n_composited=len(at_overpass),
+        window=window.label,
+    )
+
+
+# --- WorldPop (population) -------------------------------------------------------
+
+# Padding on the WGS84 clip, in degrees. Roughly 5 km — enough that reprojection into UTM
+# never reaches past the clipped edge for a pixel inside the tile.
+WORLDPOP_CLIP_PAD_DEG = 0.05
+# How far the tile's head count may drift from the source before it is a defect rather
+# than geometry. The grid is snapped outward so a small positive residual is expected
+# (+0.9% on Lahore); bilinear resampling would show roughly -26%.
+POPULATION_DRIFT_WARN_PCT = 5.0
+
+
+def _download_once(url: str, path: Path, timeout_s: float) -> Path:
+    """Fetch `url` to `path` unless it is already there. Static file, so cache it.
+
+    WorldPop's server does not honour HTTP range requests, so GDAL cannot read the raster
+    in place over /vsicurl. It is 33 MB and never changes, so one download reused across
+    every rebuild is both simpler and faster than any streaming arrangement.
+    """
+    if path.exists() and path.stat().st_size > 0:
+        logger.info("using cached %s", path)
+        return path
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_suffix(path.suffix + ".partial")
+    logger.info("downloading %s -> %s", url, path)
+    with (
+        urllib.request.urlopen(url, timeout=timeout_s) as response,
+        partial.open("wb") as handle,
+    ):
+        declared = response.headers.get("Content-Length")
+        while chunk := response.read(1 << 20):
+            handle.write(chunk)
+
+    # This server drops connections mid-transfer, and a short read raises nothing: you
+    # get a valid-looking GeoTIFF with the bottom rows missing, which over a country-wide
+    # raster could quietly be the half containing Lahore. Verify, then let the retry
+    # wrapper have another go.
+    written = partial.stat().st_size
+    if declared is not None and written != int(declared):
+        partial.unlink(missing_ok=True)
+        raise OSError(f"truncated download: got {written} of {declared} bytes from {url}")
+
+    # Rename only once complete, so an interrupted download is never mistaken for a cache
+    # hit on the next run.
+    partial.replace(path)
+    return path
+
+
+def _ingest_population(
+    catalog: pystac_client.Client, settings: Settings, grid: Grid
+) -> tuple[dict[str, xr.DataArray], SourceRecord]:
+    """Residents per cell from WorldPop 2020 constrained, 100 m.
+
+    Population is *extensive*: the value is a head count for that pixel, not a rate. So
+    this resamples by SUM, and the check that it worked is that the tile total survives
+    reprojection — an interpolating method would quietly redistribute people.
+    """
+    path = _download_once(settings.worldpop_url, settings.worldpop_cache, settings.http_timeout_s)
+
+    # open_rasterio's return type is a union over Dataset/DataArray/list; a single-band
+    # GeoTIFF is always the DataArray case.
+    raw = cast("xr.DataArray", rioxarray.open_rasterio(path, masked=True)).squeeze(drop=True)
+    west, south, east, north = settings.tile.bbox
+    pad = WORLDPOP_CLIP_PAD_DEG
+    clipped = raw.rio.clip_box(west - pad, south - pad, east + pad, north + pad)
+
+    # WorldPop's nodata means "no settlement counted here", which as a head count is
+    # zero, not unknown. Filling before the warp also keeps nodata out of the sum.
+    counts = clipped.fillna(0.0)
+    counts = counts.rio.write_nodata(0.0)
+
+    # Match the canonical grid rather than restating its transform: `grid.empty()` is
+    # already the authority on shape, bounds and pixel centres, so there is no second
+    # place for the two to drift apart.
+    template = grid.empty().rio.write_crs(grid.crs)
+    warped = counts.rio.reproject_match(template, resampling=RioResampling.sum, nodata=0.0)
+
+    # Conservation check, and it has to compare like with like. The clip above carries
+    # ~5 km of padding so the warp has data to reach for at the edges, so its total is
+    # naturally ~30% larger than the tile - comparing against *that* reports a huge fake
+    # loss and makes correct SUM resampling look broken in the build log. The honest
+    # baseline is the unpadded bbox. Expect a small positive residual: the grid is
+    # snapped outward, so it covers slightly more ground than the bbox does.
+    inside_bbox = float(
+        np.nansum(np.asarray(raw.rio.clip_box(west, south, east, north).values))
+    )
+    warped_total = float(np.asarray(warped.values).sum())
+    drift = 100 * (warped_total - inside_bbox) / inside_bbox if inside_bbox else 0.0
+    logger.info(
+        "%s: %.0f people in the bbox, %.0f on the grid (%+.2f%%)",
+        SOURCE_WORLDPOP,
+        inside_bbox,
+        warped_total,
+        drift,
+    )
+    # Sum-resampling conserves; interpolation does not. Bilinear loses ~26% here, so a
+    # drift of this size means the declared method is not the one that ran.
+    if abs(drift) > POPULATION_DRIFT_WARN_PCT:
+        logger.warning(
+            "%s: tile total drifted %+.1f%% from the source - population is extensive "
+            "and must resample by SUM; check the declared method",
+            SOURCE_WORLDPOP,
+            drift,
+        )
+
+    return {"population": warped.astype("float32")}, SourceRecord(
+        collection_id=SOURCE_WORLDPOP,
+        n_found=1,
+        n_kept=1,
+        n_composited=1,
+    )
 
 
 def _newest_epoch(result: SearchResult) -> SearchResult:
@@ -314,53 +543,97 @@ def _newest_epoch(result: SearchResult) -> SearchResult:
     return result.model_copy(update={"items": items})
 
 
-# One collection's ingest: search, mask, convert, and return arrays keyed by cube
-# variable name, alongside the scene accounting for the build report.
-Ingestor = Callable[
+# One source's ingest: search, mask, convert, and return arrays keyed by cube variable
+# name, alongside the scene accounting for the build report. Static sources see no
+# window; temporal ones produce exactly one window's slice per call.
+StaticIngestor = Callable[
     ["pystac_client.Client", Settings, Grid],
     tuple[dict[str, xr.DataArray], SourceRecord],
 ]
+TemporalIngestor = Callable[
+    ["pystac_client.Client", Settings, Grid, SeasonWindow],
+    tuple[dict[str, xr.DataArray], SourceRecord],
+]
 
-_INGESTORS: tuple[tuple[str, Ingestor], ...] = (
-    ("sentinel-2", _ingest_sentinel2),
-    ("landsat", _ingest_landsat),
+_STATIC_INGESTORS: tuple[tuple[str, StaticIngestor], ...] = (
     ("copernicus-dem", _ingest_dem),
     ("worldcover", _ingest_worldcover),
+    ("worldpop", _ingest_population),
+)
+
+_TEMPORAL_INGESTORS: tuple[tuple[str, TemporalIngestor], ...] = (
+    ("sentinel-2", _ingest_sentinel2),
+    ("landsat", _ingest_landsat),
+    ("open-meteo", _ingest_meteorology),
 )
 
 
 def build_cube(
     catalog: pystac_client.Client, settings: Settings, grid: Grid
 ) -> tuple[xr.Dataset, list[SourceRecord]]:
-    """Run every source and assemble the State Cube.
+    """Run every source over every window and assemble the State Cube.
 
-    Returns the cube plus per-collection scene accounting. Variables whose source failed
-    or returned nothing are left at their declared fill value — present in the schema,
-    reported as unpopulated.
+    Returns the cube plus per-source, per-window scene accounting. Variables whose source
+    failed or returned nothing are left at their declared fill value — present in the
+    schema, reported as unpopulated. A failure is scoped to one source *and one window*,
+    so a cloudy winter costs you that slice and nothing else.
     """
     configure_gdal_for_cog_reads()
-    cube = empty_cube(grid)
+    windows = settings.windows
+    cube = empty_cube(grid, windows)
     records: list[SourceRecord] = []
 
-    for label, ingest in _INGESTORS:
-        outcome = _ingest_with_retries(label, ingest, catalog, settings, grid, cube)
+    for label, static in _STATIC_INGESTORS:
+        outcome = _ingest_with_retries(
+            label, partial(static, catalog, settings, grid), settings, grid
+        )
         if outcome is None:
             continue
-        aligned, record = outcome
+        arrays, record = outcome
         records.append(record)
-        cube.update(aligned)
+        for name, array in arrays.items():
+            _assign(cube, name, array, None)
 
-    validate_cube(cube, grid)
+    for index, window in enumerate(windows):
+        for label, temporal in _TEMPORAL_INGESTORS:
+            outcome = _ingest_with_retries(
+                f"{label} [{window.label}]",
+                partial(temporal, catalog, settings, grid, window),
+                settings,
+                grid,
+            )
+            if outcome is None:
+                continue
+            arrays, record = outcome
+            records.append(record)
+            for name, array in arrays.items():
+                _assign(cube, name, array, index)
+
+    validate_cube(cube, grid, windows)
     return cube, records
+
+
+def _assign(cube: xr.Dataset, name: str, aligned: xr.DataArray, index: int | None) -> None:
+    """Write one cleaned array into its place in the cube.
+
+    Writing through `.values` rather than `cube.update` is what keeps the assignment
+    per-window: `update` would replace the whole variable, so a single window's slice
+    would blow away the ones already loaded.
+    """
+    spec = VARIABLES_BY_NAME[name]
+    if spec.dims is Dims.SPACE:
+        cube[name].values[...] = aligned.values
+    elif index is None:
+        raise ValueError(f"{name} varies over time but was ingested without a window")
+    else:
+        cube[name].values[index] = aligned.values
 
 
 def _ingest_with_retries(
     label: str,
-    ingest: Ingestor,
-    catalog: pystac_client.Client,
+    run: Callable[[], tuple[dict[str, xr.DataArray], SourceRecord]],
     settings: Settings,
     grid: Grid,
-    cube: xr.Dataset,
 ) -> tuple[dict[str, xr.DataArray], SourceRecord] | None:
     """Run one source, retrying transient remote failures. `None` means give up.
 
@@ -375,11 +648,14 @@ def _ingest_with_retries(
     for attempt in range(1, attempts + 1):
         started = time.perf_counter()
         try:
-            arrays, record = ingest(catalog, settings, grid)
+            arrays, record = run()
             # Materialise *inside* the guard. odc-stac returns lazy dask arrays, so a
             # failed remote read does not raise until the array is computed - if that
             # happened outside this try, one dead collection would kill the whole build.
-            aligned = {name: _align(array, cube[name], name) for name, array in arrays.items()}
+            aligned = {
+                name: _clean(array, VARIABLES_BY_NAME[name], grid)
+                for name, array in arrays.items()
+            }
         except Exception as exc:
             elapsed = time.perf_counter() - started
             if attempt < attempts:
@@ -416,33 +692,38 @@ def _ingest_with_retries(
     return None
 
 
-def _align(source: xr.DataArray, template: xr.DataArray, name: str) -> xr.DataArray:
-    """Force a loaded array onto the cube's exact dims, coords, and attrs.
+def _clean(source: xr.DataArray, spec: VariableSpec, grid: Grid) -> xr.DataArray:
+    """Force a loaded array onto the canonical grid's exact dims and coords.
 
-    odc-stac already warped to the right geobox, so this is a contract check that
-    materialises the array — not a second resampling. Coordinate values are overwritten
-    with the canonical ones to eliminate float drift between sources. Physically
-    impossible values are dropped here against the variable's declared `valid_range`.
+    odc-stac already warped to the right geobox, so for the raster sources this is a
+    contract check that materialises the array — not a second resampling. Coordinate
+    values are overwritten with the canonical ones to eliminate float drift between
+    sources. Physically impossible values are dropped here against the variable's
+    declared `valid_range`.
+
+    Scalar (`Dims.TIME`) variables skip the grid entirely — there is no geometry to
+    check — but still go through the range enforcement, because a units bug in the
+    meteorology fetch should surface the same way a scaling bug in Landsat does.
     """
-    data = np.asarray(source.transpose("y", "x").values)
-    if data.shape != template.shape:
-        raise ValueError(f"{name}: loaded shape {data.shape} != cube shape {template.shape}")
+    if spec.dims is Dims.TIME:
+        aligned = source.astype(spec.dtype)
+    else:
+        data = np.asarray(source.transpose("y", "x").values)
+        if data.shape != grid.shape:
+            raise ValueError(
+                f"{spec.name}: loaded shape {data.shape} != grid shape {grid.shape}"
+            )
+        aligned = xr.DataArray(
+            data.astype(spec.dtype), dims=("y", "x"), coords=grid.coords()
+        )
 
-    aligned = xr.DataArray(
-        data.astype(template.dtype),
-        dims=("y", "x"),
-        coords=template.coords,
-        attrs=template.attrs,
-    )
-
-    spec = VARIABLES_BY_NAME[name]
     aligned, n_dropped = enforce_valid_range(aligned, spec)
     if n_dropped:
         logger.warning(
-            "%s: dropped %d px (%.3f%%) outside the physical range %s - check scaling",
-            name,
+            "%s: dropped %d of %d value(s) outside the physical range %s - check scaling",
+            spec.name,
             n_dropped,
-            100 * n_dropped / aligned.size,
+            aligned.size,
             spec.valid_range,
         )
     return aligned

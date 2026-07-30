@@ -8,8 +8,10 @@ selection, reprojection onto the canonical grid, QA masking, and unit conversion
 from __future__ import annotations
 
 import os
+import urllib.request
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, cast
 
 import numpy as np
@@ -24,6 +26,9 @@ from terrarium.config import (
     COLLECTION_LANDSAT,
     COLLECTION_SENTINEL2,
     COLLECTION_WORLDCOVER,
+    SOURCE_OPEN_METEO,
+    SOURCE_WORLDPOP,
+    SeasonWindow,
     Settings,
     Tile,
 )
@@ -38,8 +43,8 @@ from terrarium.state.cube import (
     CUBE_VARIABLES,
     VARIABLES_BY_NAME,
     Resampling,
-    empty_cube,
     enforce_valid_range,
+    select_window,
     summarise,
 )
 from terrarium.state.grid import Grid, grid_for_tile
@@ -60,6 +65,10 @@ TEST_TILE = Tile(
     target_resolution_m=100,
 )
 
+# One year, so the mocked builds stay small and fast: a summer and a winter window is
+# enough to exercise every per-window code path.
+TEST_YEARS = [2024]
+
 
 @pytest.fixture
 def grid() -> Grid:
@@ -67,12 +76,16 @@ def grid() -> Grid:
 
 
 @pytest.fixture
+def windows() -> tuple[SeasonWindow, ...]:
+    return Settings(window_years=TEST_YEARS).windows
+
+
+@pytest.fixture
 def settings() -> Settings:
     # No retries and no delay: retry behaviour gets its own tests, and paying the real
     # backoff in every failure test would make the suite slow for no extra coverage.
     return Settings(
-        search_start="2024-04-01",
-        search_end="2024-06-30",
+        window_years=TEST_YEARS,
         max_cloud_cover=20.0,
         ingest_attempts=1,
         ingest_retry_delay_s=0.0,
@@ -231,9 +244,13 @@ def test_reprojection_from_wgs84_lands_on_the_canonical_grid(grid: Grid) -> None
     assert np.allclose(np.asarray(out["y"].values), grid.y_coords())
 
 
-def test_every_cube_variable_declares_a_resampling_method() -> None:
+def test_every_gridded_variable_declares_a_resampling_method() -> None:
     for spec in CUBE_VARIABLES:
-        assert spec.resampling in (Resampling.NEAREST, Resampling.BILINEAR)
+        if spec.dims.is_spatial:
+            assert spec.resampling is not None, f"{spec.name} lands on the grid but has no method"
+        else:
+            # Nothing is resampled onto a dimension that does not exist.
+            assert spec.resampling is None, f"{spec.name} is a scalar series"
     # Land cover is the categorical one; nothing else may be.
     categorical = {spec.name for spec in CUBE_VARIABLES if spec.is_categorical}
     assert categorical == {"landcover"}
@@ -382,8 +399,69 @@ def _fake_search(
     return search
 
 
+# --------------------------------------------------------------------------------
+# The two non-STAC sources: WorldPop over plain HTTP, Open-Meteo over JSON
+# --------------------------------------------------------------------------------
+
+# People per source pixel in the synthetic population raster. Uniform, so the tile total
+# is exactly (pixel count x this) and any loss during reprojection is arithmetic rather
+# than an artefact of an awkward distribution.
+FAKE_PEOPLE_PER_PIXEL = 4.0
+# WorldPop's native grid: 3 arc-seconds, ~100 m.
+WORLDPOP_DEG = 1.0 / 1200.0
+
+
+def _write_fake_worldpop(path: Path, tile: Tile) -> Path:
+    """A WGS84 population raster covering `tile` with a known, uniform head count."""
+    west, south, east, north = tile.bbox
+    pad = pipeline.WORLDPOP_CLIP_PAD_DEG * 2
+    lons = np.arange(west - pad, east + pad, WORLDPOP_DEG)
+    lats = np.arange(north + pad, south - pad, -WORLDPOP_DEG)
+
+    data = np.full((len(lats), len(lons)), FAKE_PEOPLE_PER_PIXEL, dtype="float32")
+    array = xr.DataArray(data, dims=("y", "x"), coords={"y": lats, "x": lons})
+    array = array.rio.write_crs("EPSG:4326").rio.write_nodata(np.nan)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    array.rio.to_raster(path)
+    return path
+
+
+def _fake_open_meteo(settings: Settings, window: SeasonWindow) -> dict[str, list[float | None]]:
+    """Hourly series whose values encode the hour, so picking the wrong one is visible.
+
+    Temperature is 20 + hour, so the overpass-hour median must come out at exactly
+    20 + OVERPASS_HOUR. A daily mean, or an off-by-one on the hour, lands somewhere else.
+    """
+    stamps: list[str] = []
+    temps: list[float | None] = []
+    winds: list[float | None] = []
+    humidity: list[float | None] = []
+
+    day = window.start
+    while day <= window.end:
+        for hour in range(24):
+            stamps.append(f"{day.isoformat()}T{hour:02d}:00")
+            temps.append(20.0 + hour)
+            winds.append(hour / 10.0)
+            humidity.append(float(hour))
+        day += timedelta(days=1)
+
+    return {
+        "time": cast("list[float | None]", stamps),
+        "temperature_2m": temps,
+        "wind_speed_10m": winds,
+        "relative_humidity_2m": humidity,
+    }
+
+
 @pytest.fixture
-def mocked(monkeypatch: pytest.MonkeyPatch, grid: Grid) -> FakeLoader:
+def mocked(monkeypatch: pytest.MonkeyPatch, grid: Grid, tmp_path: Path) -> FakeLoader:
+    """Stub every network boundary: STAC search + load, the WorldPop GET, Open-Meteo.
+
+    The two new sources are stubbed at their *fetch* functions rather than at the whole
+    ingestor, so the clipping, the sum-resampling and the overpass-hour reduction all stay
+    under test — those are the parts we own.
+    """
     loader = FakeLoader(grid)
     counts = {
         COLLECTION_SENTINEL2: (30, 6),
@@ -393,6 +471,10 @@ def mocked(monkeypatch: pytest.MonkeyPatch, grid: Grid) -> FakeLoader:
     }
     monkeypatch.setattr(pipeline, "load_items", loader)
     monkeypatch.setattr(pipeline, "search_collection", _fake_search(counts))
+
+    worldpop = _write_fake_worldpop(tmp_path / "worldpop.tif", TEST_TILE)
+    monkeypatch.setattr(pipeline, "_download_once", lambda url, path, timeout_s: worldpop)
+    monkeypatch.setattr(pipeline, "_fetch_open_meteo", _fake_open_meteo)
     return loader
 
 
@@ -409,20 +491,85 @@ def test_build_cube_populates_every_variable(
         COLLECTION_LANDSAT,
         COLLECTION_DEM,
         COLLECTION_WORLDCOVER,
+        SOURCE_OPEN_METEO,
+        SOURCE_WORLDPOP,
     }
 
 
+def test_every_variable_lands_on_the_axes_it_declares(
+    mocked: FakeLoader, settings: Settings, grid: Grid, windows: tuple[SeasonWindow, ...]
+) -> None:
+    """The Phase 3 contract: maps per window, static maps, and per-window scalars."""
+    cube, _ = pipeline.build_cube(catalog=FAKE_CATALOG, settings=settings, grid=grid)
+    n = len(windows)
+
+    assert cube["lst_c"].dims == ("time", "y", "x")
+    assert cube["lst_c"].shape == (n, *grid.shape)
+    # Elevation does not change between seasons; storing n copies of it would be a lie
+    # about what was measured.
+    assert cube["elevation_m"].dims == ("y", "x")
+    assert cube["population"].dims == ("y", "x")
+    # One reanalysis point cannot resolve anything inside a 20 km tile.
+    assert cube["air_temp_c"].dims == ("time",)
+    assert cube["air_temp_c"].shape == (n,)
+
+    assert [str(w) for w in cube["window"].values] == [w.label for w in windows]
+    assert sorted(set(str(s) for s in cube["season"].values)) == ["summer", "winter"]
+
+
+def test_every_window_gets_its_own_composite(
+    monkeypatch: pytest.MonkeyPatch,
+    mocked: FakeLoader,
+    settings: Settings,
+    grid: Grid,
+    windows: tuple[SeasonWindow, ...],
+) -> None:
+    """Each window must be searched over its own dates, not the whole span at once."""
+    searched: list[str | None] = []
+    # `mocked` already replaced the real search; wrap whatever is currently installed.
+    inner = _fake_search({COLLECTION_SENTINEL2: (30, 6), COLLECTION_LANDSAT: (12, 4),
+                          COLLECTION_DEM: (2, 2), COLLECTION_WORLDCOVER: (1, 1)})
+
+    def recording_search(
+        catalog: object,
+        collection_id: str,
+        bbox: tuple[float, float, float, float],
+        *,
+        datetime: str | None = None,
+        max_cloud_cover: float | None = None,
+    ) -> SearchResult:
+        if collection_id == COLLECTION_SENTINEL2:
+            searched.append(datetime)
+        return inner(
+            catalog, collection_id, bbox, datetime=datetime, max_cloud_cover=max_cloud_cover
+        )
+
+    monkeypatch.setattr(pipeline, "search_collection", recording_search)
+    pipeline.build_cube(catalog=FAKE_CATALOG, settings=settings, grid=grid)
+
+    assert searched == [w.stac_datetime for w in windows]
+    # And winter really does straddle the new year, which is the case a naive
+    # "same year, month 11 to month 1" range would silently return nothing for.
+    winter = next(w for w in windows if w.season == "winter")
+    assert winter.start.year + 1 == winter.end.year
+
+
 def test_scene_counts_survive_to_the_report(
-    mocked: FakeLoader, settings: Settings, grid: Grid
+    mocked: FakeLoader, settings: Settings, grid: Grid, windows: tuple[SeasonWindow, ...]
 ) -> None:
     _, records = pipeline.build_cube(catalog=FAKE_CATALOG, settings=settings, grid=grid)
-    by_id = {r.collection_id: r for r in records}
+    s2 = [r for r in records if r.collection_id == COLLECTION_SENTINEL2]
 
-    assert by_id[COLLECTION_SENTINEL2].n_found == 30
-    assert by_id[COLLECTION_SENTINEL2].n_kept == 6
-    assert by_id[COLLECTION_SENTINEL2].max_cloud_cover == 20.0
-    # The DEM is static: it must not be cloud-filtered.
-    assert by_id[COLLECTION_DEM].max_cloud_cover is None
+    # One row per window, not one row for the whole build: a season that came back thin
+    # has to be visible as that season.
+    assert [r.window for r in s2] == [w.label for w in windows]
+    assert all(r.n_found == 30 and r.n_kept == 6 for r in s2)
+    assert all(r.max_cloud_cover == 20.0 for r in s2)
+
+    dem = next(r for r in records if r.collection_id == COLLECTION_DEM)
+    # The DEM is static: it must not be cloud-filtered, and it belongs to no window.
+    assert dem.max_cloud_cover is None
+    assert dem.window is None
 
 
 def test_categorical_bands_are_loaded_with_nearest(
@@ -449,35 +596,90 @@ def test_categorical_bands_are_loaded_with_nearest(
 
 
 def test_cloud_masking_blanks_flagged_pixels(
-    mocked: FakeLoader, settings: Settings, grid: Grid
+    mocked: FakeLoader, settings: Settings, grid: Grid, windows: tuple[SeasonWindow, ...]
 ) -> None:
     cube, _ = pipeline.build_cube(catalog=FAKE_CATALOG, settings=settings, grid=grid)
     width = grid.shape[1]
 
-    for name in ("ndvi", "lst_c"):
-        values = np.asarray(cube[name].values)
-        assert np.isnan(values[:, : width // 2]).all(), f"{name}: cloudy half not masked"
-        assert np.isfinite(values[:, width // 2 :]).all(), f"{name}: clear half was masked"
+    # Every window, not just the first: the masking runs once per slice.
+    for window in windows:
+        sliced = select_window(cube, window.label)
+        for name in ("ndvi", "lst_c"):
+            values = np.asarray(sliced[name].values)
+            assert np.isnan(values[:, : width // 2]).all(), f"{name}: cloudy half not masked"
+            assert np.isfinite(values[:, width // 2 :]).all(), f"{name}: clear half was masked"
 
 
 def test_sentinel2_indices_use_baseline_corrected_reflectance(
     mocked: FakeLoader, settings: Settings, grid: Grid
 ) -> None:
     cube, _ = pipeline.build_cube(catalog=FAKE_CATALOG, settings=settings, grid=grid)
-    clear = slice(grid.shape[1] // 2, None)
+    clear = np.s_[:, :, grid.shape[1] // 2 :]
 
-    assert np.allclose(cube["ndvi"].values[:, clear], EXPECTED_NDVI, atol=1e-5)
-    assert np.allclose(cube["ndbi"].values[:, clear], EXPECTED_NDBI, atol=1e-5)
-    assert np.allclose(cube["albedo"].values[:, clear], EXPECTED_ALBEDO, atol=1e-5)
+    assert np.allclose(cube["ndvi"].values[clear], EXPECTED_NDVI, atol=1e-5)
+    assert np.allclose(cube["ndbi"].values[clear], EXPECTED_NDBI, atol=1e-5)
+    assert np.allclose(cube["albedo"].values[clear], EXPECTED_ALBEDO, atol=1e-5)
 
 
 def test_landsat_digital_numbers_become_celsius(
     mocked: FakeLoader, settings: Settings, grid: Grid
 ) -> None:
     cube, _ = pipeline.build_cube(catalog=FAKE_CATALOG, settings=settings, grid=grid)
-    clear = slice(grid.shape[1] // 2, None)
+    clear = np.s_[:, :, grid.shape[1] // 2 :]
 
-    assert np.allclose(cube["lst_c"].values[:, clear], LST_TARGET_C, atol=0.01)
+    assert np.allclose(cube["lst_c"].values[clear], LST_TARGET_C, atol=0.01)
+
+
+# --------------------------------------------------------------------------------
+# Meteorology and population
+# --------------------------------------------------------------------------------
+
+
+def test_meteorology_is_sampled_at_the_overpass_hour(
+    mocked: FakeLoader, settings: Settings, grid: Grid, windows: tuple[SeasonWindow, ...]
+) -> None:
+    """A daily mean would describe a different time of day than the LST it explains.
+
+    The fixture's temperature is 20 + hour, so the only value that can come out of a
+    correct reduction is 20 + OVERPASS_HOUR. A 24-hour mean gives 31.5; an off-by-one
+    gives 31 or 29.
+    """
+    cube, _ = pipeline.build_cube(catalog=FAKE_CATALOG, settings=settings, grid=grid)
+
+    assert np.allclose(cube["air_temp_c"].values, 20.0 + pipeline.OVERPASS_HOUR)
+    assert np.allclose(cube["wind_speed_ms"].values, pipeline.OVERPASS_HOUR / 10.0)
+    assert np.allclose(cube["relative_humidity_pct"].values, pipeline.OVERPASS_HOUR)
+    assert cube["air_temp_c"].shape == (len(windows),)
+
+
+def test_population_survives_reprojection_as_a_head_count(
+    mocked: FakeLoader, settings: Settings, grid: Grid
+) -> None:
+    """The whole reason population declares SUM: people are extensive, not a rate.
+
+    The synthetic source is uniform, so the expected tile total is just the grid area in
+    source pixels. Bilinear, which is right for every other continuous variable here,
+    loses roughly a quarter of them on the real WorldPop raster.
+    """
+    cube, _ = pipeline.build_cube(catalog=FAKE_CATALOG, settings=settings, grid=grid)
+    people = np.asarray(cube["population"].values)
+
+    assert np.isfinite(people).all()
+    # Grid area / source pixel area, times the per-source-pixel count. The source is
+    # ~92.6 m at this latitude in x and ~92.6 m in y, so this is not 1:1 with our 100 m
+    # cells - which is precisely why an interpolating method would not conserve.
+    source_px_m2 = (WORLDPOP_DEG * 111_320) ** 2 * np.cos(np.radians(TEST_TILE.centroid[1]))
+    cell_px = grid.resolution_m**2 / source_px_m2
+    expected_per_cell = FAKE_PEOPLE_PER_PIXEL * cell_px
+
+    assert people.mean() == pytest.approx(expected_per_cell, rel=0.05)
+
+
+def test_population_is_not_resampled_by_interpolation() -> None:
+    """Guard the declaration itself — the bug would be a quiet edit to the spec."""
+    assert VARIABLES_BY_NAME["population"].resampling is Resampling.SUM
+    # SUM must not be mistaken for a categorical method by anything downstream.
+    assert not VARIABLES_BY_NAME["population"].is_categorical
 
 
 def test_landcover_stays_integral(mocked: FakeLoader, settings: Settings, grid: Grid) -> None:
@@ -506,6 +708,52 @@ def test_a_failing_source_leaves_its_variables_missing_but_the_cube_valid(
     assert summary.missing == ["lst_c"]
     assert "ndvi" in summary.populated
     assert COLLECTION_LANDSAT not in {r.collection_id for r in records}
+
+
+def test_one_bad_window_does_not_cost_the_others(
+    monkeypatch: pytest.MonkeyPatch,
+    settings: Settings,
+    grid: Grid,
+    mocked: FakeLoader,
+    windows: tuple[SeasonWindow, ...],
+) -> None:
+    """Failure is isolated per window, not just per source.
+
+    A season whose scenes are all cloudy, or whose reads time out, must cost you that
+    slice and nothing else. Before the time dimension there was only one slice to lose,
+    so this is a genuinely new failure mode.
+    """
+    doomed = windows[-1]
+    inner = _fake_search({COLLECTION_SENTINEL2: (30, 6), COLLECTION_LANDSAT: (12, 4),
+                          COLLECTION_DEM: (2, 2), COLLECTION_WORLDCOVER: (1, 1)})
+
+    def flaky_search(
+        catalog: object,
+        collection_id: str,
+        bbox: tuple[float, float, float, float],
+        *,
+        datetime: str | None = None,
+        max_cloud_cover: float | None = None,
+    ) -> SearchResult:
+        if collection_id == COLLECTION_LANDSAT and datetime == doomed.stac_datetime:
+            raise RuntimeError("every scene in this window was cloud")
+        return inner(
+            catalog, collection_id, bbox, datetime=datetime, max_cloud_cover=max_cloud_cover
+        )
+
+    monkeypatch.setattr(pipeline, "search_collection", flaky_search)
+    cube, records = pipeline.build_cube(catalog=FAKE_CATALOG, settings=settings, grid=grid)
+
+    for window in windows[:-1]:
+        values = np.asarray(select_window(cube, window.label)["lst_c"].values)
+        assert np.isfinite(values).any(), f"{window.label} lost its LST too"
+    assert np.isnan(np.asarray(select_window(cube, doomed.label)["lst_c"].values)).all()
+
+    # And the other sources for the doomed window still landed.
+    assert np.isfinite(select_window(cube, doomed.label)["ndvi"].values).any()
+    assert doomed.label not in {
+        r.window for r in records if r.collection_id == COLLECTION_LANDSAT
+    }
 
 
 def test_implausible_temperatures_are_rejected(
@@ -649,7 +897,8 @@ def test_a_lazy_read_failure_is_caught_and_isolated(
     summary = summarise(cube, grid)
 
     assert sorted(summary.missing) == ["albedo", "ndbi", "ndvi"]
-    assert sorted(summary.populated) == ["elevation_m", "landcover", "lst_c"]
+    assert "lst_c" in summary.populated
+    assert "elevation_m" in summary.populated
     assert COLLECTION_SENTINEL2 not in {r.collection_id for r in records}
 
 
@@ -711,18 +960,15 @@ def test_a_transient_failure_is_retried_and_succeeds() -> None:
     settings = Settings(ingest_attempts=3, ingest_retry_delay_s=0.0)
     calls: list[int] = []
 
-    def flaky(
-        catalog: pystac_client.Client, settings_: Settings, grid_: Grid
-    ) -> tuple[dict[str, xr.DataArray], SourceRecord]:
+    def flaky() -> tuple[dict[str, xr.DataArray], SourceRecord]:
         calls.append(1)
         if len(calls) < 3:
             raise RuntimeError("Could not resolve host: sentinel2l2a01.blob.core.windows.net")
-        return {"ndvi": grid_.empty(fill=0.5)}, SourceRecord(
+        return {"ndvi": grid.empty(fill=0.5)}, SourceRecord(
             collection_id=COLLECTION_SENTINEL2, n_found=1, n_kept=1, n_composited=1
         )
 
-    cube = empty_cube(grid)
-    outcome = pipeline._ingest_with_retries("s2", flaky, FAKE_CATALOG, settings, grid, cube)
+    outcome = pipeline._ingest_with_retries("s2", flaky, settings, grid)
 
     assert outcome is not None
     arrays, record = outcome
@@ -736,14 +982,11 @@ def test_retries_are_bounded_and_then_give_up() -> None:
     settings = Settings(ingest_attempts=2, ingest_retry_delay_s=0.0)
     calls: list[int] = []
 
-    def always_fails(
-        catalog: pystac_client.Client, settings_: Settings, grid_: Grid
-    ) -> tuple[dict[str, xr.DataArray], SourceRecord]:
+    def always_fails() -> tuple[dict[str, xr.DataArray], SourceRecord]:
         calls.append(1)
         raise RuntimeError("permanently broken")
 
-    cube = empty_cube(grid)
-    outcome = pipeline._ingest_with_retries("s2", always_fails, FAKE_CATALOG, settings, grid, cube)
+    outcome = pipeline._ingest_with_retries("s2", always_fails, settings, grid)
 
     assert outcome is None
     assert len(calls) == 2
@@ -756,19 +999,66 @@ def test_retry_backoff_is_exponential(monkeypatch: pytest.MonkeyPatch) -> None:
     slept: list[float] = []
     monkeypatch.setattr(pipeline, "sleep", slept.append)
 
-    def always_fails(
-        catalog: pystac_client.Client, settings_: Settings, grid_: Grid
-    ) -> tuple[dict[str, xr.DataArray], SourceRecord]:
+    def always_fails() -> tuple[dict[str, xr.DataArray], SourceRecord]:
         raise RuntimeError("Could not resolve host")
 
-    assert (
-        pipeline._ingest_with_retries(
-            "s2", always_fails, FAKE_CATALOG, settings, grid, empty_cube(grid)
-        )
-        is None
-    )
+    assert pipeline._ingest_with_retries("s2", always_fails, settings, grid) is None
     # Three sleeps for four attempts, doubling each time.
     assert slept == [10.0, 20.0, 40.0]
+
+
+class _ShortResponse:
+    """A response that promises 1000 bytes and delivers 100, then stops. No exception."""
+
+    def __init__(self) -> None:
+        self.headers = {"Content-Length": "1000"}
+        self._sent = False
+
+    def read(self, _size: int) -> bytes:
+        if self._sent:
+            return b""
+        self._sent = True
+        return b"x" * 100
+
+    def __enter__(self) -> _ShortResponse:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+def test_a_truncated_download_is_rejected_rather_than_cached(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The failure that actually happened while building this: a short read.
+
+    WorldPop's server drops connections mid-transfer, and a short read raises nothing —
+    you get a valid-looking GeoTIFF missing its bottom rows. If that were renamed into
+    place, every later build would reuse a population layer with a hole in it and never
+    notice, because the only check would be "does the file exist".
+    """
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=None: _ShortResponse())
+
+    target = tmp_path / "worldpop.tif"
+    with pytest.raises(OSError, match="truncated"):
+        pipeline._download_once("http://example.invalid/x.tif", target, 1.0)
+
+    assert not target.exists(), "a truncated download must not become a cache hit"
+    assert not target.with_suffix(".tif.partial").exists()
+
+
+def test_a_complete_download_is_cached_and_not_refetched(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """33 MB of static raster should be fetched once, not once per build."""
+    target = tmp_path / "worldpop.tif"
+    target.write_bytes(b"already here")
+
+    def explode(*args: object, **kwargs: object) -> None:
+        raise AssertionError("cached file was re-downloaded")
+
+    monkeypatch.setattr(urllib.request, "urlopen", explode)
+    assert pipeline._download_once("http://example.invalid/x.tif", target, 1.0) == target
 
 
 # --------------------------------------------------------------------------------
@@ -935,7 +1225,7 @@ def test_negative_reflectance_cannot_push_ndvi_out_of_bounds(
         pipeline, "search_collection", _fake_search({COLLECTION_SENTINEL2: (5, 5)})
     )
 
-    arrays, _ = pipeline._ingest_sentinel2(FAKE_CATALOG, settings, grid)
+    arrays, _ = pipeline._ingest_sentinel2(FAKE_CATALOG, settings, grid, settings.windows[0])
     ndvi = np.asarray(arrays["ndvi"].values)
 
     # The unphysical NIR is discarded outright rather than producing a bogus index.
@@ -947,10 +1237,10 @@ def test_valid_reflectance_still_produces_in_bounds_indices(
 ) -> None:
     """The screening must not be so aggressive that legitimate data is thrown away."""
     cube, _ = pipeline.build_cube(catalog=FAKE_CATALOG, settings=settings, grid=grid)
-    clear = slice(grid.shape[1] // 2, None)
+    clear = np.s_[:, :, grid.shape[1] // 2 :]
 
     for name in ("ndvi", "ndbi"):
-        values = np.asarray(cube[name].values)[:, clear]
+        values = np.asarray(cube[name].values)[clear]
         assert np.isfinite(values).all()
         assert values.min() >= -1.0
         assert values.max() <= 1.0

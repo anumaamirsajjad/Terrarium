@@ -21,6 +21,10 @@ dependencies = [
     # Imported directly by state/grid.py and ingest/client.py, not just transitively.
     "odc-geo>=0.4",
     "pyproj>=3.6",
+    # Imported directly for its Resampling enum: ingest/pipeline.py needs `sum` for the
+    # extensive population raster, and scripts/preview_cube.py needs the enum too. Pulled
+    # in transitively by rioxarray, but we name it because we import it.
+    "rasterio>=1.3",
     "zarr>=2.18,<3",
     "duckdb>=1.1",
     "geopandas>=1.0",
@@ -99,6 +103,7 @@ module = [
     "pyproj.*",
     "pandas.*",
     "scipy.*",
+    "rasterio.*",
 ]
 ignore_missing_imports = true
 

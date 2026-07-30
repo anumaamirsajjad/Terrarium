@@ -1,9 +1,10 @@
 """Render the State Cube as PNGs for visual review.
 
-    uv run python scripts/preview_cube.py --out <folder>
+    uv run python scripts/preview_cube.py --out <folder> [--window 2024-summer]
 
-One image per variable plus a combined overview, all plotted on a lat/lon axis so they
-can be compared against a real map of Lahore. Read-only: this never modifies the cube.
+One image per mappable variable plus a combined overview, all plotted on a lat/lon axis
+so they can be compared against a real map of Lahore. Read-only: this never modifies the
+cube. One seasonal window per run — the cube has several, and an image is a 2-D thing.
 
 Purely a human sanity-check tool. Nothing in the package imports it, and it is not a
 substitute for the assertions in `state/cube.py`.
@@ -27,9 +28,14 @@ from matplotlib.colors import BoundaryNorm, ListedColormap
 from pyproj import Transformer
 
 from terrarium.config import get_settings
-from terrarium.state.cube import CUBE_VARIABLES, VariableSpec
+from terrarium.state.cube import CUBE_VARIABLES, Dims, VariableSpec, select_window, window_labels
 from terrarium.state.grid import Grid, grid_for_tile
 from terrarium.state.store import open_cube
+
+# Variables with a map to draw. The `Dims.TIME` meteorology series are single numbers per
+# window - there is nothing spatial to render, and a flat one-colour tile would only
+# imply a spatial signal that was never measured.
+RENDERABLE = tuple(spec for spec in CUBE_VARIABLES if spec.dims is not Dims.TIME)
 
 # Official ESA WorldCover palette, so the land-cover render matches published maps.
 WORLDCOVER_STYLE: dict[int, tuple[str, str]] = {
@@ -54,6 +60,7 @@ COLORMAPS: dict[str, str] = {
     "ndbi": "RdBu_r",
     "albedo": "cividis",
     "elevation_m": "terrain",
+    "population": "magma",
 }
 
 # Point landmarks for orientation. Approximate centres, good to a few hundred metres —
@@ -144,7 +151,9 @@ def _plot_categorical(ax: Any, data: xr.DataArray, extent: list[float]) -> list[
     ]
 
 
-def _render_variable(ds: xr.Dataset, spec: VariableSpec, grid: Grid, out_dir: Path) -> Path | None:
+def _render_variable(
+    ds: xr.Dataset, spec: VariableSpec, grid: Grid, out_dir: Path, window: str
+) -> Path | None:
     data = _to_wgs84(ds, spec, grid)
     values = np.asarray(data.values)
     if not np.isfinite(values).any():
@@ -165,7 +174,9 @@ def _render_variable(ds: xr.Dataset, spec: VariableSpec, grid: Grid, out_dir: Pa
             fontsize=8,
             frameon=False,
         )
-        ax.set_title(f"{spec.name}  [{spec.units}]\n{spec.description}", fontsize=9)
+        ax.set_title(
+            f"{spec.name}  [{spec.units}]  -  {window}\n{spec.description}", fontsize=9
+        )
     else:
         finite = values[np.isfinite(values)]
         # Clip the display range to 2-98% so a handful of outliers cannot flatten the
@@ -183,7 +194,7 @@ def _render_variable(ds: xr.Dataset, spec: VariableSpec, grid: Grid, out_dir: Pa
         bar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03)
         bar.set_label(f"{spec.name} [{spec.units}]  (2-98% stretch)", fontsize=8)
         ax.set_title(
-            f"{spec.name}  [{spec.units}]\n{spec.description}\n"
+            f"{spec.name}  [{spec.units}]  -  {window}\n{spec.description}\n"
             f"actual range {finite.min():.3f} to {finite.max():.3f}",
             fontsize=9,
         )
@@ -191,19 +202,27 @@ def _render_variable(ds: xr.Dataset, spec: VariableSpec, grid: Grid, out_dir: Pa
     _decorate(ax, extent)
     fig.tight_layout()
 
-    path = out_dir / f"{spec.name}.png"
+    # Time-varying layers carry the window in the filename so rendering a second season
+    # does not silently overwrite the first - these PNGs are the alignment evidence.
+    stem = spec.name if spec.dims is Dims.SPACE else f"{spec.name}_{window}"
+    path = out_dir / f"{stem}.png"
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     print(f"  {spec.name:<14} -> {path.name}")
     return path
 
 
-def _render_overview(ds: xr.Dataset, grid: Grid, out_dir: Path) -> Path:
+def _render_overview(ds: xr.Dataset, grid: Grid, out_dir: Path, window: str) -> Path:
     """All variables side by side, for spotting misalignment between layers at a glance."""
-    specs = list(CUBE_VARIABLES)
-    fig, axes = plt.subplots(2, 3, figsize=(16, 11), dpi=130)
+    specs = list(RENDERABLE)
+    ncols = 3
+    nrows = -(-len(specs) // ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(16, 5.5 * nrows), dpi=130)
+    flat = axes.ravel()
+    for spare in flat[len(specs) :]:
+        spare.set_axis_off()
 
-    for ax, spec in zip(axes.ravel(), specs, strict=False):
+    for ax, spec in zip(flat, specs, strict=False):
         data = _to_wgs84(ds, spec, grid)
         values = np.asarray(data.values)
         extent = _extent(data)
@@ -233,11 +252,12 @@ def _render_overview(ds: xr.Dataset, grid: Grid, out_dir: Path) -> Path:
         _decorate(ax, extent)
 
     fig.suptitle(
-        "Terrarium State Cube - Lahore tile, EPSG:32643 @ 100 m, plotted on WGS84 axes",
+        f"Terrarium State Cube - Lahore tile, EPSG:32643 @ 100 m, window {window}\n"
+        "plotted on WGS84 axes",
         fontsize=12,
     )
     fig.tight_layout()
-    path = out_dir / "overview.png"
+    path = out_dir / f"overview_{window}.png"
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     return path
@@ -357,6 +377,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--zarr", type=Path, default=None)
     parser.add_argument("--out", type=Path, required=True, help="output folder for PNGs")
+    parser.add_argument(
+        "--window",
+        default=None,
+        help="which seasonal window to render (default: the first, i.e. earliest summer)",
+    )
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -369,13 +394,23 @@ def main(argv: list[str] | None = None) -> int:
 
     out_dir = args.out
     out_dir.mkdir(parents=True, exist_ok=True)
-    ds = open_cube(path)
+    full = open_cube(path)
 
-    print(f"\n  rendering {len(CUBE_VARIABLES)} variables from {path}")
-    for spec in CUBE_VARIABLES:
-        _render_variable(ds, spec, grid, out_dir)
+    labels = window_labels(full)
+    window = args.window or labels[0]
+    if window not in labels:
+        print(f"no window {window!r} in this cube; have {', '.join(labels)}")
+        return 1
 
-    print(f"  {'overview':<14} -> {_render_overview(ds, grid, out_dir).name}")
+    # Render one window at a time. An image is a 2-D thing, and averaging the seasons
+    # into one picture would show a surface that exists in no season.
+    ds = select_window(full, window)
+
+    print(f"\n  rendering {len(RENDERABLE)} variables from {path}, window {window}")
+    for spec in RENDERABLE:
+        _render_variable(ds, spec, grid, out_dir, window)
+
+    print(f"  {'overview':<14} -> {_render_overview(ds, grid, out_dir, window).name}")
     print(f"  {'footprint':<14} -> {_render_footprint(grid, ds, out_dir).name}")
 
     _print_summary(ds, grid, out_dir)

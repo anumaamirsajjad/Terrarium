@@ -8,8 +8,8 @@ with the team.
 | 0 | Foundations — repo, tooling, API skeleton, frontend skeleton | ✅ **DONE** |
 | 1 | State Cube v1 — six variables, one date, Lahore | ✅ **DONE** |
 | 2 | Thermal core — LightGBM ΔLST emulator | ✅ **DONE** |
-| 3 | State Cube v2 — time dimension + winter windows | ▶ **NEXT** |
-| 4 | Thermal core v2 — multi-date retrain + meteorology | ⬜ |
+| 3 | State Cube v2 — time dimension + winter windows | ✅ **DONE** |
+| 4 | Thermal core v2 — multi-date retrain + meteorology | ▶ **NEXT** |
 | 5 | API — expose cube and simulation | ⬜ |
 | 6 | Frontend — map, draw, compare | ⬜ |
 | 7 | Hindcast validation | ⬜ |
@@ -350,26 +350,131 @@ narration — as **mid-morning land surface temperature**. Never "afternoon", ne
 
 ---
 
-## Phase 3 — State Cube v2: time + seasons ▶ NEXT
+## Phase 3 — State Cube v2: time + seasons ✅ DONE
 
 The biggest hidden dependency in the plan: Phases 4, 7, 8 and 9 all need it.
 
-- Widen `search_start/end` into a list of per-year seasonal windows.
-- **Summer (Apr–Jun) and winter (Nov–Jan)** per year (D10) — winter now, so the air core
-  never forces a second ingest expansion.
-- Add `time` to the grid contract, `empty_cube`, and `validate_cube`.
-- Store per-window composites rather than one.
-- Add **meteorology** (Open-Meteo, keyless) and **population** (WorldPop 100 m).
+**Delivered:** `search_start/end` replaced by `window_years` → `SeasonWindow`; a `time`
+axis on the cube with `window` and `season` label coordinates; per-window composites;
+meteorology from Open-Meteo and population from WorldPop. 93 tests, still none touching
+the network. `ruff` and `mypy --strict` clean.
 
-Revisit `max_scenes_per_collection` here — only 8 of 49 usable Sentinel-2 scenes are
-currently composited. That was a deliberate speed/token-expiry trade, worth re-tuning
-once builds are per-window.
+### The variable table now has three shapes, not one
 
-## Phase 4 — Thermal core v2 ⬜
+Adding `time` to everything would have been the wrong move. `Dims` in `state/cube.py`
+declares which axes each variable actually varies along:
+
+| dims | variables | why |
+|---|---|---|
+| `(time, y, x)` | `lst_c`, `ndvi`, `ndbi`, `albedo` | one composite per window |
+| `(y, x)` | `elevation_m`, `landcover`, `population` | static — four identical copies would imply a variation nobody measured |
+| `(time,)` | `air_temp_c`, `wind_speed_ms`, `relative_humidity_pct` | one reanalysis point cannot resolve anything inside a 20 km tile |
+
+That last row is the one worth defending: painting a single Open-Meteo value across
+40,602 pixels would look like a meteorology *field* and is not one. Phase 4 broadcasts it
+as a feature; the cube stores what was measured.
+
+**`cores/` was not touched.** `select_window(cube, label)` returns the 2-D cube the
+thermal core already consumes, and the caller picks the slice. Purity intact.
+
+### Verified, not assumed — build `3723544fdc64`, 259 s, 10/10 variables at 100 % valid
+
+The default `window_years = [2023, 2024]`, four windows, ~65 s per window:
+
+| window | air temp | wind | RH | Landsat scenes |
+|---|---|---|---|---|
+| 2023-summer | 31.5 °C | 2.14 m/s | 43 % | 12 |
+| 2023-winter | 14.9 °C | 1.06 m/s | 82 % | **3** |
+| 2024-summer | 34.0 °C | 2.25 m/s | 37 % | 12 |
+| 2024-winter | 14.1 °C | 0.79 m/s | 71 % | 5 |
+
+Meteorology varies between *years* as well as seasons — 2023 and 2024 summers differ by
+2.5 °C — which is what makes it a usable feature in Phase 4 rather than a season label in
+disguise.
+
+Meteorology is sampled at the **10:00 local overpass hour** and reduced by median over
+the window's days — deliberately the same reduction the LST composite uses, so the two
+are not describing different days or different times of day. The winter row is the air
+core's whole premise arriving early: 0.79 m/s and 71 % RH is the stagnation signature.
+
+**Population: 6,259,308 residents**, 91.5 % of cells inhabited, max 264 per hectare. The
+render is a fourth independent confirmation of the tile's geography — the airport and the
+River Ravi both appear as uninhabited holes in exactly the right places, agreeing with
+land cover, NDVI and LST.
+
+### Population resamples by SUM, and that is not a detail
+
+Population is **extensive** — a head count per cell, not a rate — so it is the first
+variable that is neither nearest nor bilinear. Measured on the real WorldPop raster
+against the exact-bbox source total of 6,203,454:
+
+| method | tile total | error |
+|---|---|---|
+| **sum** | 6,259,308 | **+0.9 %** (the grid is snapped outward, so it covers slightly more) |
+| bilinear | 4,575,662 | −26 % — **1.6 million people deleted** |
+| average | 4,760,930 | −23 % |
+
+Phase 8 divides cooling by this number. Had it been resampled like every other continuous
+variable, the equity panel would have been wrong by a quarter and nothing would have said
+so.
+
+### The contrast question — answered, and the answer is no
+
+The plan asked whether per-window composites raise the tree-vs-built LST contrast above
+Phase 2's 2.60 °C. **They do not**, and two independent years now say so:
+
+| window | tree p50 | built p50 | contrast |
+|---|---|---|---|
+| 2023-summer | 40.41 °C | 43.20 °C | **2.78 °C** |
+| 2023-winter | 23.47 °C | 24.26 °C | 0.80 °C |
+| 2024-summer | 44.35 °C | 46.96 °C | **2.60 °C** |
+| 2024-winter | 22.03 °C | 22.34 °C | 0.31 °C |
+
+Summer lands at 2.6–2.8 °C in both years, on 12 Landsat scenes each rather than Phase 2's
+8. So the modest contrast is not a compositing artefact that a tighter window recovers —
+it is what Lahore at 100 m actually shows, where "tree cover" means scattered street trees
+rather than closed canopy. **Quote 2.6–2.8 °C in the pitch, not the literature's 3–6 °C**,
+and say why. Two years agreeing is a much stronger claim than one, and it is free.
+
+Winter is a finding in its own right: 0.31–0.80 °C, i.e. tree planting buys essentially
+nothing thermally in winter. Winter's value in this project is the air core, not the
+thermal one, and the equity story must not claim year-round cooling. Treat the winter
+numbers as the softer of the two — 2023-winter rests on **3** clear Landsat scenes, which
+is also the likeliest reason it reads higher than 2024's.
+
+Retraining the thermal core on `2024-summer` reproduces Phase 2 within noise — mean ΔLST
+inside −0.500 °C (was −0.498), blocked-CV MAE 0.658 ± 0.050 (was 0.606 ± 0.054), skill
+51.7 % (was 55.2 %). The cube changed shape; the physics did not.
+
+### Two things that bit, both now guarded
+
+- **`window` is a reserved word in DuckDB.** The catalogue column is `window_label`.
+  Schema changes ship as `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, so a Phase 1/2
+  catalogue migrates instead of needing deletion, and every `INSERT` names its columns.
+- **WorldPop's server drops connections mid-transfer and does not support range
+  requests.** A short read raises nothing — you get a valid-looking GeoTIFF missing its
+  bottom rows. The download verifies `Content-Length` and only renames into place when
+  complete, so a truncated fetch can never become a cache hit.
+
+`max_scenes_per_collection` raised 8 → 14 now that windows are ~3 months rather than one
+range standing in for the whole cube.
+
+## Phase 4 — Thermal core v2 ▶ NEXT
 
 Retrain on multi-date. Meteorology becomes a real feature. Re-run the blocked CV and
 compare against the Phase 2 number — the delta between them tells you how much the
 single-date model was leaning on cross-sectional contrast alone.
+
+The cube is ready: `select_window` gives one slice, and stacking every window into one
+training frame is a `features.py` change, not a cube change. Two things Phase 3 measured
+that shape this work:
+
+- Meteorology is `(time,)`, so as a feature it is **constant within a window** and only
+  varies between them. With two windows that is one bit of information — build more years
+  (`--years`) before concluding anything about its importance.
+- Winter's tree-vs-built contrast is 0.31 °C. A model trained on both seasons pooled will
+  learn a weaker average canopy effect than a summer-only one, and that is correct, not a
+  regression. Report per-season ΔLST rather than one number.
 
 ## Phase 5 — API ⬜
 
@@ -481,7 +586,16 @@ That alone is a complete, defensible submission. Everything after is upside.
   hotter than that one*. Using it for interventions assumes contrast-between-places
   equals effect-of-changing-a-place. Standard and defensible, but it is the model's
   softest spot — put it in limitations before anyone asks. Phase 3 partly relieves it.
-- **Phase 3 blocks four later phases.** Do not let it drift.
+- ~~**Phase 3 blocks four later phases.**~~ Unblocked — 4, 7, 8 and 9 all have the cube
+  they were waiting on.
+- **Four windows is still a thin time axis.** Having a time dimension is not the same as
+  having enough of one. Two years is enough for meteorology to vary (the summers differ
+  by 2.5 °C) but nowhere near enough for hindcast change detection, which needs a decade
+  to find a land-cover transition big enough to resolve at 100 m. Widening `window_years`
+  is a build-time cost, not a code change — but it has to actually happen before Phase 7.
+- **Winter rests on 3–5 Landsat scenes per window, summer on 12.** The winter contrast
+  varies more between years than the summer one almost certainly because of that, not
+  because of the weather. Do not read inter-annual winter differences as signal yet.
 - **Build fragility.** Planetary Computer drops connections; retries handle it, but keep
   a known-good Zarr and never rebuild the night before a demo.
 - **Purity drift.** The moment a core reads config or opens a file, API caching and
@@ -503,6 +617,16 @@ That alone is a complete, defensible submission. Everything after is upside.
    `Intervention.mask` is `(y, x)` bool on the canonical grid; the API owns
    GeoJSON → mask. **The `/simulate` HTTP schema itself is still unwritten** — that is
    Track B's first Phase 5 task, and it is the remaining half of this action.
-3. Phase 3, and while there **check whether per-window composites raise the tree-vs-built
-   LST contrast above 2.60 °C**. If the contrast stays this low, say so in the pitch
-   rather than quoting literature numbers the data does not support.
+3. ~~**Check whether per-window composites raise the contrast above 2.60 °C**~~ ✅ done.
+   They do not — summer is 2.60 °C on 12 scenes, winter is 0.31 °C. **The pitch quotes
+   2.60 °C and explains why**, rather than the literature's 3–6 °C.
+4. **Rebuild the canonical cube with more years before Phase 7.** Two builds exist:
+   `cube_phase3.zarr` (`--years 2024`, 2 windows, 136 s) and `cube_4win.zarr` (the
+   default `[2023, 2024]`, 4 windows, 259 s). Both are 10/10 valid. Hindcast change
+   detection needs a longer archive than either — budget ~65 s per window and go back as
+   far as Landsat 8 allows. `data/processed/cube.zarr` is deliberately still the
+   known-good Phase 1/2 cube — do not overwrite it the night before a demo.
+5. **Winter Landsat is thin: 3–5 clear scenes per window against summer's 12.** Coverage
+   is still 100 % because the composite fills, but any winter claim rests on less
+   evidence than the summer equivalent. Consider relaxing `max_cloud_cover` for winter
+   windows specifically before Phase 9 leans on them.

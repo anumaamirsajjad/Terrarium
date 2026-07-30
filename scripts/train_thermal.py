@@ -35,6 +35,7 @@ from terrarium.cores.thermal.simulate import (
     effective_fraction,
     simulate,
 )
+from terrarium.state.cube import select_window, window_labels
 from terrarium.state.grid import grid_for_tile
 from terrarium.state.store import open_cube
 
@@ -61,6 +62,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--zarr", type=Path, default=None)
     parser.add_argument("--out", type=Path, default=MODEL_PATH)
+    parser.add_argument(
+        "--window",
+        default=None,
+        help="which seasonal window to train on (default: the first summer, which is "
+             "what the thermal core is about). Multi-date training is Phase 4.",
+    )
     parser.add_argument("--rounds", type=int, default=400)
     parser.add_argument("--skip-cv", action="store_true", help="train only, no validation")
     parser.add_argument("--lon", type=float, default=DEFAULT_CENTRE_LON)
@@ -77,7 +84,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no cube at {path} - run scripts/build_tile.py first")
         return 1
 
-    cube = open_cube(path)
+    full = open_cube(path)
+
+    # The cube gained a time dimension in Phase 3; the thermal core did not. It still
+    # consumes one composite, so the choice of which window to train on is made here,
+    # by the caller, and the core stays a pure function of a 2-D cube. Retraining across
+    # windows with meteorology as a real feature is Phase 4's job, not this script's.
+    labels = window_labels(full)
+    summers = [label for label in labels if label.endswith("summer")]
+    window = args.window or (summers[0] if summers else labels[0])
+    if window not in labels:
+        print(f"no window {window!r} in this cube; have {', '.join(labels)}")
+        return 1
+    cube = select_window(full, window)
+
     frame, valid = build_features(cube)
     target = target_from_cube(cube)
 
@@ -87,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     print("  Thermal core - mid-morning land surface temperature emulator")
     print(f"{'=' * 78}")
     print(f"  cube         {path}")
+    print(f"  window       {window}  (of {len(labels)}: {', '.join(labels)})")
     print(f"  grid         {grid.shape[0]} x {grid.shape[1]} = {valid.size:,} px")
     print(f"  usable rows  {n_rows:,}  ({n_rows / valid.size:.1%})\n")
 

@@ -55,6 +55,16 @@ CREATE TABLE IF NOT EXISTS build_variables (
     vmax           DOUBLE,
     vmean          DOUBLE
 );
+
+-- Phase 3 columns, added rather than baked into the CREATEs above so an existing
+-- catalogue from a Phase 1/2 build keeps its history instead of needing a delete.
+-- Every INSERT below names its columns, so appended columns cannot shift a value into
+-- the wrong slot.
+--
+-- `window_label`, not `window`: the latter is a reserved word in DuckDB (window
+-- functions) and every reference to it would need quoting forever after.
+ALTER TABLE builds        ADD COLUMN IF NOT EXISTS windows      VARCHAR;
+ALTER TABLE build_sources ADD COLUMN IF NOT EXISTS window_label VARCHAR;
 """
 
 
@@ -74,6 +84,9 @@ class SourceRecord(BaseModel):
     n_kept: int
     n_composited: int
     max_cloud_cover: float | None = None
+    # Which seasonal window these counts belong to. `None` for the static sources, which
+    # are ingested once for the whole cube rather than per window.
+    window: str | None = None
 
 
 class BuildRecord(BaseModel):
@@ -111,10 +124,18 @@ def write_cube(ds: xr.Dataset, path: Path, *, grid: Grid) -> Path:
     # rioxarray stashes the CRS on a non-serialisable object; the attrs above carry it.
     ds = ds.drop_vars("spatial_ref", errors="ignore")
 
-    encoding = {
-        name: {"chunks": (min(512, ds.sizes["y"]), min(512, ds.sizes["x"]))}
-        for name in ds.data_vars
-    }
+    # Chunk spatially, one window per chunk along time: every read is either "one
+    # variable, one window" or "one pixel through time", and neither wants time bundled
+    # into the same chunk as a 512 x 512 tile. Scalar time series are left unchunked.
+    encoding = {}
+    for name, var in ds.data_vars.items():
+        if not {"y", "x"} <= set(var.dims):
+            continue
+        encoding[str(name)] = {
+            "chunks": tuple(
+                min(512, ds.sizes[dim]) if dim in ("y", "x") else 1 for dim in var.dims
+            )
+        }
     ds.to_zarr(path, mode="w", encoding=encoding, consolidated=True)
     logger.info("wrote cube to %s", path)
     return path
@@ -147,7 +168,8 @@ def record_build(conn: duckdb.DuckDBPyConnection, record: BuildRecord) -> None:
     conn.execute("DELETE FROM build_variables WHERE build_id = ?", [record.build_id])
 
     conn.execute(
-        "INSERT INTO builds VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO builds (build_id, built_at, tile_name, crs, resolution_m, height, "
+        "width, zarr_path, duration_s, windows) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             record.build_id,
             record.built_at,
@@ -158,12 +180,14 @@ def record_build(conn: duckdb.DuckDBPyConnection, record: BuildRecord) -> None:
             width,
             str(record.zarr_path),
             record.duration_s,
+            ",".join(record.summary.windows),
         ],
     )
 
     for source in record.sources:
         conn.execute(
-            "INSERT INTO build_sources VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO build_sources (build_id, collection_id, n_found, n_kept, "
+            "n_composited, max_cloud_cover, window_label) VALUES (?, ?, ?, ?, ?, ?, ?)",
             [
                 record.build_id,
                 source.collection_id,
@@ -171,12 +195,14 @@ def record_build(conn: duckdb.DuckDBPyConnection, record: BuildRecord) -> None:
                 source.n_kept,
                 source.n_composited,
                 source.max_cloud_cover,
+                source.window,
             ],
         )
 
     for var in record.summary.variables:
         conn.execute(
-            "INSERT INTO build_variables VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO build_variables (build_id, variable, populated, valid_fraction, "
+            "vmin, vmax, vmean) VALUES (?, ?, ?, ?, ?, ?, ?)",
             [
                 record.build_id,
                 var.name,
