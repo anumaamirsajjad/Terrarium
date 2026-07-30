@@ -1,0 +1,26 @@
+# Ingested and derived data. Rebuildable via scripts/build_tile.py; never committed.
+data/
+*.zarr/
+*.duckdb
+
+# Build logs
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Tooling caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local environment
+.env

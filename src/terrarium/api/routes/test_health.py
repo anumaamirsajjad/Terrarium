@@ -28,7 +28,7 @@ def test_health_reports_the_active_tile(client: TestClient) -> None:
 
     assert tile["name"] == ACTIVE_TILE.name
     assert tuple(tile["bbox"]) == ACTIVE_TILE.bbox
-    assert tile["resolution_m"] == ACTIVE_TILE.resolution_m
+    assert tile["target_resolution_m"] == ACTIVE_TILE.target_resolution_m
 
 
 def test_tile_centroid_falls_inside_its_own_bbox() -> None:

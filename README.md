@@ -7,6 +7,7 @@ green infrastructure — and see the modelled effect on temperature, pollution, 
 risk, and equity of exposure, rendered on the map.
 
 **v1 tile:** Lahore, Pakistan — `[74.2533, 31.4305, 74.4641, 31.6103]`
+**v1 grid:** EPSG:32643 (UTM 43N), 100 m, 201 × 202 pixels
 **v1 core:** thermal only (LightGBM land-surface-temperature emulator)
 
 See [CLAUDE.md](CLAUDE.md) for architecture, conventions, and scope boundaries.
@@ -71,7 +72,29 @@ uv run terrarium-api
 
 `/health` returns the active tile (Lahore) and should respond immediately.
 
-### 4. Run the frontend
+### 4. Build the State Cube
+
+Everything downstream reads from one Zarr cube. Build it once:
+
+```bash
+uv run python scripts/build_tile.py     # ingest Lahore -> data/processed/cube.zarr
+uv run python scripts/inspect_cube.py   # read it back and print value ranges
+```
+
+The build hits Microsoft Planetary Computer (no credentials needed) and takes a few
+minutes on a good connection. It prints, per collection, how many scenes were found, how
+many passed the cloud filter, and how many were actually composited — then the grid shape
+and each variable's value range. **It exits non-zero if any variable came back empty**, so
+a partially-built cube fails loudly rather than quietly feeding the thermal model nothing.
+
+Useful flags: `--max-scenes N` to trade build time against composite depth, `-v` for
+per-asset debug logging, `--out PATH` to write elsewhere.
+
+If a collection fails after its retries — Planetary Computer drops connections
+occasionally — the build continues and reports those variables as `MISSING`. Re-run it;
+the build is idempotent and total.
+
+### 5. Run the frontend
 
 In a **second terminal**, leaving the API running:
 

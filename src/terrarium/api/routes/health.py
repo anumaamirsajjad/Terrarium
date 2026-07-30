@@ -30,6 +30,6 @@ async def health(settings: Annotated[Settings, Depends(get_settings)]) -> Health
             bbox=tile.bbox,
             centroid=tile.centroid,
             crs=tile.crs,
-            resolution_m=tile.resolution_m,
+            target_resolution_m=tile.target_resolution_m,
         ),
     )

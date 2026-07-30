@@ -89,9 +89,19 @@ interventions; in v1 it just executes what the user asked for.
 Microsoft Planetary Computer, anonymous access with request signing via
 `planetary_computer.sign_inplace`. Primary collections:
 
-- `landsat-c2-l2` — surface temperature (ST_B10) and optical bands, 30 m
-- `sentinel-2-l2a` — NDVI / land cover context, 10 m
-- `esa-worldcover` — land cover classification
+- `landsat-c2-l2` — surface temperature (ST_B10) and optical bands, 30 m native
+- `sentinel-2-l2a` — NDVI / NDBI / albedo, 10–20 m native
+- `cop-dem-glo-30` — elevation, 30 m native
+- `esa-worldcover` — land cover classification, 10 m native
+
+These are *source* resolutions. Everything is resampled onto the single analysis grid —
+**100 m**, `Tile.target_resolution_m` in `config.py` — which is what every physics core
+assumes. Do not confuse the two: `NATIVE_RESOLUTION_M` describes the inputs,
+`target_resolution_m` describes the cube. Over the Lahore bbox that grid is **201 × 202**.
+
+Resampling method is a property of the variable's *meaning*, declared once in
+`state/cube.py`: nearest for anything whose values are labels (land cover classes, QA
+bitmasks), bilinear for anything measured on a continuous scale.
 
 ---
 
@@ -106,11 +116,11 @@ terrarium/
 ├── src/terrarium/
 │   ├── config.py           # settings + THE tile bbox. Single source of truth.
 │   ├── ingest/             # ← ONLY layer permitted to do network I/O
-│   │   ├── stac.py         #   PC search + signing
-│   │   └── vector.py       #   OSM / admin boundaries
+│   │   ├── client.py       #   PC STAC search, signing, odc-stac load
+│   │   └── pipeline.py     #   masking, unit conversion, cube assembly
 │   ├── state/              # the cube: grid, alignment, Zarr, DuckDB catalog
 │   │   ├── grid.py         #   canonical CRS / resolution / transform
-│   │   ├── cube.py         #   build, open, validate the Dataset
+│   │   ├── cube.py         #   variable + resampling contract; validate, summarise
 │   │   └── store.py        #   Zarr + DuckDB persistence
 │   ├── cores/              # ← PURE. no I/O, no network, no globals.
 │   │   ├── base.py         #   Core protocol every simulator implements
@@ -124,7 +134,9 @@ terrarium/
 │       └── schemas/        #   Pydantic request/response contracts
 ├── web/                    # React + Vite + MapLibre + deck.gl
 ├── data/                   # gitignored: raw/ interim/ processed/
-├── scripts/                # one-off CLI entrypoints (ingest, train)
+├── scripts/                # one-off CLI entrypoints
+│   ├── build_tile.py       #   full ingest -> State Cube, with a build report
+│   └── inspect_cube.py     #   read back and summarise a built cube
 └── docs/
 ```
 

@@ -30,8 +30,10 @@ class Tile(BaseModel):
     bbox: tuple[float, float, float, float]
     # Metric CRS used for all analysis. Everything is reprojected into this.
     crs: str
-    # Analysis grid resolution in metres. 30 m matches Landsat thermal natively.
-    resolution_m: int = 30
+    # THE analysis grid resolution, in metres. Every source is resampled *into* this,
+    # and every physics core assumes it. Not to be confused with any source's native
+    # resolution (see NATIVE_RESOLUTION_M).
+    target_resolution_m: int = 100
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -47,10 +49,30 @@ LAHORE = Tile(
     country="PK",
     bbox=(74.2533, 31.4305, 74.4641, 31.6103),
     crs="EPSG:32643",  # UTM zone 43N
-    resolution_m=30,
+    target_resolution_m=100,
 )
 
 ACTIVE_TILE = LAHORE
+
+# --------------------------------------------------------------- data sources ---
+
+# Planetary Computer collection IDs. See CLAUDE.md > Data source.
+COLLECTION_SENTINEL2 = "sentinel-2-l2a"
+COLLECTION_LANDSAT = "landsat-c2-l2"
+COLLECTION_DEM = "cop-dem-glo-30"
+COLLECTION_WORLDCOVER = "esa-worldcover"
+
+# Native ground sample distance of each source, in metres, *before* resampling onto
+# the target grid. Kept separate from Tile.target_resolution_m so the two concepts
+# never collide: these describe the inputs, that describes the output.
+NATIVE_RESOLUTION_M: dict[str, int] = {
+    COLLECTION_SENTINEL2: 10,  # visible / NIR bands
+    COLLECTION_LANDSAT: 30,  # optical; ST_B10 is delivered resampled to 30 m
+    COLLECTION_DEM: 30,  # Copernicus DEM GLO-30
+    COLLECTION_WORLDCOVER: 10,  # ESA WorldCover
+}
+
+DEM_NATIVE_RESOLUTION_M = NATIVE_RESOLUTION_M[COLLECTION_DEM]
 
 
 class Settings(BaseSettings):
@@ -74,6 +96,27 @@ class Settings(BaseSettings):
 
     # STAC catalogue. See CLAUDE.md > Data source.
     stac_url: str = "https://planetarycomputer.microsoft.com/api/stac/v1"
+
+    # Search window for imagery, as a STAC datetime interval. Lahore's pre-monsoon
+    # dry season: hot, clear, and the period the thermal core actually cares about.
+    search_start: str = "2024-04-01"
+    search_end: str = "2024-06-30"
+    # Scene-level cloud cover ceiling, percent. Applied as a STAC query filter.
+    max_cloud_cover: float = 20.0
+    # Cap on scenes composited per collection, least-cloudy first.
+    #
+    # Lahore's dry season yields ~49 usable Sentinel-2 scenes; compositing all of them
+    # means ~300 COG reads and over an hour of warping, during which the Planetary
+    # Computer SAS tokens minted at search time expire and the load fails mid-flight. A
+    # median over the clearest handful is both faster and no less representative.
+    max_scenes_per_collection: int = 8
+    # Attempts per collection before giving up and leaving its variables unpopulated.
+    # Planetary Computer reads fail transiently often enough (DNS blips, dropped TLS
+    # connections mid-tile) that a single attempt makes builds needlessly flaky.
+    # Delay doubles each attempt: 10s, 20s, 40s. Flat short delays burn every attempt
+    # inside a single DNS flap, which defeats the point of retrying at all.
+    ingest_attempts: int = 4
+    ingest_retry_delay_s: float = 10.0
 
     zarr_store: Path = DATA_DIR / "processed" / "cube.zarr"
     duckdb_path: Path = DATA_DIR / "processed" / "terrarium.duckdb"

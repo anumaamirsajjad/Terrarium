@@ -17,7 +17,7 @@ class TileInfo(BaseModel):
     )
     centroid: tuple[float, float] = Field(description="WGS84 [longitude, latitude]")
     crs: str
-    resolution_m: int
+    target_resolution_m: int
 
 
 class HealthResponse(BaseModel):

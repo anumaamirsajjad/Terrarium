@@ -18,6 +18,9 @@ dependencies = [
     "pystac-client>=0.8",
     "planetary-computer>=1.0",
     "rioxarray>=0.17",
+    # Imported directly by state/grid.py and ingest/client.py, not just transitively.
+    "odc-geo>=0.4",
+    "pyproj>=3.6",
     "zarr>=2.18,<3",
     "duckdb>=1.1",
     "geopandas>=1.0",
@@ -68,7 +71,10 @@ select = ["E", "F", "I", "UP", "B", "SIM", "ANN", "RUF"]
 ignore = ["ANN401"]  # allow typing.Any where genuinely needed
 
 [tool.ruff.lint.per-file-ignores]
-"**/test_*.py" = ["ANN201", "ANN001"]  # test functions need no return annotations
+# Test functions need no return annotations, and test doubles mirror the untyped
+# third-party signatures they stand in for.
+"**/test_*.py" = ["ANN001", "ANN002", "ANN003", "ANN201", "ANN202"]
+"scripts/*.py" = ["ANN001"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -77,5 +83,21 @@ mypy_path = "src"
 strict = true
 # Geospatial stack ships incomplete stubs; don't fail the build on them.
 [[tool.mypy.overrides]]
-module = ["odc.*", "pystac_client.*", "planetary_computer.*", "lightgbm.*", "rioxarray.*"]
+module = [
+    "odc.*",
+    "pystac.*",
+    "pystac_client.*",
+    "planetary_computer.*",
+    "lightgbm.*",
+    "rioxarray.*",
+    "pyproj.*",
+]
 ignore_missing_imports = true
+
+# dask ships a partial py.typed: `delayed` is re-exported implicitly and `from_delayed`
+# is unannotated, so strict mode rejects both despite the stubs being present.
+[[tool.mypy.overrides]]
+module = ["dask", "dask.*"]
+ignore_missing_imports = true
+implicit_reexport = true
+follow_imports = "skip"
