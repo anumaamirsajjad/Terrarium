@@ -113,7 +113,9 @@ def main(argv: list[str] | None = None) -> int:
             ).fetchall()
         if rows:
             print("  latest catalogued build")
-            print(f"    {rows[0][0]}  at {rows[0][1]}  ({rows[0][2]:.1f}s)")
+            # duration_s is nullable in the schema, so it cannot be format-specced blind.
+            duration = "unknown" if rows[0][2] is None else f"{rows[0][2]:.1f}s"
+            print(f"    {rows[0][0]}  at {rows[0][1]}  ({duration})")
             for _, _, _, coll, found, kept, comp in rows:
                 print(f"    {coll:<24} found={found:<4} cloud-ok={kept:<4} composited={comp}")
             print()

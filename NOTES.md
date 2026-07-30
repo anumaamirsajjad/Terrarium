@@ -3,34 +3,24 @@
 Transient state and things to do before demo. Anything that turns out to be a durable
 rule belongs in `CLAUDE.md` instead — this file is meant to shrink.
 
+Sequenced work lives in `docs/IMPLEMENTATION_PLAN.md`, not here.
+
 ## TODO
 
-### Rebuild the cube before demo / submission — stale `elevation_m` metadata
+Nothing open.
 
-**Status:** open. Affects metadata only; the pixel data is correct.
+## Recently closed
 
-The on-disk Zarr at `data/processed/cube.zarr` was built before the `elevation_m`
-description was corrected, so its stored attrs still read:
+### Stale `elevation_m` metadata in the on-disk Zarr — **closed 2026-07-30**
 
-> `Ground elevation above EGM2008 geoid, Copernicus DEM GLO-30`
+The store predated the corrected description and still called GLO-30 a ground-elevation
+model. Rebuilt (`build e6e3c768f392`, 116 s, 6/6 variables populated); the store now
+carries *"Surface elevation (DSM, incl. buildings) above EGM2008"*. Verified with
+`inspect_cube.py`.
 
-`state/cube.py` now correctly says it is a Digital **Surface** Model — GLO-30 includes
-buildings and canopy, which is visible in the render as the built-up core sitting ~7 m
-above its surroundings. It is an urban-form proxy, not terrain height.
+Same rebuild also picked up the albedo normalisation fix, so the cube on disk is current
+with `state/cube.py` and `ingest/pipeline.py` as of that commit.
 
-Variable attrs are written into the Zarr store at build time, so editing `cube.py` alone
-does not update what is on disk. One rebuild fixes it:
-
-```bash
-uv run python scripts/build_tile.py
-uv run python scripts/inspect_cube.py   # confirm the wording, then delete this entry
-```
-
-**Why it matters:** anything reading the cube's own metadata — the API, a future data
-dictionary, a reviewer opening the Zarr directly — currently gets the wrong description.
-Nothing downstream reads that attr today, so this is not urgent, only pre-demo hygiene.
-
-**Cost:** ~4–6 minutes, network permitting. The build is idempotent and total
-(`mode="w"`), so a *partial* run overwrites a good cube — rerun until it exits 0 rather
-than accepting a run that reports `MISSING` variables. This machine's DNS drops
-individual Azure hosts intermittently, so expect to need more than one attempt.
+**Rebuild whenever a `VariableSpec` description, unit, or formula changes** — variable
+attrs are written into Zarr at build time, so editing `cube.py` alone does not update
+what is on disk.

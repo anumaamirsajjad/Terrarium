@@ -10,7 +10,9 @@ risk, and equity of exposure, rendered on the map.
 **v1 grid:** EPSG:32643 (UTM 43N), 100 m, 201 × 202 pixels
 **v1 core:** thermal only (LightGBM land-surface-temperature emulator)
 
-See [CLAUDE.md](CLAUDE.md) for architecture, conventions, and scope boundaries.
+See [CLAUDE.md](CLAUDE.md) for architecture, conventions, and scope boundaries, and
+[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for what is built today and
+what is next.
 
 ## Getting Started
 

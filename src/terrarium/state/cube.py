@@ -96,7 +96,9 @@ CUBE_VARIABLES: tuple[VariableSpec, ...] = (
     ),
     VariableSpec(
         name="albedo",
-        description="Broadband shortwave albedo, Liang (2001) Sentinel-2 approximation",
+        description=(
+            "Broadband shortwave albedo, Liang (2001) coefficients on Sentinel-2 bands"
+        ),
         units="1",
         dtype="float32",
         resampling=Resampling.BILINEAR,

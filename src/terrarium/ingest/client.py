@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+from time import sleep
 from typing import Any, Literal
 
 import odc.stac
@@ -106,11 +107,35 @@ def open_catalog(settings: Settings) -> pystac_client.Client:
 
     `sign_inplace` as a modifier means every item that comes out of a search already has
     signed asset hrefs, so nothing downstream needs to know about tokens.
+
+    Retried on the same schedule as the ingestors. This is the first network call a build
+    makes and it used to be the only one *outside* the retry logic, so a single DNS blip
+    at second zero killed the whole build with a bare traceback - the exact failure the
+    per-source retries exist to survive. Unlike an ingestor this cannot be skipped: with
+    no catalogue there is nothing to build, so exhausting the attempts re-raises.
     """
-    return pystac_client.Client.open(
-        settings.stac_url,
-        modifier=planetary_computer.sign_inplace,
-    )
+    attempts = max(1, settings.ingest_attempts)
+
+    for attempt in range(1, attempts + 1):
+        try:
+            return pystac_client.Client.open(
+                settings.stac_url,
+                modifier=planetary_computer.sign_inplace,
+            )
+        except Exception as exc:
+            if attempt == attempts:
+                raise
+            delay = settings.ingest_retry_delay_s * (2 ** (attempt - 1))
+            logger.warning(
+                "opening the STAC catalogue failed (attempt %d/%d: %s); retrying in %.0fs",
+                attempt,
+                attempts,
+                exc,
+                delay,
+            )
+            sleep(delay)
+
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def search_collection(

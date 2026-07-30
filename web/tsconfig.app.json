@@ -16,7 +16,10 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
-    /* Linting */
+    /* Linting. `strict` mirrors `mypy --strict` on the Python side - the API contract in
+       src/api/client.ts is hand-mirrored from Pydantic models, so a silent `any` here is
+       exactly the drift that goes unnoticed until runtime. */
+    "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,

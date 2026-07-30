@@ -58,6 +58,14 @@ S2_SCALE = 10_000.0
 # Processing baseline 04.00 (2022-01-25 onward) shifts reflectance by -1000 DN.
 S2_OFFSET_BASELINE = 4.0
 S2_BOA_OFFSET_DN = 1000.0
+# Liang (2001) narrowband-to-broadband shortwave albedo. The coefficients are his
+# Landsat ones, remapped onto the equivalent Sentinel-2 bands (B02/B04/B08/B11/B12) as
+# validated by Bonafoni & Sekertekin (2020). The trailing division is part of the
+# published formula, not a fudge factor - dropping it biases every pixel ~1.6% high.
+LIANG_COEFFICIENTS = (0.356, 0.130, 0.373, 0.085, 0.072)
+LIANG_INTERCEPT = -0.0018
+LIANG_NORMALISATION = 1.016
+
 # Upper bound on plausible surface reflectance. Physically it is 1.0, but specular
 # glint and bright cloud edges legitimately overshoot after atmospheric correction, so
 # allow headroom rather than punching holes in the composite.
@@ -178,9 +186,17 @@ def _ingest_sentinel2(
 
     ndvi = _collapse_time((nir - red) / (nir + red))
     ndbi = _collapse_time((swir16 - nir) / (swir16 + nir))
-    # Bonafoni & Sekertekin (2020) Sentinel-2 broadband shortwave albedo.
+    c_blue, c_red, c_nir, c_swir16, c_swir22 = LIANG_COEFFICIENTS
     albedo = _collapse_time(
-        0.356 * blue + 0.130 * red + 0.373 * nir + 0.085 * swir16 + 0.072 * swir22 - 0.0018
+        (
+            c_blue * blue
+            + c_red * red
+            + c_nir * nir
+            + c_swir16 * swir16
+            + c_swir22 * swir22
+            + LIANG_INTERCEPT
+        )
+        / LIANG_NORMALISATION
     )
 
     return (

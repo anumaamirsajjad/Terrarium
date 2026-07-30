@@ -270,7 +270,9 @@ S2_SWIR22_DN = 1500.0  # -> 0.05
 S2_BLUE_DN = 1200.0  # -> 0.02
 EXPECTED_NDVI = (0.30 - 0.05) / (0.30 + 0.05)
 EXPECTED_NDBI = (0.10 - 0.30) / (0.10 + 0.30)
-EXPECTED_ALBEDO = 0.356 * 0.02 + 0.130 * 0.05 + 0.373 * 0.30 + 0.085 * 0.10 + 0.072 * 0.05 - 0.0018
+EXPECTED_ALBEDO = (
+    0.356 * 0.02 + 0.130 * 0.05 + 0.373 * 0.30 + 0.085 * 0.10 + 0.072 * 0.05 - 0.0018
+) / 1.016
 
 LST_TARGET_C = 35.0
 LST_DN = (LST_TARGET_C + pipeline.KELVIN_TO_C - pipeline.ST_OFFSET) / pipeline.ST_SCALE
@@ -649,6 +651,51 @@ def test_a_lazy_read_failure_is_caught_and_isolated(
     assert sorted(summary.missing) == ["albedo", "ndbi", "ndvi"]
     assert sorted(summary.populated) == ["elevation_m", "landcover", "lst_c"]
     assert COLLECTION_SENTINEL2 not in {r.collection_id for r in records}
+
+
+def test_opening_the_catalog_survives_a_transient_dns_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The build's first network call must be as retry-protected as the ingestors.
+
+    It used to be the only one outside the retry logic, so a DNS blip at second zero
+    aborted the build with a traceback and no report.
+    """
+    import pystac_client
+
+    from terrarium.ingest import client
+
+    calls: list[int] = []
+
+    def flaky_open(url: str, modifier: object = None) -> pystac_client.Client:
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError("Failed to resolve 'planetarycomputer.microsoft.com'")
+        return FAKE_CATALOG
+
+    monkeypatch.setattr(pystac_client.Client, "open", flaky_open)
+    monkeypatch.setattr(client, "sleep", lambda _: None)
+
+    settings = Settings(ingest_attempts=3, ingest_retry_delay_s=0.0)
+
+    assert client.open_catalog(settings) is FAKE_CATALOG
+    assert len(calls) == 3
+
+
+def test_opening_the_catalog_gives_up_and_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No catalogue means nothing to build, so this must not fail quietly."""
+    import pystac_client
+
+    from terrarium.ingest import client
+
+    def always_fails(url: str, modifier: object = None) -> pystac_client.Client:
+        raise RuntimeError("permanently offline")
+
+    monkeypatch.setattr(pystac_client.Client, "open", always_fails)
+    monkeypatch.setattr(client, "sleep", lambda _: None)
+
+    with pytest.raises(RuntimeError, match="permanently offline"):
+        client.open_catalog(Settings(ingest_attempts=2, ingest_retry_delay_s=0.0))
 
 
 def test_gdal_configuration_is_applied() -> None:

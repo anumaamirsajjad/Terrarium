@@ -16,6 +16,7 @@ from terrarium.config import Settings, get_settings
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the app. Accepts injected settings so tests can override configuration."""
+    injected = settings
     settings = settings or get_settings()
 
     app = FastAPI(
@@ -31,6 +32,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Routes resolve settings through `Depends(get_settings)`, which returns the cached
+    # global. Without this override an injected Settings would reach the middleware above
+    # and nothing else, so every endpoint would silently answer from the real config.
+    if injected is not None:
+        app.dependency_overrides[get_settings] = lambda: injected
 
     app.include_router(health.router)
 

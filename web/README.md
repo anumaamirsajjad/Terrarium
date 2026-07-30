@@ -1,32 +1,23 @@
-# React + TypeScript + Vite
+# Terrarium — web
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React 19 + Vite frontend for the Terrarium digital twin. MapLibre GL renders the
+basemap; deck.gl renders the data overlays.
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev      # http://localhost:5173
+npm run build    # type-check + production bundle
+npm run lint     # oxlint
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+The API must be running (`uv run terrarium-api` from the repository root) or the page
+shows a connection error. To point elsewhere, copy `.env.example` to `.env.local` and set
+`VITE_API_URL`.
+
+`src/api/client.ts` mirrors the Pydantic response models in `src/terrarium/api/schemas/`
+**by hand**. When a schema changes on the Python side, change it here too — or generate
+from `/openapi.json`.
+
+Current state: the page calls `/health` and renders the active tile. deck.gl and MapLibre
+are installed but not yet wired up — see
+[`docs/IMPLEMENTATION_PLAN.md`](../docs/IMPLEMENTATION_PLAN.md), Phase 3.
