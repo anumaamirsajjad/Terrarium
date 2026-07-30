@@ -106,7 +106,11 @@ CUBE_VARIABLES: tuple[VariableSpec, ...] = (
     ),
     VariableSpec(
         name="elevation_m",
-        description="Ground elevation above EGM2008 geoid, Copernicus DEM GLO-30",
+        # GLO-30 is a Digital *Surface* Model: it includes buildings and canopy, so over
+        # dense Lahore this reads several metres above bare ground. That is useful to the
+        # thermal core as an urban-form proxy, but it is not terrain height - do not
+        # treat it as such.
+        description="Surface elevation (DSM, incl. buildings) above EGM2008, Copernicus DEM GLO-30",
         units="m",
         dtype="float32",
         resampling=Resampling.BILINEAR,
