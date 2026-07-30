@@ -3,12 +3,14 @@
 A neighbourhood-scale digital twin for climate interventions.
 
 Pick a real 20 km city tile, apply an intervention — plant trees, ban vehicles, add
-green infrastructure — and see the modelled effect on temperature, pollution, flood
-risk, and equity of exposure, rendered on the map.
+green infrastructure — and see the modelled effect on mid-morning land surface
+temperature, air quality, and equity of exposure, rendered on the map.
 
 **v1 tile:** Lahore, Pakistan — `[74.2533, 31.4305, 74.4641, 31.6103]`
 **v1 grid:** EPSG:32643 (UTM 43N), 100 m, 201 × 202 pixels
-**v1 core:** thermal only (LightGBM land-surface-temperature emulator)
+**v1 core:** thermal only — a LightGBM emulator of **mid-morning land surface
+temperature** (~10:30 local, Landsat overpass). Surface, not air temperature: it runs
+several degrees hotter and peaks later in the day.
 
 See [CLAUDE.md](CLAUDE.md) for architecture, conventions, and scope boundaries, and
 [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for what is built today and

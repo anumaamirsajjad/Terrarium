@@ -66,7 +66,14 @@ class VariableSpec(BaseModel):
 CUBE_VARIABLES: tuple[VariableSpec, ...] = (
     VariableSpec(
         name="lst_c",
-        description="Land surface temperature from Landsat ST_B10, clear-sky median",
+        # Landsat crosses Lahore at ~10:30 local and ST_B10 measures the *surface*, not
+        # the air. Surface temperature runs several degrees above air temperature and
+        # peaks well after the overpass, so this is never "temperature" unqualified and
+        # never "afternoon". Keep the full phrase wherever this is shown (D9).
+        description=(
+            "Mid-morning land surface temperature (~10:30 local) from Landsat ST_B10, "
+            "clear-sky median. Surface, not air temperature."
+        ),
         units="degC",
         dtype="float32",
         resampling=Resampling.BILINEAR,

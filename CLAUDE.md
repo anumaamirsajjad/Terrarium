@@ -2,12 +2,18 @@
 
 A neighbourhood-scale **digital twin**. A user draws or selects an intervention on a real
 city tile — plant 5,000 trees along these streets, ban combustion vehicles inside this
-ring, add a retention pond here — and Terrarium returns modelled deltas in **temperature,
-pollution, flood risk, and equity of exposure**, rendered on the map.
+ring — and Terrarium returns modelled deltas in **mid-morning land surface temperature,
+air quality, and equity of exposure**, rendered on the map.
 
 The claim we are making is *"here is what this specific street would feel like"*, not
 *"here is a national climate scenario"*. Everything in the architecture follows from that:
 high spatial resolution, small spatial extent, fast enough to feel interactive.
+
+**[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) is the roadmap and the
+decisions register.** This file is the repo's operating rules — how to write code here.
+That file is what to build next and what was decided. When the two disagree, the plan
+wins and this file is wrong; fix it rather than working around it. Phase status is
+deliberately *not* duplicated here, because a duplicated status is a stale status.
 
 ---
 
@@ -17,12 +23,12 @@ Data flows strictly downward. Nothing in a lower layer imports from a higher one
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  3. INTELLIGENCE      api/          agents, orchestration,   │
-│                                     FastAPI, scenario diffs  │
+│  3. INTELLIGENCE      api/          FastAPI, scenario diffs, │
+│                       dsl/          later: DSL + agents      │
 ├──────────────────────────────────────────────────────────────┤
 │  2. PHYSICS CORE      cores/        pure simulators:         │
-│                                     thermal, (later: air,    │
-│                                     hydro, equity)           │
+│                                     thermal, later air,      │
+│                                     equity                   │
 ├──────────────────────────────────────────────────────────────┤
 │  1. STATE CUBE        ingest/       satellite + vector →     │
 │                       state/        one aligned raster cube  │
@@ -48,24 +54,43 @@ Simulators. Each core answers one question and nothing else.
 
 A core is a **pure function**:
 
+```python
+core(cube: xr.Dataset, intervention: Intervention, model) -> CoreResult
 ```
-core(baseline_cube, intervention) -> result_cube
-```
+
+The `Core` protocol in `cores/base.py` types `model` as `object`, because each core knows
+its own artefact type and the protocol should not care. The thermal core narrows it to
+`lgb.Booster` at its own signature.
 
 No file reads. No network. No database. No global state. No logging side effects that
 change behaviour. Given the same inputs it returns the same outputs, always. This is what
 makes cores testable, cacheable, parallelisable, and swappable.
 
-v1 ships exactly one core: **thermal**, a LightGBM emulator that predicts land surface
-temperature from land cover, albedo, NDVI, imperviousness, and meteorology. We train it
-against observed LST so it learns the local empirical relationship rather than us hand-
-rolling a surface energy balance under hackathon time pressure.
+**The trained model is an argument, never trained or loaded inside the core.** Training
+per call kills the interactivity claim; opening the artefact file breaks purity. Loading
+it is the caller's job — `scripts/` today, the API's startup hook later.
+
+`Intervention`, `CoreResult` and `DeltaStats` are frozen in `cores/base.py`. They are the
+only interface between the physics track and the product track, so changing their shape
+is a two-person decision, not a refactor.
+
+Geometry reaches a core as a boolean `(y, x)` mask on the canonical grid. Converting
+GeoJSON to that mask is the API's job, because it is the layer that knows about the grid.
+
+The first core is **thermal**: a LightGBM emulator predicting mid-morning land surface
+temperature from NDVI, NDBI, albedo, elevation, land cover, and 500 m neighbourhood means
+of NDVI and NDBI. It is trained against observed Landsat ST_B10 so it learns the local
+empirical relationship rather than us hand-rolling a surface energy balance. Meteorology
+is **not** a feature yet — with a single-date composite, wind and air temperature are
+constant across all 40,602 pixels and carry exactly zero information. They arrive with the
+time dimension.
 
 ### Layer 3 — Intelligence (`api/`)
 
-The composition root. Loads the cube, validates requests, calls cores, diffs baseline
-against scenario, serialises for the map. Later this layer grows agents that *choose*
-interventions; in v1 it just executes what the user asked for.
+The composition root. Loads the cube and the model **once at startup**, validates
+requests, converts GeoJSON to masks, calls cores, and serialises deltas for the map.
+Routes stay thin. Later this layer grows a DSL and agents that *choose* interventions;
+for now it executes what the user asked for.
 
 ---
 
@@ -81,8 +106,10 @@ interventions; in v1 it just executes what the user asked for.
 | Raster storage     | **Zarr** (v2)                             | Chunked, cloud-shaped, appendable |
 | Tabular / catalog  | **DuckDB**                                | Zero-server analytics over run metadata + zonal stats |
 | Emulator           | **LightGBM**                              | Fast to train, fast to infer, handles tabular pixel features well |
+| Array / tabular    | **numpy**, **pandas**, **scipy.ndimage**  | scipy only for the neighbourhood filters in `cores/thermal/features.py` |
 | Frontend           | **React** + **Vite**                      | |
 | Map                | **MapLibre GL** + **deck.gl**             | MapLibre for basemap, deck.gl for the data overlays |
+| Basemap tiles      | **OpenFreeMap** Positron                  | Keyless and unmetered. See the zero-budget rule below |
 
 ### Data source
 
@@ -91,13 +118,19 @@ Microsoft Planetary Computer, anonymous access with request signing via
 
 - `landsat-c2-l2` — surface temperature (ST_B10) and optical bands, 30 m native
 - `sentinel-2-l2a` — NDVI / NDBI / albedo, 10–20 m native
-- `cop-dem-glo-30` — elevation, 30 m native
+- `cop-dem-glo-30` — elevation, 30 m native. A Digital *Surface* Model: it includes
+  buildings and canopy, so over dense Lahore it reads above bare ground. Useful as an
+  urban-form proxy, but it is not terrain height
 - `esa-worldcover` — land cover classification, 10 m native
+
+Later phases add Open-Meteo (meteorology), WorldPop (population), OSM via Overpass
+(emissions inventory) and OpenAQ (air validation) — all keyless and free.
 
 These are *source* resolutions. Everything is resampled onto the single analysis grid —
 **100 m**, `Tile.target_resolution_m` in `config.py` — which is what every physics core
 assumes. Do not confuse the two: `NATIVE_RESOLUTION_M` describes the inputs,
-`target_resolution_m` describes the cube. Over the Lahore bbox that grid is **201 × 202**.
+`target_resolution_m` describes the cube. Over the Lahore bbox that grid is **201 × 202
+= 40,602 pixels**.
 
 Resampling method is a property of the variable's *meaning*, declared once in
 `state/cube.py`: nearest for anything whose values are labels (land cover classes, QA
@@ -123,21 +156,25 @@ terrarium/
 │   │   ├── cube.py         #   variable + resampling contract; validate, summarise
 │   │   └── store.py        #   Zarr + DuckDB persistence
 │   ├── cores/              # ← PURE. no I/O, no network, no globals.
-│   │   ├── base.py         #   Core protocol every simulator implements
-│   │   └── thermal/        #   v1's only core
-│   │       ├── features.py #   cube → feature matrix
-│   │       ├── model.py    #   LightGBM train / predict
-│   │       └── simulate.py #   apply intervention, return delta
+│   │   ├── base.py         #   Intervention, CoreResult, DeltaStats, Core protocol
+│   │   └── thermal/
+│   │       ├── features.py #   cube → feature matrix, incl. neighbourhood means
+│   │       ├── model.py    #   LightGBM train / predict / spatially blocked CV
+│   │       └── simulate.py #   apply intervention, return whole-tile delta
 │   └── api/
 │       ├── main.py         #   app factory, CORS, router wiring
 │       ├── routes/         #   HTTP endpoints (thin)
 │       └── schemas/        #   Pydantic request/response contracts
 ├── web/                    # React + Vite + MapLibre + deck.gl
 ├── data/                   # gitignored: raw/ interim/ processed/
-├── scripts/                # one-off CLI entrypoints
+│                           #   processed/cube.zarr, terrarium.duckdb, thermal.txt
+├── scripts/                # one-off CLI entrypoints. I/O around the cores lives here.
 │   ├── build_tile.py       #   full ingest -> State Cube, with a build report
-│   └── inspect_cube.py     #   read back and summarise a built cube
+│   ├── inspect_cube.py     #   read back and summarise a built cube
+│   ├── preview_cube.py     #   render PNGs for visual alignment checks
+│   └── train_thermal.py    #   train + blocked CV + one worked intervention
 └── docs/
+    └── IMPLEMENTATION_PLAN.md   # phases, decisions register, measured results
 ```
 
 ---
@@ -145,22 +182,31 @@ terrarium/
 ## Coding conventions
 
 **Type hints everywhere.** Every function signature — parameters and return. `mypy
---strict` is the target. Untyped third-party geo libraries get an `ignore_missing_imports`
-override in `pyproject.toml`, never a bare `# type: ignore` at the call site.
+--strict` is the target and is currently clean. Untyped third-party libraries get an
+`ignore_missing_imports` override in `pyproject.toml`, never a bare `# type: ignore` at
+the call site.
 
 **`cores/` is pure.** No `open()`, no `requests`, no `xr.open_zarr`, no `datetime.now()`,
 no reading config. Everything a core needs arrives as an argument. If you find yourself
-wanting I/O inside a core, the data should have been put in the cube by `state/` instead.
-This is the single most important rule in the codebase — it is what lets us test physics
-without a network and swap emulators without touching the API.
+wanting I/O inside a core, the data should have been put in the cube by `state/` instead,
+or the file should have been opened by the caller. This is the single most important rule
+in the codebase — it is what lets us test physics without a network and swap emulators
+without touching the API. `cores/` importing `terrarium.config` is the canary.
 
 **Pydantic models for all data contracts.** Every boundary — HTTP request, HTTP response,
 core input, core output, config — is a Pydantic model. No bare dicts crossing a module
 boundary. Models live in `api/schemas/` for HTTP and next to the core for core contracts.
+Frozen unless there is a reason not to be.
 
 **Tests alongside each module.** `foo.py` is tested by `test_foo.py` in the same directory.
 Not a mirrored `tests/` tree — proximity keeps them honest and makes deletion obvious when
-a module dies. They are excluded from the built wheel.
+a module dies. They are excluded from the built wheel. **No test may touch the network.**
+
+**Name the temperature precisely.** Landsat crosses Lahore at ~10:30 local and ST_B10
+measures the *surface*, not the air. Surface temperature runs several degrees above air
+temperature and peaks after the overpass. Everywhere it appears — variable descriptions,
+API schemas, UI copy, narration, the pitch — call it **mid-morning land surface
+temperature**. Never "temperature" unqualified, never "afternoon".
 
 **Naming.** `snake_case` functions, `PascalCase` models, `SCREAMING_CASE` constants.
 Geospatial variables carry units in the name: `temp_c`, `area_m2`, `dist_m`.
@@ -170,32 +216,39 @@ carry CRS in `.rio.crs`. Never `.values` a lazy array until you actually need it
 
 ---
 
-## Scope for v1 — read this before adding anything
+## Scope — read this before adding anything
 
-v1 is deliberately narrow. The point is one convincing vertical slice, not four shallow
-ones.
+The point is one convincing vertical slice, not four shallow ones. Scope is **phase-gated,
+not permanently closed**: the plan schedules equity, an air dispersion core, a DSL, agents,
+voice and VLM into later phases. That is a roadmap, not a licence to start them.
 
-**In scope:**
+**The rule:** build the phase that is currently open, in full, and nothing from a later
+one. Adding a placeholder module, an empty interface, or a "just the stub for now" ahead
+of its phase is a scope violation, not foresight — the layer boundaries above already
+guarantee those phases can land later without a rewrite, and that is the only concession
+made to them.
+
+Fixed for the whole project unless a decision reopens it:
 
 - **ONE tile.** Lahore, Pakistan. Hardcoded bbox in `config.py`:
   `[74.2533, 31.4305, 74.4641, 31.6103]` — roughly 20 km × 20 km centred on
-  31.5204 N, 74.3587 E. No tile selection UI. No multi-city support. No dynamic bbox.
-- **ONE physics core.** Thermal only. LightGBM LST emulator.
-- **ONE intervention type** to start: tree planting / land-cover change.
-- Baseline vs scenario diff, rendered on a deck.gl layer.
+  31.5204 N, 74.3587 E. No tile selection UI, no multi-city support, no dynamic bbox.
+- **No auth, no user accounts, no persistence of user scenarios, no multi-tenancy.**
+  These are not in any phase.
+- **Flood risk** appears in the product vision but has no scheduled core. Do not build one
+  without reopening the plan.
 
-**Explicitly NOT in v1** — do not scaffold, stub, or "just add the interface for" these:
+### Zero budget — this is a design constraint, not just a wallet
 
-- ❌ Agents, tool-calling, LLM orchestration
-- ❌ Voice input
-- ❌ VLM / image understanding
-- ❌ Pollution, flood, and equity cores
-- ❌ Auth, user accounts, persistence of user scenarios
-- ❌ Multi-tenancy, deployment infra, Docker
+**Nothing in this project may require a credit card.** It is a claim in the pitch — *any
+city on Earth can run this at zero marginal cost* — so a paid dependency breaks the
+argument, not just the budget. The whole data layer, every library, and the basemap tiles
+are free and keyless today.
 
-The layer boundaries above exist so these can be added later without a rewrite. That is
-the *only* concession v1 makes to them. Adding a placeholder module for a v2 feature is a
-scope violation, not foresight.
+The two easy ways to break this: **basemap tiles** (MapLibre is the free library; MapTiler
+and Stadia are metered services — use OpenFreeMap) and **the LLM** (route through a free
+tier, behind one adapter, so the provider never leaks into the agent logic). If a phase
+cannot be done free, the plan changes, not the budget.
 
 ---
 
@@ -205,10 +258,15 @@ scope violation, not foresight.
 uv sync --extra dev              # install everything
 uv run terrarium-api             # API on :8000, docs at /docs
 uv run pytest                    # tests
-uv run ruff check src/           # lint
+uv run ruff check src/ scripts/  # lint
 uv run mypy                      # types
 
-cd web && npm install && npm run dev    # frontend on :5173
+uv run python scripts/build_tile.py       # ingest -> State Cube (needs network, ~2 min)
+uv run python scripts/inspect_cube.py     # what is actually in the built cube
+uv run python scripts/preview_cube.py     # PNG renders for visual alignment checks
+uv run python scripts/train_thermal.py    # train + blocked CV + worked intervention
+
+cd web && npm install && npm run dev      # frontend on :5173
 ```
 
 ## Conventions for working in this repo
@@ -216,4 +274,14 @@ cd web && npm install && npm run dev    # frontend on :5173
 - Check `config.py` before hardcoding any constant — the bbox, CRS, and resolution live
   there and nowhere else.
 - When adding a dependency, add it to `pyproject.toml`, never `pip install` into the venv.
+  If it is imported directly rather than pulled in transitively, say so in a comment.
 - If a change makes a core impure, stop and reconsider the design.
+- **Prefer a number the tile actually shows over a number from the literature.** A
+  hardcoded expected range silently becomes wrong when the composite, the season, or the
+  city changes; a threshold derived from the cube does not. The thermal core's acceptance
+  band is built this way, after a literature band gave a false failure.
+- Keep a known-good Zarr. Planetary Computer drops connections, and never rebuild the
+  night before a demo.
+- Report validation honestly, including when it is unflattering, and label what a number
+  does **not** prove. Spatially blocked CV shows the model generalises across space; it
+  says nothing about whether it predicts the effect of a change.

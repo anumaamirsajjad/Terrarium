@@ -30,6 +30,9 @@ dependencies = [
     "numpy>=1.26",
     "pandas>=2.2",
     "scikit-learn>=1.5",
+    # Imported directly by cores/thermal/features.py for the neighbourhood filter, not
+    # just pulled in transitively by scikit-learn.
+    "scipy>=1.14",
     "numba>=0.66.0",
 ]
     
@@ -94,6 +97,8 @@ module = [
     "lightgbm.*",
     "rioxarray.*",
     "pyproj.*",
+    "pandas.*",
+    "scipy.*",
 ]
 ignore_missing_imports = true
 

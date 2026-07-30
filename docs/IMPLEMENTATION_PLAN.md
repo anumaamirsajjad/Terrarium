@@ -7,8 +7,8 @@ with the team.
 |---|---|---|
 | 0 | Foundations — repo, tooling, API skeleton, frontend skeleton | ✅ **DONE** |
 | 1 | State Cube v1 — six variables, one date, Lahore | ✅ **DONE** |
-| 2 | Thermal core — LightGBM ΔLST emulator | ▶ **NEXT** |
-| 3 | State Cube v2 — time dimension + winter windows | ⬜ |
+| 2 | Thermal core — LightGBM ΔLST emulator | ✅ **DONE** |
+| 3 | State Cube v2 — time dimension + winter windows | ▶ **NEXT** |
 | 4 | Thermal core v2 — multi-date retrain + meteorology | ⬜ |
 | 5 | API — expose cube and simulation | ⬜ |
 | 6 | Frontend — map, draw, compare | ⬜ |
@@ -176,9 +176,85 @@ Plus housekeeping: stock Vite README replaced, TypeScript `strict` enabled, stal
 
 ---
 
-## Phase 2 — Thermal core ▶ NEXT
+## Phase 2 — Thermal core ✅ DONE
 
 **Goal:** `core(cube, intervention, model) -> CoreResult`. Pure, offline, sub-second.
+
+### Results — measured, not assumed
+
+**Spatially blocked CV**, 2 km blocks, 5 folds, 40,602 usable rows (100 % of the tile):
+
+| | MAE (°C) |
+|---|---|
+| model | **0.606 ± 0.054** |
+| naive (predict the tile mean) | 1.354 |
+| skill | **55.2 %** of the naive error removed |
+
+Placeholder validation, as planned — it measures spatial generalisation, not response to
+change. Phase 7 is what tests the latter.
+
+**Feature importance (gain).** The neighbourhood term dominates exactly as predicted:
+
+`ndbi_mean_500m` 60.2 % · `ndbi` 15.0 % · `elevation_m` 7.4 % · `albedo` 6.1 % ·
+`ndvi_mean_500m` 5.6 % · `landcover` 2.9 % · `ndvi` 2.8 %
+
+**No double-counting.** `landcover` carries only 2.9 % of gain, and the intervention
+deliberately does not touch it — adding 30 % canopy leaves a built-up block built-up.
+Flipping the class as well would have counted the same cooling through two channels.
+
+**Worked intervention** — +30 % canopy on the 261 built-up cells within 1 km of the
+Lahore Canal at Canal Bank Road (31.5163 N, 74.3403 E):
+
+| | °C |
+|---|---|
+| mean ΔLST inside | **−0.498** |
+| mean ΔLST in the 200 m ring outside (spillover) | **−0.119** (161 cells) |
+| strongest cooling | −1.133 |
+| largest warming | +0.269 |
+
+**Spillover decays cleanly and then stops dead**, which is the strongest correctness
+evidence in this phase:
+
+| ring beyond the polygon | mean ΔLST | cells cooling |
+|---|---|---|
+| +100 m | −0.159 °C | 87 % |
+| +200 m | −0.058 °C | 76 % |
+| +300 m | −0.017 °C | 45 % |
+| beyond 600 m | **exactly 0.000** | 0 % |
+
+That final row is the proof that the delta is prediction-minus-prediction and not
+prediction-minus-observed: outside the feature neighbourhood the two feature rows are
+identical, so the two predictions are bit-identical and the delta is exactly zero on
+39,891 cells. Had we differenced against observed LST, the whole tile would show
+residual noise and the map would be unreadable.
+
+Only 39 cells anywhere warm, all by less than +0.27 °C — boundary effects where a
+neighbourhood mean shifts without the cell itself being planted.
+
+### The magnitude finding — read this before quoting a number
+
+**The plan's expected −1 to −4 °C band was wrong for this cube, and the model is right.**
+
+This tile's *observed* median LST contrast between tree-cover and built-up pixels is only
+**2.60 °C** (44.47 vs 47.07). That is the ceiling: converting a cell entirely to tree
+cover cannot buy more than 2.6 °C, because that is all the difference the data contains.
+At a mean 26.9 % canopy actually added after capping, the linear expectation is −0.70 °C
+and the model returns −0.50 °C. Consistent, and slightly conservative.
+
+The contrast is modest because the LST layer is a **median composite over Apr–Jun clear
+scenes** — compositing averages away the extremes — and because at 100 m Lahore's "tree
+cover" class is scattered street trees rather than closed canopy. Literature values of
+3–6 °C come from single-date imagery over closed canopy, which is not what is in the cube.
+
+Consequence: `scripts/train_thermal.py` now derives its acceptance band **from the tile's
+own observed contrast** rather than a hardcoded range. A literature constant silently
+becomes wrong the moment the composite, the season, or the city changes. Phase 3's
+per-window composites should raise the contrast — that is a thing to check, not assume.
+
+**Delivered:** `cores/base.py` (`Intervention`, `DeltaStats`, `CoreResult`, `Core`),
+`cores/thermal/{features,model,simulate}.py`, `cores/thermal/test_simulate.py` (10 tests,
+in-memory synthetic cube, no I/O), `scripts/train_thermal.py`. Artefact at
+`data/processed/thermal.txt`. Whole suite 60/60, `ruff` and `mypy --strict` clean.
 
 ### 2a. `cores/base.py` — Core protocol
 
@@ -256,8 +332,10 @@ built-up core near the canal**.
 
 - **ΔLST must be negative** in the planted region. Positive means a sign error, not a
   finding.
-- **Magnitude ≈ −1 to −4 °C.** Much more and the model is extrapolating: the built-up
-  core has few high-canopy analogues, and gradient boosting fails silently there.
+- **Magnitude must not exceed the tile's own tree-vs-built LST contrast.** More than a
+  full conversion to tree cover means the model is extrapolating: the built-up core has
+  few high-canopy analogues, and gradient boosting fails silently there. *(Revised — the
+  original "−1 to −4 °C" assumed a contrast this composite does not have. See Results.)*
 
 **Acceptance:** `cores/thermal/test_simulate.py` builds a synthetic cube in memory,
 plants trees in a hot patch, asserts ΔLST negative there and ~zero far away.
@@ -272,7 +350,7 @@ narration — as **mid-morning land surface temperature**. Never "afternoon", ne
 
 ---
 
-## Phase 3 — State Cube v2: time + seasons ⬜
+## Phase 3 — State Cube v2: time + seasons ▶ NEXT
 
 The biggest hidden dependency in the plan: Phases 4, 7, 8 and 9 all need it.
 
@@ -417,8 +495,14 @@ That alone is a complete, defensible submission. Everything after is upside.
 
 ## Immediate next actions
 
-1. **Rewrite `CLAUDE.md`** against the project description (D3, D11) so the repo's own
-   rules stop contradicting the plan — do this before Phase 2 code, since `CLAUDE.md`
-   currently forbids most of what is above.
-2. Freeze the `CoreResult` / `/simulate` contract so both tracks can start.
-3. Begin Phase 2a–2e; report the CV MAE and the worked intervention before going further.
+1. ~~**Rewrite `CLAUDE.md`**~~ ✅ done. It now carries the correct core signature, the
+   D9 temperature-labelling rule, the D13 zero-budget constraint, and phase-gated scope
+   instead of a permanent "not in v1" list. Phase status is deliberately *not* duplicated
+   there — this file is the single source for it, because a duplicated status goes stale.
+2. `CoreResult` is frozen in `cores/base.py` — Track B can build `/simulate` against it.
+   `Intervention.mask` is `(y, x)` bool on the canonical grid; the API owns
+   GeoJSON → mask. **The `/simulate` HTTP schema itself is still unwritten** — that is
+   Track B's first Phase 5 task, and it is the remaining half of this action.
+3. Phase 3, and while there **check whether per-window composites raise the tree-vs-built
+   LST contrast above 2.60 °C**. If the contrast stays this low, say so in the pitch
+   rather than quoting literature numbers the data does not support.
