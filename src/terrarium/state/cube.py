@@ -382,6 +382,63 @@ def window_labels(ds: xr.Dataset) -> list[str]:
     return [str(label) for label in np.asarray(ds["window"].values).reshape(-1)]
 
 
+def _valid_mask(values: np.ndarray, spec: VariableSpec) -> np.ndarray:
+    """Which entries hold a real observation rather than the variable's fill value."""
+    if spec.is_categorical:
+        return np.asarray(values != np.asarray(spec.fill_value).astype(values.dtype))
+    return np.asarray(np.isfinite(values))
+
+
+def window_valid_fractions(ds: xr.Dataset) -> dict[str, dict[str, float]]:
+    """Valid-value share of every per-window variable, per window.
+
+    `summarise` reduces over the whole array, so a variable that loaded for two windows
+    out of four still reads as 100 % populated. This is the per-window pass that catches
+    the difference.
+    """
+    report: dict[str, dict[str, float]] = {}
+
+    for label in window_labels(ds):
+        window = select_window(ds, label)
+        per_variable: dict[str, float] = {}
+        for spec in CUBE_VARIABLES:
+            if spec.dims is Dims.SPACE:
+                continue  # static: identical in every window, nothing per-window to say
+            values = np.asarray(window[spec.name].values)
+            valid = _valid_mask(values, spec)
+            per_variable[spec.name] = float(valid.sum() / valid.size) if valid.size else 0.0
+        report[label] = per_variable
+
+    return report
+
+
+def validate_windows(ds: xr.Dataset, *, minimum_valid_fraction: float = 0.0) -> None:
+    """Reject a cube that has time slices nothing was ever written into.
+
+    A half-built cube does not announce itself. An ingest that dies partway leaves the
+    time axis at full length with the unreached windows still holding their fill value,
+    and every downstream consumer accepts that quietly: `validate_cube` checks shapes and
+    coordinates, `summarise` reduces over all windows at once, and `select_window` hands
+    back a slice of NaN without complaint. That is exactly how a cube whose 2024 windows
+    were entirely empty got as far as training a model on half the time axis it claimed.
+
+    `minimum_valid_fraction` defaults to 0.0, which fails only on a *completely* empty
+    variable-window. Raise it to demand real coverage - an API serving map tiles wants
+    more than one valid pixel.
+    """
+    empty = [
+        f"{name}@{label} ({fraction:.1%} valid)"
+        for label, per_variable in window_valid_fractions(ds).items()
+        for name, fraction in per_variable.items()
+        if fraction <= minimum_valid_fraction
+    ]
+    if empty:
+        raise ValueError(
+            "cube has unpopulated variable-windows, so it is a partial build: "
+            f"{', '.join(empty)}. Rebuild it - see scripts/build_tile.py."
+        )
+
+
 def select_window(ds: xr.Dataset, label: str) -> xr.Dataset:
     """One window as a 2-D cube — the shape a physics core consumes.
 

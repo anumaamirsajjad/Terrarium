@@ -107,6 +107,22 @@ requests, converts GeoJSON to masks, calls cores, and serialises deltas for the 
 Routes stay thin. Later this layer grows a DSL and agents that *choose* interventions;
 for now it executes what the user asked for.
 
+Three rules this layer earned the hard way:
+
+- **Validate the artefact when you load it, not when you built it.** A cube whose ingest
+  died partway keeps its full time axis with the unreached windows still holding fill
+  values, and shapes, coordinates and whole-cube summaries all still pass.
+  `state.cube.validate_windows` checks per *variable-window*, and `api/runtime.py` refuses
+  to serve a cube that fails it. Startup logs and degrades to `/health` rather than
+  dying — a readiness probe needs an answer, not a restart loop.
+- **A raster crosses the wire as base64 float32 plus bounds, never as GeoJSON features.**
+  40,602 cells as features is tens of megabytes describing a grid three numbers already
+  define. The encoding is named in the payload so a client never guesses.
+- **The window is part of every answer.** The same planting cools ~0.51 °C in summer and
+  ~0.13 °C in winter, so a response that does not name its window is unquotable. Requests
+  may omit it; responses never do. The default is the latest *summer*, not whichever slice
+  happens to be last.
+
 ---
 
 ## Tech stack
@@ -199,7 +215,10 @@ terrarium/
 │   │       ├── model.py    #   LightGBM train / predict / spatially blocked CV
 │   │       └── simulate.py #   apply intervention, return whole-tile delta
 │   └── api/
-│       ├── main.py         #   app factory, CORS, router wiring
+│       ├── main.py         #   app factory, CORS, router wiring, loads the runtime
+│       ├── runtime.py      #   cube + model loaded ONCE; per-window validation
+│       ├── geometry.py     #   GeoJSON -> boolean grid mask (D6). Only place doing this
+│       ├── deps.py         #   the runtime as a FastAPI dependency
 │       ├── routes/         #   HTTP endpoints (thin)
 │       └── schemas/        #   Pydantic request/response contracts
 ├── web/                    # React + Vite + MapLibre + deck.gl
@@ -295,6 +314,11 @@ cannot be done free, the plan changes, not the budget.
 ```bash
 uv sync --extra dev              # install everything
 uv run terrarium-api             # API on :8000, docs at /docs
+                                 #   GET  /health          tile + liveness
+                                 #   GET  /cube/summary    variables, windows, validity
+                                 #   GET  /cube/layer/lst_c?window=2024-summer
+                                 #   POST /simulate        GeoJSON polygon -> ΔLST
+                                 #   serves TERRARIUM_SERVE_ZARR_STORE, not the build path
 uv run pytest                    # tests
 uv run ruff check src/ scripts/  # lint
 uv run mypy                      # types
@@ -308,7 +332,11 @@ uv run python scripts/preview_cube.py     # PNG renders; one --window per run
 uv run python scripts/train_thermal.py    # train + blocked CV + worked intervention,
                                           #   on one --window (default: earliest summer)
 
-cd web && npm install && npm run dev      # frontend on :5173
+cd web && npm install && npm run dev      # frontend on :5173 (the API's CORS allowlist
+                                          #   is 5173 only — do not accept Vite's
+                                          #   fallback port, free 5173 instead)
+cd web && npm run test                    # vitest: raster decode, ramps, compare split
+cd web && npm run build                   # tsc -b + production bundle
 ```
 
 ## Conventions for working in this repo
@@ -323,7 +351,12 @@ cd web && npm install && npm run dev      # frontend on :5173
   city changes; a threshold derived from the cube does not. The thermal core's acceptance
   band is built this way, after a literature band gave a false failure.
 - Keep a known-good Zarr. Planetary Computer drops connections, and never rebuild the
-  night before a demo. Build to `--out` a new path rather than over the good one.
+  night before a demo. Build to `--out` a new path rather than over the good one. This is
+  why `serve_zarr_store` (what the API serves) is a separate setting from `zarr_store`
+  (where a build writes) — the serving path only moves once a build has been checked.
+- **A cube that opens is not a cube that is complete.** `data/processed/cube.zarr` has
+  four time slices of which two are entirely empty, from a build that died partway. Check
+  per window — `validate_windows`, or `inspect_cube.py --per-window` — before trusting one.
 - **A remote fetch that succeeds is not a fetch that completed.** WorldPop's server
   truncates transfers without raising; verify the length and write through a `.partial`
   rename, so a short read can never be mistaken for a cache hit.

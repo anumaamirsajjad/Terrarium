@@ -74,6 +74,15 @@ def configure_gdal_for_cog_reads() -> None:
     os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
     os.environ.setdefault("GDAL_HTTP_MAX_RETRY", "5")
     os.environ.setdefault("GDAL_HTTP_RETRY_DELAY", "1")
+    # Bound how long a single stalled read can block. Without these GDAL waits
+    # indefinitely on a half-open connection: one observed build sat on a single
+    # Sentinel-2 B11 read for 16.4 hours before the per-source retry ever got a chance
+    # to fire. A retry policy is worthless if the attempt it is guarding never returns.
+    os.environ.setdefault("GDAL_HTTP_TIMEOUT", "120")  # seconds, whole request
+    os.environ.setdefault("GDAL_HTTP_CONNECTTIMEOUT", "20")
+    # Abort a transfer that falls below 1 KB/s for 60 s rather than crawling forever.
+    os.environ.setdefault("GDAL_HTTP_LOW_SPEED_TIME", "60")
+    os.environ.setdefault("GDAL_HTTP_LOW_SPEED_LIMIT", "1000")
     os.environ.setdefault("GDAL_HTTP_MULTIPLEX", "YES")
     os.environ.setdefault("VSI_CACHE", "TRUE")
     os.environ.setdefault("VSI_CACHE_SIZE", "67108864")

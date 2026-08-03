@@ -213,8 +213,18 @@ class Settings(BaseSettings):
     # Ceiling on any single plain-HTTP fetch. The retry wrapper handles the rest.
     http_timeout_s: float = 300.0
 
+    # Where `scripts/build_tile.py` writes by default.
     zarr_store: Path = DATA_DIR / "processed" / "cube.zarr"
     duckdb_path: Path = DATA_DIR / "processed" / "terrarium.duckdb"
+
+    # What the API *serves*, which is deliberately not what a build writes to. Keeping
+    # them separate is what lets you rebuild without pointing the demo at a half-finished
+    # cube: builds go to `zarr_store` (or `--out`), and this only moves once a build has
+    # been checked. `cube.zarr` is currently a failed partial build - its 2024 windows are
+    # empty - which is precisely the accident this split exists to survive.
+    serve_zarr_store: Path = DATA_DIR / "processed" / "cube_phase4.zarr"
+    # LightGBM native text format, written by scripts/train_thermal.py.
+    thermal_model_path: Path = DATA_DIR / "processed" / "thermal.txt"
 
     @property
     def tile(self) -> Tile:

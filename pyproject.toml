@@ -104,6 +104,8 @@ module = [
     "pandas.*",
     "scipy.*",
     "rasterio.*",
+    # Imported directly by api/geometry.py for the GeoJSON -> mask conversion.
+    "shapely.*",
 ]
 ignore_missing_imports = true
 

@@ -20,7 +20,11 @@ import numpy as np
 import xarray as xr
 
 from terrarium.cores.base import CoreResult, Intervention, summarise_delta
-from terrarium.cores.thermal.features import BASE_VARIABLES, features_from_arrays
+from terrarium.cores.thermal.features import (
+    BASE_VARIABLES,
+    features_from_arrays,
+    meteorology_from_cube,
+)
 from terrarium.cores.thermal.model import predict
 
 # WorldCover class codes. Tree cover is the state we move planted cells toward; water is
@@ -100,6 +104,31 @@ def perturb(arrays: dict[str, np.ndarray], fraction: np.ndarray) -> dict[str, np
     return perturbed
 
 
+def tree_built_contrast(cube: xr.Dataset) -> float:
+    """This window's observed median LST gap between built-up and tree-cover pixels.
+
+    The **ceiling on what any planting can buy**: converting a cell entirely to tree
+    cover cannot cool it by more than the difference the data actually contains. Report
+    a modelled delta next to this number, never on its own - Phase 2 measured 2.60 degC
+    here against a literature expectation of 3-6 degC, and quoting the literature would
+    have made a correct model look broken.
+
+    A property of *this window*, not of the tile: summer reads 2.6-2.8 degC and winter
+    0.3-0.8 degC, so a single cached value would misdescribe half the cube.
+
+    Positive means built-up is hotter, which is the expected sign.
+    """
+    lst = np.asarray(cube[RESULT_VARIABLE].values, dtype="float64")
+    landcover = np.asarray(cube["landcover"].values)
+
+    built = (landcover == BUILT_UP_CLASS) & np.isfinite(lst)
+    trees = (landcover == TREE_COVER_CLASS) & np.isfinite(lst)
+    if not built.any() or not trees.any():
+        raise ValueError("window has no valid built-up or tree-cover pixels to contrast")
+
+    return float(np.median(lst[built]) - np.median(lst[trees]))
+
+
 def simulate(
     cube: xr.Dataset, intervention: Intervention, model: lgb.Booster
 ) -> CoreResult:
@@ -112,10 +141,15 @@ def simulate(
 
     fraction = effective_fraction(arrays, intervention)
 
-    baseline_frame, valid = features_from_arrays(arrays)
+    # The same weather on both sides. Planting trees does not change the synoptic
+    # conditions the window was composited under, and letting meteorology differ between
+    # baseline and scenario would attribute a seasonal offset to the intervention.
+    meteorology = meteorology_from_cube(cube)
+
+    baseline_frame, valid = features_from_arrays(arrays, meteorology)
     # Rebuilt, not patched: the 500 m neighbourhood terms have to come from the perturbed
     # field, and forgetting that is exactly what silently removes the spillover.
-    scenario_frame, _ = features_from_arrays(perturb(arrays, fraction))
+    scenario_frame, _ = features_from_arrays(perturb(arrays, fraction), meteorology)
 
     delta = np.full(shape, np.nan, dtype="float32")
     rows = valid.reshape(-1)

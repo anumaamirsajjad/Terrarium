@@ -9,10 +9,10 @@ with the team.
 | 1 | State Cube v1 — six variables, one date, Lahore | ✅ **DONE** |
 | 2 | Thermal core — LightGBM ΔLST emulator | ✅ **DONE** |
 | 3 | State Cube v2 — time dimension + winter windows | ✅ **DONE** |
-| 4 | Thermal core v2 — multi-date retrain + meteorology | ▶ **NEXT** |
-| 5 | API — expose cube and simulation | ⬜ |
-| 6 | Frontend — map, draw, compare | ⬜ |
-| 7 | Hindcast validation | ⬜ |
+| 4 | Thermal core v2 — multi-date retrain + meteorology | ✅ **DONE** |
+| 5 | API — expose cube and simulation | ✅ **DONE** |
+| 6 | Frontend — map, draw, compare | ✅ **DONE** |
+| 7 | Hindcast validation | ▶ **NEXT** |
 | 8 | Equity | ⬜ |
 | 9 | Air dispersion core | ⬜ |
 | 10 | DSL + agent layer | ⬜ |
@@ -459,40 +459,385 @@ inside −0.500 °C (was −0.498), blocked-CV MAE 0.658 ± 0.050 (was 0.606 ± 
 `max_scenes_per_collection` raised 8 → 14 now that windows are ~3 months rather than one
 range standing in for the whole cube.
 
-## Phase 4 — Thermal core v2 ▶ NEXT
+## Phase 4 — Thermal core v2 ✅ DONE
 
-Retrain on multi-date. Meteorology becomes a real feature. Re-run the blocked CV and
-compare against the Phase 2 number — the delta between them tells you how much the
-single-date model was leaning on cross-sectional contrast alone.
+One model now spans every window, with meteorology as a real feature carrying the
+between-window difference. `cores/` stayed pure and still consumes a *single* 2-D cube —
+stacking happens in `features.build_training_frame`, and `simulate` takes one window.
 
-The cube is ready: `select_window` gives one slice, and stacking every window into one
-training frame is a `features.py` change, not a cube change. Two things Phase 3 measured
-that shape this work:
+### What shipped
 
-- Meteorology is `(time,)`, so as a feature it is **constant within a window** and only
-  varies between them. With two windows that is one bit of information — build more years
-  (`--years`) before concluding anything about its importance.
-- Winter's tree-vs-built contrast is 0.31 °C. A model trained on both seasons pooled will
-  learn a weaker average canopy effect than a summer-only one, and that is correct, not a
-  regression. Report per-season ΔLST rather than one number.
+- **`features.py`** — `METEOROLOGY_VARIABLES` join `FEATURE_NAMES`, broadcast constant
+  across the tile from the window's scalars. `features_from_arrays` now *requires*
+  meteorology rather than defaulting it: a default would let a caller train or simulate
+  against the wrong weather, and because the columns are constant that mistake produces
+  no NaN, no shape error, and no visible symptom anywhere downstream.
+- **`TrainingFrame`** — every window stacked, carrying `window_index` *and* `cell_index`.
+- **`model.py`** — `pooled_spatial_folds`, `leave_one_window_out_cv`, and
+  `blocked_cv(baseline_groups=…)` so the naive comparison knows what season it is.
+- **`train_thermal.py`** — `--windows` (default: all), both CV reports, per-season ΔLST.
+- **24 tests** in `cores/thermal/`, fully in memory. Whole suite 107.
 
-## Phase 5 — API ⬜
+### The leakage trap, and why `cell_index` exists
 
-- `GET /cube/summary` — reuse `state.cube.summarise`.
-- `GET /cube/layer/{name}` — one variable as a bitmap or base64 float32 array with bounds.
-  **Not** 40,602 GeoJSON features.
-- `POST /simulate` — GeoJSON polygon → boolean mask (D6) → core → delta layer + stats.
+Pooling windows and assigning CV folds *per row* is the obvious implementation and it is
+wrong. Grid cell (100, 100) in 2023-summer would train while the same cell in
+2024-summer is scored — and since land cover, elevation and the neighbourhood terms
+barely change between windows, that is very nearly the identical row on both sides of the
+split. The model looks the answer up and the MAE flatters it.
 
-Cube and model load **once at startup**. Routes stay thin. Target < 3 s warm.
+`pooled_spatial_folds` keys the fold off the **cell**, so a block is held out of *every*
+window at once. `test_pooled_folds_hold_a_cell_out_of_every_window` pins it.
 
-## Phase 6 — Frontend map ⬜
+### Two CV numbers now, not one
 
-MapLibre basemap centred from `/health`, deck.gl `BitmapLayer` for the raster, polygon
-draw → `POST /simulate`, split-screen or swipe compare, diverging ΔLST ramp.
+| split | question it answers |
+|---|---|
+| pooled spatial blocks | can it predict LST somewhere unseen, in a season it knows? |
+| leave-one-window-out | can it reach a **date** it has never seen? |
 
-**Basemap tiles: OpenFreeMap Positron**, not MapTiler or Stadia — see the cost register.
-The tile service is a separate thing from the MapLibre library and is the one place in
-the frontend where a key would silently creep in.
+The second is the harder one and is where meteorology stops helping: a held-out window
+carries values the model never saw, so it can only fall back on the nearest window it
+did. **The gap between the two is the honest measure of how much the model leans on
+cross-sectional contrast alone** — which is exactly what this phase was asked to find
+out. Neither is the hindcast: every window here is a different *time*, not a different
+*land surface*. Nothing has actually changed on the ground.
+
+### Measured, on 2023-summer + 2023-winter
+
+The 2024 windows failed to ingest (network, see below), so these numbers rest on two
+windows, not four.
+
+| | summer-only (Phase 2-comparable) | pooled summer + winter |
+|---|---|---|
+| spatial-block MAE | 0.634 ± 0.021 °C | **0.539 ± 0.024 °C** |
+| naive baseline | 1.353 °C | 9.210 °C |
+| reported "skill" | 53.1 % | 94.2 % |
+| `air_temp_c` gain | 0.0 % | **92.1 %** |
+| ΔLST, canal +30 % canopy | −0.482 °C | −0.507 °C |
+
+**Do not quote the 94.2 %.** It is not an improvement on Phase 2's 51.7 % — the *baseline
+moved*. Pooling two seasons that differ by ~17 °C makes the naive "predict the mean"
+error jump from 1.35 °C to 9.21 °C, so most of that 94 % is the model knowing summer from
+winter, which is not a skill anyone needs. The honest comparison is the MAE: **0.634 →
+0.539 °C**, a real but modest gain from having twice the data. Skill percentages are only
+comparable between models scored against the same baseline.
+
+The same effect explains `air_temp_c` taking 92 % of the gain: pooled, the between-season
+offset dwarfs everything the land surface does, so the tree splits on it first. That is
+correct behaviour and it is also why the summer-only model remains the one to quote for
+land-surface feature importance.
+
+**The reassuring result:** ΔLST for the worked intervention barely moved, −0.482 →
+−0.507 °C. The plan's worry — that pooling seasons would wash out the canopy effect —
+does not materialise. Summer cooling survives pooling intact.
+
+**Leave-one-window-out is degenerate at two windows: MAE 17.7 °C, skill 3.8 %.** Holding
+out summer leaves only winter to train on, so the model has never seen a hot day and
+cannot extrapolate to one. Treat this as a *floor*, not an estimate — it needs the 2024
+windows before it says anything about temporal generalisation. It does already establish
+the qualitative point the phase was asked for: with meteorology as the only temporal
+feature, the model interpolates between seasons it has seen and cannot reach past them.
+
+### Verified, not assumed — build `dc1af462b9c1`, 4 windows, 162,399 usable rows
+
+Trained on all four windows of `data/processed/cube_phase4.zarr` (10/10 variables at
+100 % valid, 484 s). 107 tests green, `ruff` and `mypy --strict` clean.
+
+| split | MAE (°C) | naive (°C) | skill |
+|---|---|---|---|
+| pooled spatial blocks (2 km, 5 folds) | **0.550 ± 0.033** | 1.011 | **45.6 %** |
+| leave-one-window-out | **2.900 ± 0.998** | 14.104 | 79.4 % |
+
+Against Phase 2 (0.606, single window) and Phase 3's retrain (0.658, `2024-summer`), the
+pooled MAE of **0.550 °C is a modest improvement** — four windows of training data help,
+but not dramatically, because the extra windows are extra *dates*, not extra *places*.
+
+**The leave-one-window-out spread is the finding.** Per held-out window:
+
+| held out | MAE (°C) |
+|---|---|
+| 2023-summer | 3.857 |
+| 2024-summer | 3.931 |
+| 2023-winter | 2.032 |
+| 2024-winter | 1.780 |
+
+Reaching an unseen date costs **5.3× the error** of reaching an unseen place in a known
+season, and summer costs roughly twice what winter does. With two seasons observed, a
+held-out summer must be reconstructed largely from winter, and the model has no way to
+know how far above the winter it should sit. **This is the number to quote when asked
+whether Terrarium forecasts** — it does not, and 2.9 °C is the honest size of that
+limitation. Widening `window_years` is the only thing that shrinks it.
+
+### The naive baseline had to be fixed before the skill number meant anything
+
+The first run reported **94.8 % skill**, which is not a result — it is an artefact.
+Pooled across windows, "predict the mean" predicts one number for a set spanning 44 °C
+summers and 22 °C winters, so its MAE is 10.6 °C and almost all of that is the seasonal
+offset. Beating it demonstrates only that the model can tell summer from winter, which is
+trivially true the moment air temperature is a feature.
+
+`blocked_cv` now takes `baseline_groups`; the spatial split passes `window_index`, so the
+baseline predicts *that window's own mean*. The baseline drops 10.579 → 1.011 °C and the
+skill drops 94.8 % → **45.6 %**, which is the number comparable to Phase 2's 55.2 %.
+
+Skill fell against Phase 2 while MAE improved, and both are real: the per-window baseline
+averages in the winter windows, whose spatial spread is much smaller, so there is simply
+less error available to remove. **Quote the MAE across phases, not the skill percentage** —
+the denominator changed. Leave-one-window-out keeps the pooled baseline, because a
+held-out window's own mean is precisely what is unknown.
+
+### Meteorology took over the model, and ΔLST did not move
+
+| feature | gain |
+|---|---|
+| `air_temp_c` | **91.5 %** |
+| `ndbi_mean_500m` | 1.9 % |
+| `wind_speed_ms` | 1.4 % |
+| `albedo` · `elevation_m` | 1.2 % each |
+| `ndbi` | 1.0 % |
+| `ndvi_mean_500m` | 0.8 % |
+| `landcover` | 0.6 % |
+| `ndvi` | 0.4 % |
+| `relative_humidity_pct` | 0.0 % |
+
+Air temperature carries 91.5 % of gain and the land-surface terms together carry ~7 %,
+where in Phase 2 `ndbi_mean_500m` alone carried 60.2 %. This is exactly the risk
+`features.py` flags: with four windows the meteorology columns take four distinct values,
+so a tree can use them as a **window identifier**, and identifying the window explains
+most of the variance in a pooled target spanning 22 °C.
+
+**It does not contaminate the intervention.** `simulate` holds meteorology fixed across
+baseline and scenario, so every meteorology split lands identically on both sides and
+cancels in the difference. Planting trees does not change the synoptic conditions the
+window was composited under, and pretending otherwise would attribute a seasonal offset
+to the intervention. The proof is the ΔLST table below: −0.506 °C in 2023-summer against
+Phase 2's −0.498 °C on one window with none of these features. **The gain ranking now
+describes what separates the windows, not what drives the intervention** — do not read it
+as "canopy barely matters".
+
+### Per-season ΔLST, as the plan required
+
+The worked intervention runs in every trained window and prints ΔLST, spillover, that
+window's own tree-vs-built contrast, and the linear expectation. Same scenario throughout:
++30 % canopy on built-up cells within 1 km of 31.5163 N, 74.3403 E.
+
+| window | cells | ΔLST inside | spillover | contrast | linear | ratio |
+|---|---|---|---|---|---|---|
+| 2023-summer | 258 | **−0.506** | −0.144 | +2.78 | −0.742 | 0.68 |
+| 2024-summer | 261 | **−0.510** | −0.126 | +2.60 | −0.704 | 0.72 |
+| 2023-winter | 262 | −0.233 | −0.047 | +0.80 | −0.223 | 1.05 |
+| 2024-winter | 251 | −0.131 | −0.037 | +0.31 | −0.081 | 1.63 |
+
+Every window cools, in proportion to its **own** observed contrast, and no window trips a
+sanity check. The two summers agree to 0.004 °C across independent years — the strongest
+reproducibility evidence in the project so far — and both sit slightly *under* the linear
+expectation, as in Phase 2.
+
+Winter cooling is **a quarter to a half of summer's**, tracking the seasonal contrast
+rather than anything the model invented. The pitch says *this intervention buys summer
+cooling*; a single pooled number would have averaged a real effect with a near-absent one
+and described neither.
+
+The plausibility ratio is **enforced in summer only**: winter's contrast is 0.31–0.80 °C,
+so the ratio there divides a small number by a smaller one — 2024-winter's 1.63 is that
+noise, not a model defect, and it is why the check does not fire on it.
+
+### One thing that bit, now guarded
+
+**GDAL had no read timeout.** A rebuild attempt sat inside a *single* Sentinel-2 B11 read
+for **16.4 hours** before returning. The per-source retry with exponential backoff was
+already in place and was completely useless, because the attempt it guards never
+returned. `configure_gdal_for_cog_reads` now sets `GDAL_HTTP_TIMEOUT`,
+`GDAL_HTTP_CONNECTTIMEOUT` and the low-speed abort. A retry policy is worthless without a
+bound on the thing being retried.
+
+## Phase 5 — API ✅ DONE
+
+Three endpoints over the loaded cube and model. `cores/` stayed pure and untouched: the
+API opens the artefacts, converts GeoJSON to a mask, and calls `simulate` exactly once.
+
+### What shipped
+
+| route | does |
+|---|---|
+| `GET /health` | unchanged — liveness plus the active tile the map centres on |
+| `GET /cube/summary` | `state.cube.summarise`, plus the default window and per-window validity |
+| `GET /cube/layer/{name}` | one variable as base64 float32 + bounds, `?window=` |
+| `POST /simulate` | GeoJSON → mask (D6) → core → whole-tile ΔLST layer + stats + context |
+
+- **`api/runtime.py`** — `Runtime`, loaded once by the app factory and shared frozen.
+- **`api/geometry.py`** — the only place that speaks both WGS84 GeoJSON and the grid.
+- **`api/deps.py`** — the runtime as a dependency off `app.state`, so tests inject rather
+  than monkeypatch.
+- **`state/cube.py`** — `window_valid_fractions` and `validate_windows`, the guard below.
+- **`cores/thermal/simulate.py`** — `tree_built_contrast`, now shared with the training
+  script instead of being reimplemented in it.
+- **58 API tests**, all in memory: no Zarr, no artefact, no network. Whole suite **161**.
+
+### Verified against the real cube and model
+
+Loading `cube_phase4.zarr` and `thermal.txt`:
+
+| | measured |
+|---|---|
+| startup (cube open + model parse + validation) | **3.1 s**, once |
+| `GET /cube/layer/lst_c` | **0.02 s**, 217 kB |
+| `POST /simulate` | **0.37 s** warm |
+
+Comfortably inside the < 3 s warm target — the budget was never the physics, it was going
+to be the artefact loading, which is why it happens once at startup.
+
+A 2 km box over Canal Bank Road, +30 % canopy:
+
+| window | ΔLST inside | spillover | contrast | ratio |
+|---|---|---|---|---|
+| 2024-summer | −0.543 °C | −0.114 | +2.60 | 0.78 |
+| 2024-winter | −0.146 °C | −0.039 | +0.31 | *null* |
+
+Consistent with Phase 4's disc-shaped scenario (−0.510 / −0.131) — the polygon differs,
+the physics does not. The winter ratio is deliberately `null` rather than a number:
+below a 1 °C contrast it divides a small number by a smaller one.
+
+### The half-built-cube guard, which is the point of this phase
+
+Phase 4 found `cube.zarr` had two entirely empty windows and **nothing in the stack
+noticed** — `validate_cube` checks shapes, `summarise` reduces over all windows at once,
+and `select_window` returns a slice of NaN without complaint. An API that loads a cube
+once at startup and serves it to a map is exactly where that becomes a demo failure.
+
+`validate_windows` fails per *variable-window* rather than over the whole array, and the
+API runs it at a 50 % threshold — a window that is 3 % valid will not render and will not
+simulate sensibly, so accepting it only defers the failure somewhere less legible. Pointed
+at the bad cube, startup now says:
+
+```
+cube at data/processed/cube.zarr is not servable: cube has unpopulated
+variable-windows, so it is a partial build: ndvi@2024-summer (0.0% valid), ...
+```
+
+**It logs and degrades rather than dying.** `/health` still answers 200 — it is what the
+frontend boots against and what a container's readiness probe hits — while `/cube/*` and
+`/simulate` are simply not mounted. Crashing on startup would turn a missing artefact into
+an opaque restart loop on Hugging Face Spaces in Phase 12.
+
+### Decisions worth not relitigating
+
+- **Rasters ship as base64 float32 + bounds, never GeoJSON features.** 40,602 cells as
+  features is tens of megabytes of coordinate strings describing a grid already defined by
+  three numbers; as bytes it is 163 kB and is what deck.gl's `BitmapLayer` samples
+  directly. The encoding is named in the payload (`base64:float32:little:row-major`) so a
+  client never guesses and a change to it is a visible break.
+- **`bounds_wgs84` is an envelope and says so.** A UTM rectangle is not a lat/lon
+  rectangle, so a north-up overlay is off by a fraction of a cell at the corners. Fine at
+  20 km, stated in the schema rather than hidden.
+- **Meteorology is 400, not a raster.** It is `(time,)` — one reanalysis value per window.
+  Painting it across 40,602 pixels would imply a field nobody measured, which is the exact
+  mistake the cube's `Dims` split exists to prevent.
+- **An empty mask is 422, never a result.** A polygon outside the tile rasterises to all
+  False, simulates cleanly, and returns a delta of exactly zero everywhere — which reads
+  as "the model found no effect" rather than "your polygon is in the Gulf of Guinea".
+  Same for points and lines, which have no area.
+- **The window is echoed in every response.** The same planting is −0.54 °C in summer and
+  −0.15 °C in winter; a response that did not name its window would be unquotable.
+- **Every ΔLST ships with its ceiling.** `tree_built_contrast_c` and the linear
+  expectation travel with the delta, so the UI cannot show −0.54 °C naked against a
+  reader's memory of the literature's 3–6 °C.
+- **`serve_zarr_store` is separate from `zarr_store`.** Builds write to one, the API
+  serves the other, and the second only moves once a build has been checked. That split is
+  what lets you rebuild without pointing the demo at a half-finished cube.
+
+### A fixture bug worth remembering
+
+The first synthetic cube gave built-up pixels NDVI 0.16 and tree pixels 0.62 with nothing
+in between. Every split the booster learned sat inside that empty gap, so a +30 % canopy
+step landed short of all of them and **the modelled delta was exactly zero** — the API
+looked broken when the fixture was. Real NDVI is continuous; the fixture now varies
+greenness smoothly and derives land cover from it. A test cube whose distribution is
+sharper than reality will pass things the real cube fails.
+
+## Phase 6 — Frontend map ✅ DONE
+
+The vertical slice closes: draw a polygon on real Lahore streets, get a modelled ΔLST
+back, and compare before against after. **Basemap tiles are OpenFreeMap Positron** — no
+key, no registration, no limit (D13).
+
+### What shipped
+
+| module | does |
+|---|---|
+| `api/client.ts` | typed fetchers for all four routes; surfaces the API's own `detail` |
+| `raster/decode.ts` | base64 float32 → `Float32Array`, encoding checked not assumed |
+| `raster/ramp.ts` | sequential ramps + a diverging one that is transparent at zero |
+| `raster/image.ts` | colourising, the compare split, extents, column↔longitude |
+| `raster/canvas.ts` | coloured bytes → a texture source deck.gl accepts |
+| `map/MapView.tsx` | MapLibre + `MapboxOverlay`, bitmap and drawing layers |
+| `map/useDrawnPolygon.ts` | click-to-draw polygon state |
+| `panels/` | legend, and the result readout with its ceiling |
+
+**29 frontend tests** (vitest) over the pure logic — decode, ramps, the split, the
+GeoJSON ring. `tsc -b` and `oxlint` clean. Python side untouched: **161** still pass.
+
+### Verified by driving the real browser, not by inspection
+
+Headless Chromium against the production bundle and the live API:
+
+| | result |
+|---|---|
+| basemap vector tiles | 11 requested, all 200 |
+| console / page errors | **none** |
+| draw 4 corners → close → simulate | ΔLST **−0.54 °C**, 979 cells, 9.79 km² |
+| ceiling shown beside it | 2.60 °C |
+| canopy actually added | 26.6 % of a requested 30 %, after capping |
+| switch to 2024-winter, re-run | ΔLST **−0.15 °C**, ceiling 0.31 °C |
+
+The summer/winter pair is the phase's own end-to-end proof: the same polygon, the same
+requested canopy, a 3.6× difference in the answer, and each shown against its own
+window's ceiling.
+
+### The bug that ate an hour, and would have eaten the demo
+
+**The basemap rendered nothing and said nothing about it.** MapLibre parses vector tiles
+in a web worker whose URL it resolves as `new URL('./maplibre-gl-worker.mjs',
+import.meta.url)` — not statically analysable, so Vite never emits the file and it 404s.
+
+What makes it dangerous is the failure mode. The style fetched 200. The TileJSON fetched
+200. Sprites and glyphs fetched 200. Nothing threw, no console error appeared, and the
+map simply **never requested a single `.pbf`** — because tile loading is dispatched
+through the worker. The symptom is a blank basemap that reads as a styling or CORS
+problem. It was only found by counting network requests by extension.
+
+Fixed in `map/maplibreWorker.ts` with `setWorkerUrl` plus a `?worker&url` import, and
+`worker: { format: 'es' }` in the Vite config. A plain `?url` import is the tempting
+shorter fix and yields a worker that 404s on *its* dependency instead. Both lines are
+load-bearing; an `optimizeDeps.exclude` that also appeared to help was tested and
+dropped, because it was not what fixed it.
+
+**Worth generalising: "the request succeeded" is not "the feature works."** This is the
+third time on this project — WorldPop's truncated-but-200 download, the ingest that died
+mid-build leaving a valid-looking Zarr, and now a basemap whose every request returned
+200 while the map stayed empty. Check the artefact, not the transport.
+
+### Decisions worth not relitigating
+
+- **Colouring happens in JS, not a shader.** At 40,602 cells the cost is nil, and it buys
+  exact control: NaN genuinely transparent, exact zeros invisible, and the compare split
+  as an array operation rather than a GPU trick.
+- **The diverging ramp is transparent at zero, not merely pale.** After a simulation
+  ~39,000 of 40,602 cells are *exactly* 0.000 — outside the feature neighbourhood both
+  predictions are bit-identical. Giving them a colour would paint the whole city as
+  changed and bury the intervention in it. The legend says so explicitly.
+- **The compare divider is a line of longitude, not a screen position.** It maps to a
+  column index, so the boundary stays on the same ground when the user pans or zooms and
+  the two halves always describe the same places. Both halves share one colour domain;
+  rescaling each side independently would render identical temperatures as different
+  colours across the line.
+- **Nearest-neighbour texture filtering.** At 100 m a cell is a measured unit; smoothing
+  between cells invents gradients the cube does not contain.
+- **Drawing is hand-rolled, ~90 lines.** The draw plugins in this ecosystem carry a peer
+  matrix against MapLibre and deck.gl majors that is a standing upgrade hazard for
+  "click a few points and close the ring".
+- **The window is a visible control, and the result echoes it.** Not a hidden default.
 
 ## Phase 7 — Hindcast validation ⬜
 
@@ -562,23 +907,30 @@ decision (D12) — never blocks physics work.
 
 | | Track A — data & physics | Track B — product & interface |
 |---|---|---|
-| now | **Phase 2** thermal core | **Phase 5** API skeleton against a stubbed core |
-| then | Phase 3 cube v2 → Phase 4 retrain | Phase 6 map, drawing, compare UI |
-| then | Phase 7 hindcast → Phase 9 air core | Phase 8 equity panel → Phase 10 DSL |
+| now | **Phase 7** hindcast — starting with a wider `window_years` build | **Phase 8** equity panel |
+| then | Phase 9 air core | Phase 10 DSL |
 
-**Freeze the `CoreResult` and `/simulate` contracts first** — that is the only interface
-between the tracks. Once both sides agree on the shape, they can proceed independently
-and integrate late without a merge fight.
+Phases 2–6 are done, so the **cut-order minimum is met**: one tile, a thermal core, and a
+map showing the delta. Everything from here is upside on a submission that already stands
+up on its own.
+
+The `CoreResult` / `/simulate` contract that had to be frozen before the tracks could
+split is now code on both sides — Pydantic models in `api/schemas/`, hand-mirrored
+TypeScript in `web/src/api/client.ts`. **That mirroring is by hand and is the seam most
+likely to drift**; generating it from `/openapi.json` is the fix if it starts to hurt.
 
 ## Cut order, worst case
 
 1. One tile ✅
-2. Thermal core + tree-planting delta
-3. Map showing the delta
-4. The hindcast number
-5. The equity panel
+2. Thermal core + tree-planting delta ✅
+3. Map showing the delta ✅
+4. The hindcast number ⬜ — Phase 7, and it needs a wider `window_years` build first
+5. The equity panel ⬜ — Phase 8, and the cube already carries the population it needs
 
-That alone is a complete, defensible submission. Everything after is upside.
+**Items 1–3 are done, so a defensible submission exists today.** Everything from here
+raises the ceiling rather than filling a hole, which is the position worth being in: 4
+and 5 are the two that make the strongest claims, and both can be cut without leaving a
+gap on screen.
 
 ## Standing risks
 
@@ -593,11 +945,32 @@ That alone is a complete, defensible submission. Everything after is upside.
   by 2.5 °C) but nowhere near enough for hindcast change detection, which needs a decade
   to find a land-cover transition big enough to resolve at 100 m. Widening `window_years`
   is a build-time cost, not a code change — but it has to actually happen before Phase 7.
+  Phase 4 put a number on the cost: **leave-one-window-out MAE is 2.9 °C against the
+  spatial split's 0.55 °C**, and with only two seasons observed a held-out summer has
+  little but winter to lean on. More years should close that gap, and it is the metric
+  to watch when they land.
+- **Meteorology can act as a window identifier.** `air_temp_c` takes 91.5 % of gain with
+  four windows, because four distinct values are enough to label the window and the
+  window explains most of a pooled target spanning 22 °C. Harmless for ΔLST — `simulate`
+  holds meteorology fixed, so it cancels in the difference — but it means the feature
+  importances no longer describe what drives the *intervention*, and anyone reading them
+  as "canopy barely matters" will draw the wrong conclusion. Re-check as windows are
+  added: more windows make the identifier less degenerate, not more.
 - **Winter rests on 3–5 Landsat scenes per window, summer on 12.** The winter contrast
   varies more between years than the summer one almost certainly because of that, not
   because of the weather. Do not read inter-annual winter differences as signal yet.
 - **Build fragility.** Planetary Computer drops connections; retries handle it, but keep
   a known-good Zarr and never rebuild the night before a demo.
+- **"200 OK" is not "it worked", and this project keeps proving it.** Three instances so
+  far: WorldPop truncating a transfer without erroring, an ingest dying mid-build and
+  leaving a valid-looking four-window Zarr with two empty windows, and MapLibre's worker
+  404ing while style, TileJSON, sprites and glyphs all returned 200 and the map rendered
+  nothing. None surfaced as an exception; each was found by checking the artefact rather
+  than the transport. Assume the next one behaves the same way.
+- **The TypeScript API types are mirrored from Pydantic by hand.** `web/src/api/client.ts`
+  will silently drift the first time a schema changes and nobody updates it — a renamed
+  field becomes `undefined` on a panel, not a build error. Generate from `/openapi.json`
+  if it bites once.
 - **Purity drift.** The moment a core reads config or opens a file, API caching and
   offline tests both break. `cores/` importing `terrarium.config` is the canary.
 - **Extrapolation in the built-up core.** The tile has few high-canopy dense-urban
@@ -613,19 +986,36 @@ That alone is a complete, defensible submission. Everything after is upside.
    D9 temperature-labelling rule, the D13 zero-budget constraint, and phase-gated scope
    instead of a permanent "not in v1" list. Phase status is deliberately *not* duplicated
    there — this file is the single source for it, because a duplicated status goes stale.
-2. `CoreResult` is frozen in `cores/base.py` — Track B can build `/simulate` against it.
-   `Intervention.mask` is `(y, x)` bool on the canonical grid; the API owns
-   GeoJSON → mask. **The `/simulate` HTTP schema itself is still unwritten** — that is
-   Track B's first Phase 5 task, and it is the remaining half of this action.
+2. ~~**Write the `/simulate` HTTP schema**~~ ✅ done. `api/schemas/simulate.py` holds
+   `SimulateRequest`/`SimulateResponse`, and `api/geometry.py` owns GeoJSON → mask as
+   D6 requires. `CoreResult` stayed frozen — the route recomputes the capped canopy
+   fraction for its context block rather than widening a contract shared with Track B.
 3. ~~**Check whether per-window composites raise the contrast above 2.60 °C**~~ ✅ done.
    They do not — summer is 2.60 °C on 12 scenes, winter is 0.31 °C. **The pitch quotes
    2.60 °C and explains why**, rather than the literature's 3–6 °C.
-4. **Rebuild the canonical cube with more years before Phase 7.** Two builds exist:
-   `cube_phase3.zarr` (`--years 2024`, 2 windows, 136 s) and `cube_4win.zarr` (the
-   default `[2023, 2024]`, 4 windows, 259 s). Both are 10/10 valid. Hindcast change
-   detection needs a longer archive than either — budget ~65 s per window and go back as
-   far as Landsat 8 allows. `data/processed/cube.zarr` is deliberately still the
-   known-good Phase 1/2 cube — do not overwrite it the night before a demo.
+4. **Rebuild the canonical cube with more years before Phase 7.** The known-good build is
+   now **`data/processed/cube_phase4.zarr`** — `dc1af462b9c1`, the default
+   `[2023, 2024]`, 4 windows, 484 s, 10/10 valid. That is what Phase 4 trained on and
+   what Phase 5 should load. Hindcast change detection needs a longer archive still —
+   budget ~120 s per window and go back as far as Landsat 8 allows.
+
+   **`data/processed/cube.zarr` is a failed build, not the known-good one.** It has four
+   time slices, but `ndvi`/`ndbi`/`albedo` are **entirely NaN in both 2024 windows** and
+   `lst_c` is NaN in 2024-winter — the catalogue confirms build `04d9909de233` only ever
+   wrote 2023's two windows. Training against it silently drops half the time axis and
+   reports a degenerate leave-one-window-out (one season predicting the other). It is the
+   flaky-network failure mode the ingest retries are meant to survive and did not.
+   **A partially-built cube reads as valid to every consumer** — `select_window` returns
+   a slice of NaN without complaint, and `build_training_frame` reports the dropped
+   windows only as a NOTE. ~~Worth a per-window `validate_cube`~~ ✅ done in Phase 5:
+   `state.cube.validate_windows` fails per variable-window, and the API refuses to serve
+   a cube that trips it.
+
+   Note that `build_tile.py` was never the hole here — it already reports per-window gaps
+   and exits non-zero on them. This cube got onto disk by the build **dying partway**, so
+   that check never ran. The lesson is that a cube's provenance cannot be trusted to a
+   report that only prints on the happy path: validate the artefact when you *load* it,
+   which is what the API now does.
 5. **Winter Landsat is thin: 3–5 clear scenes per window against summer's 12.** Coverage
    is still 100 % because the composite fills, but any winter claim rests on less
    evidence than the summer equivalent. Consider relaxing `max_cloud_cover` for winter

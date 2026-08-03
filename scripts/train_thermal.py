@@ -22,18 +22,24 @@ from pyproj import Transformer
 
 from terrarium.config import DATA_DIR, get_settings
 from terrarium.cores.base import Intervention
-from terrarium.cores.thermal.features import BASE_VARIABLES, build_features, target_from_cube
+from terrarium.cores.thermal.features import (
+    BASE_VARIABLES,
+    METEOROLOGY_VARIABLES,
+    build_training_frame,
+    meteorology_from_cube,
+)
 from terrarium.cores.thermal.model import (
     blocked_cv,
     importances,
-    spatial_folds,
+    leave_one_window_out_cv,
+    pooled_spatial_folds,
     train,
 )
 from terrarium.cores.thermal.simulate import (
     BUILT_UP_CLASS,
-    TREE_COVER_CLASS,
     effective_fraction,
     simulate,
+    tree_built_contrast,
 )
 from terrarium.state.cube import select_window, window_labels
 from terrarium.state.grid import grid_for_tile
@@ -58,15 +64,81 @@ def circular_mask(grid, lon: float, lat: float, radius_m: float) -> np.ndarray:
     return ((xs - cx) ** 2 + (ys - cy) ** 2) <= radius_m**2
 
 
+def _print_folds(report, first_column: str) -> None:
+    print(f"    {first_column:>16} {'n_train':>9} {'n_test':>8} {'MAE':>8} {'naive MAE':>10}")
+    for fold in report.folds:
+        name = fold.label if fold.label is not None else str(fold.fold)
+        print(
+            f"    {name:>16} {fold.n_train:>9,} {fold.n_test:>8,} "
+            f"{fold.mae:>8.3f} {fold.baseline_mae:>10.3f}"
+        )
+    print(f"\n    MAE          {report.mae_mean:.3f} +/- {report.mae_std:.3f} degC")
+    print(f"    naive (mean) {report.baseline_mae_mean:.3f} degC")
+    print(f"    skill        {report.skill:.1%} of the naive error removed\n")
+
+
+def _report_spatial_cv(training, shape: tuple[int, int], rounds: int) -> None:
+    """Spatial generalisation, with every window held out at the same locations."""
+    folds = pooled_spatial_folds(shape, training.cell_index)
+    report = blocked_cv(
+        training.features,
+        training.target,
+        folds,
+        num_boost_round=rounds,
+        # Per-window means, not one pooled mean. A single mean across summer and winter
+        # is a straw man - it scores ~10 degC MAE and flatters the model into the 90s.
+        baseline_groups=training.window_index,
+    )
+
+    print("  spatially blocked CV (2 km blocks, 5 folds, pooled over windows)")
+    _print_folds(report, "fold")
+    print(
+        "    Each block is held out of EVERY window at once. Assigning folds per row\n"
+        "    instead would put the same grid cell in train and test via a different\n"
+        "    window - land cover barely changes between them, so that is a duplicate.\n"
+    )
+    print(
+        "    naive = that window's own mean, NOT one mean pooled over all of them.\n"
+        "    Pooled, the baseline cannot tell summer from winter, scores ~10 degC, and\n"
+        "    inflates skill into the 90s. This number is comparable to Phase 2/3.\n"
+    )
+    print(
+        "    PLACEHOLDER VALIDATION. This answers 'can the model predict LST somewhere\n"
+        "    unseen?' - spatial generalisation. It does NOT answer 'can it predict what\n"
+        "    happens after a change?' Only the hindcast does.\n"
+    )
+
+
+def _report_window_cv(training, rounds: int) -> None:
+    """Temporal generalisation: hold out one whole window at a time."""
+    report = leave_one_window_out_cv(
+        training.features,
+        training.target,
+        training.window_index,
+        training.windows,
+        num_boost_round=rounds,
+    )
+
+    print("  leave-one-window-out CV (can it reach a date it has never seen?)")
+    _print_folds(report, "held-out window")
+    print(
+        "    Expect this to be worse than the spatial split. A held-out window carries\n"
+        "    meteorology values the model never saw, so it can only fall back on the\n"
+        "    nearest window it did see. The GAP between the two numbers is the honest\n"
+        "    measure of how much the model leans on cross-sectional contrast alone.\n"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--zarr", type=Path, default=None)
     parser.add_argument("--out", type=Path, default=MODEL_PATH)
     parser.add_argument(
-        "--window",
+        "--windows",
+        nargs="*",
         default=None,
-        help="which seasonal window to train on (default: the first summer, which is "
-             "what the thermal core is about). Multi-date training is Phase 4.",
+        help="seasonal windows to train on (default: every window in the cube). "
+             "Pass one label to reproduce the Phase 2/3 single-date model.",
     )
     parser.add_argument("--rounds", type=int, default=400)
     parser.add_argument("--skip-cv", action="store_true", help="train only, no validation")
@@ -86,56 +158,54 @@ def main(argv: list[str] | None = None) -> int:
 
     full = open_cube(path)
 
-    # The cube gained a time dimension in Phase 3; the thermal core did not. It still
-    # consumes one composite, so the choice of which window to train on is made here,
-    # by the caller, and the core stays a pure function of a 2-D cube. Retraining across
-    # windows with meteorology as a real feature is Phase 4's job, not this script's.
+    # Phase 4: the model now spans every window at once, with meteorology as a real
+    # feature carrying the between-window difference. The core is still a pure function
+    # of a *single* 2-D cube - stacking happens here in the training frame, and
+    # `simulate` continues to take one window.
     labels = window_labels(full)
-    summers = [label for label in labels if label.endswith("summer")]
-    window = args.window or (summers[0] if summers else labels[0])
-    if window not in labels:
-        print(f"no window {window!r} in this cube; have {', '.join(labels)}")
+    chosen = args.windows if args.windows else labels
+    unknown = [label for label in chosen if label not in labels]
+    if unknown:
+        print(f"no window(s) {unknown} in this cube; have {', '.join(labels)}")
         return 1
-    cube = select_window(full, window)
 
-    frame, valid = build_features(cube)
-    target = target_from_cube(cube)
+    training = build_training_frame(full, chosen)
+    n_rows = len(training.target)
 
-    rows = valid.reshape(-1) & np.isfinite(target)
-    n_rows = int(rows.sum())
     print(f"\n{'=' * 78}")
-    print("  Thermal core - mid-morning land surface temperature emulator")
+    print("  Thermal core v2 - mid-morning land surface temperature emulator")
     print(f"{'=' * 78}")
     print(f"  cube         {path}")
-    print(f"  window       {window}  (of {len(labels)}: {', '.join(labels)})")
-    print(f"  grid         {grid.shape[0]} x {grid.shape[1]} = {valid.size:,} px")
-    print(f"  usable rows  {n_rows:,}  ({n_rows / valid.size:.1%})\n")
+    print(f"  windows      {len(training.windows)}: {', '.join(training.windows)}")
+    cells = grid.shape[0] * grid.shape[1]
+    print(f"  grid         {grid.shape[0]} x {grid.shape[1]} = {cells:,} px")
+    print(f"  usable rows  {n_rows:,}  (pooled across windows)\n")
+
+    dropped = [label for label in chosen if label not in training.windows]
+    if dropped:
+        print(f"  NOTE  {len(dropped)} window(s) contributed no usable rows: "
+              f"{', '.join(dropped)}")
+        print("        usually missing LST (winter cloud) or missing meteorology.\n")
 
     if n_rows < 1000:
         print("  too few usable pixels to train - check the cube build")
         return 1
 
+    print("  meteorology per window (constant across the tile, varies between windows)")
+    print(f"    {'window':<16} " + " ".join(f"{n:>22}" for n in METEOROLOGY_VARIABLES))
+    for label in training.windows:
+        met = meteorology_from_cube(select_window(full, label))
+        print(f"    {label:<16} " + " ".join(f"{met[n]:>22.2f}" for n in METEOROLOGY_VARIABLES))
+    print()
+
     if not args.skip_cv:
-        folds = spatial_folds(valid.shape).reshape(-1)[rows]
-        report = blocked_cv(frame[rows], target[rows], folds, num_boost_round=args.rounds)
+        _report_spatial_cv(training, grid.shape, args.rounds)
+        if len(training.windows) > 1:
+            _report_window_cv(training, args.rounds)
+        else:
+            print("  leave-one-window-out CV skipped: only one window in the training set.\n")
 
-        print("  spatially blocked CV (2 km blocks, 5 folds)")
-        print(f"    {'fold':>4} {'n_train':>9} {'n_test':>8} {'MAE':>8} {'naive MAE':>10}")
-        for fold in report.folds:
-            print(
-                f"    {fold.fold:>4} {fold.n_train:>9,} {fold.n_test:>8,} "
-                f"{fold.mae:>8.3f} {fold.baseline_mae:>10.3f}"
-            )
-        print(f"\n    MAE          {report.mae_mean:.3f} +/- {report.mae_std:.3f} degC")
-        print(f"    naive (mean) {report.baseline_mae_mean:.3f} degC")
-        print(f"    skill        {report.skill:.1%} of the naive error removed")
-        print(
-            "\n    PLACEHOLDER VALIDATION. This answers 'can the model predict LST\n"
-            "    somewhere unseen?' - spatial generalisation. It does NOT answer 'can it\n"
-            "    predict what happens after a change?' Only the hindcast does.\n"
-        )
-
-    model = train(frame[rows], target[rows], num_boost_round=args.rounds)
+    model = train(training.features, training.target, num_boost_round=args.rounds)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     model.save_model(str(args.out))
     print(f"  wrote model  {args.out}\n")
@@ -149,59 +219,89 @@ def main(argv: list[str] | None = None) -> int:
         "    flipping the class as well would count the same cooling twice.\n"
     )
 
-    # ------------------------------------------------------- worked intervention ---
-    mask = circular_mask(grid, args.lon, args.lat, args.radius_m)
-    built_up = np.asarray(cube["landcover"].values) == BUILT_UP_CLASS
-    mask &= built_up
+    # ------------------------------------------------- worked intervention ---
+    #
+    # Run in EVERY window, not just one. Phase 3 measured a tree-vs-built contrast of
+    # 2.6-2.8 degC in summer but only 0.3-0.8 degC in winter, so a single pooled dLST
+    # number would average a real effect with a near-absent one and describe neither.
+    # Reporting per season is the plan's explicit requirement, and it is also the
+    # honest framing for the pitch: this intervention buys summer cooling.
+    mask_base = circular_mask(grid, args.lon, args.lat, args.radius_m)
 
     print(f"  worked intervention: +{args.canopy:.0%} canopy, built-up cells within "
           f"{args.radius_m:.0f} m of {args.lat:.4f} N {args.lon:.4f} E")
-    if not mask.any():
-        print("    no built-up cells in that disc - widen --radius-m")
-        return 1
+    print("  evaluated in every window the model was trained on\n")
 
-    intervention = Intervention(mask=mask, canopy_fraction_added=args.canopy)
-    result = simulate(cube, intervention, model)
-    stats = result.stats
-    print(f"    cells planted     {stats.n_cells_changed:,}")
-    print(f"    mean dLST inside  {stats.mean_delta_inside:+.3f} degC")
-    print(f"    mean dLST spillover {stats.mean_delta_spillover:+.3f} degC  "
-          f"({stats.spillover_cells:,} cells in the 200 m ring outside)")
-    print(f"    strongest cooling {stats.min_delta:+.3f} degC")
-    print(f"    largest warming   {stats.max_delta:+.3f} degC\n")
-
-    # The expected magnitude is a property of *this tile*, not of the literature. A
-    # hardcoded "-1 to -4 degC" band silently becomes wrong the moment the composite,
-    # the season, or the city changes; the observed contrast between the tile's own tree
-    # and built-up pixels does not.
-    arrays = {name: np.asarray(cube[name].values) for name in BASE_VARIABLES}
-    lst = np.asarray(cube["lst_c"].values)
-    contrast = float(
-        np.nanmedian(lst[built_up]) - np.nanmedian(lst[arrays["landcover"] == TREE_COVER_CLASS])
-    )
-    fraction = effective_fraction(arrays, intervention)
-    mean_fraction = float(fraction[mask].mean()) if mask.any() else 0.0
-    expected = -mean_fraction * contrast
-
-    print(f"    observed tree-vs-built LST contrast  {contrast:+.2f} degC (full conversion)")
-    print(f"    mean canopy actually added           {mean_fraction:.1%} after capping")
-    print(f"    linear expectation                   {expected:+.3f} degC\n")
+    print(f"    {'window':<16} {'cells':>7} {'dLST in':>9} {'spillover':>10} "
+          f"{'contrast':>9} {'linear':>8} {'ratio':>7}")
+    print(f"    {'-' * 16} {'-' * 7} {'-' * 9} {'-' * 10} {'-' * 9} {'-' * 8} {'-' * 7}")
 
     ok = True
-    if stats.mean_delta_inside >= 0:
-        print("    FAIL  planting did not cool. This is a sign error, not a finding.")
-        ok = False
-    elif stats.mean_delta_inside < -contrast:
-        print("    FAIL  cooling exceeds a full conversion to tree cover. The model is\n"
-              "          extrapolating - the built-up core has few high-canopy analogues.")
-        ok = False
-    elif not 0.3 <= stats.mean_delta_inside / expected <= 2.0:
-        print(f"    WARN  {stats.mean_delta_inside / expected:.2f}x the linear expectation.\n"
-              "          Plausible - the response is not linear - but worth understanding.")
-    else:
-        print("    OK    cooling, and in proportion to the contrast the tile actually shows.")
-    if stats.mean_delta_spillover >= 0:
-        print("    WARN  no spillover cooling - check the neighbourhood features.")
+    warnings: list[str] = []
+    seen_summer = False
+
+    for label in training.windows:
+        window = select_window(full, label)
+        arrays = {name: np.asarray(window[name].values) for name in BASE_VARIABLES}
+        built_up = arrays["landcover"] == BUILT_UP_CLASS
+        mask = mask_base & built_up
+        if not mask.any():
+            print(f"    {label:<16} {'no built-up cells in that disc':>52}")
+            continue
+
+        intervention = Intervention(mask=mask, canopy_fraction_added=args.canopy)
+        stats = simulate(window, intervention, model).stats
+
+        # The expected magnitude is a property of *this tile in this window*, not of the
+        # literature. A hardcoded band silently becomes wrong the moment the season
+        # changes - which is precisely what happens here. Shared with the API, which
+        # ships this same ceiling beside every delta it returns.
+        contrast = tree_built_contrast(window)
+        fraction = effective_fraction(arrays, intervention)
+        mean_fraction = float(fraction[mask].mean())
+        expected = -mean_fraction * contrast
+        ratio = stats.mean_delta_inside / expected if expected else float("nan")
+
+        print(f"    {label:<16} {stats.n_cells_changed:>7,} "
+              f"{stats.mean_delta_inside:>+9.3f} {stats.mean_delta_spillover:>+10.3f} "
+              f"{contrast:>+9.2f} {expected:>+8.3f} {ratio:>7.2f}")
+
+        is_summer = label.endswith("summer")
+        seen_summer = seen_summer or is_summer
+
+        if stats.mean_delta_inside > 0:
+            warnings.append(f"FAIL {label}: planting warmed the tile. Sign error, not a finding.")
+            ok = False
+        elif stats.mean_delta_inside < -contrast:
+            warnings.append(
+                f"FAIL {label}: cooling exceeds a full conversion to tree cover - "
+                "the model is extrapolating."
+            )
+            ok = False
+        elif is_summer and not 0.3 <= ratio <= 2.0:
+            # Only enforced in summer. In winter the contrast is ~0.3 degC, so the ratio
+            # is a small number divided by a smaller one and swings wildly on noise
+            # that means nothing physically.
+            warnings.append(
+                f"WARN {label}: {ratio:.2f}x the linear expectation. Plausible - the "
+                "response is not linear - but worth understanding."
+            )
+        if is_summer and stats.mean_delta_spillover >= 0:
+            warnings.append(f"WARN {label}: no spillover cooling - check neighbourhood features.")
+
+    print()
+    print("    contrast = this window's own tree-vs-built LST gap (a full conversion).")
+    print("    linear   = contrast x the canopy actually added, after capping.")
+    print("    ratio    = modelled / linear. Enforced in summer only: winter's contrast")
+    print("               is near zero, so the ratio there divides noise by noise.\n")
+
+    for line in warnings:
+        print(f"    {line}")
+    if not warnings:
+        print("    OK    every window cools, in proportion to its own observed contrast.")
+    if not seen_summer:
+        print("    NOTE  no summer window was evaluated; winter alone understates this")
+        print("          intervention for seasonal reasons, not modelling ones.")
     print()
 
     return 0 if ok else 1

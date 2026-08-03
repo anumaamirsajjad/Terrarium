@@ -12,7 +12,12 @@ import pytest
 import xarray as xr
 
 from terrarium.cores.base import CoreResult, Intervention
-from terrarium.cores.thermal.features import build_features, target_from_cube
+from terrarium.cores.thermal.features import (
+    FEATURE_NAMES,
+    METEOROLOGY_VARIABLES,
+    build_features,
+    target_from_cube,
+)
 from terrarium.cores.thermal.model import blocked_cv, importances, spatial_folds, train
 from terrarium.cores.thermal.simulate import simulate, tree_reference
 
@@ -54,6 +59,12 @@ def synthetic_cube() -> xr.Dataset:
             "elevation_m": (("y", "x"), elevation.astype("float32")),
             "landcover": (("y", "x"), landcover),
             "lst_c": (("y", "x"), lst.astype("float32")),
+            # Phase 4: meteorology is a real feature. Scalar per window - here a single
+            # window, so 0-d. Constant across the tile by construction, which is why it
+            # can never explain any *spatial* pattern in this test.
+            "air_temp_c": ((), np.float32(34.0)),
+            "wind_speed_ms": ((), np.float32(2.5)),
+            "relative_humidity_pct": ((), np.float32(38.0)),
         },
         coords={"y": np.arange(height, dtype="float64"), "x": np.arange(width, dtype="float64")},
     )
@@ -167,15 +178,13 @@ def test_importances_sum_to_one(fitted: tuple[xr.Dataset, lgb.Booster]) -> None:
     gains = importances(model)
 
     assert sum(gains.values()) == pytest.approx(1.0)
-    assert set(gains) <= {
-        "ndvi",
-        "ndbi",
-        "albedo",
-        "elevation_m",
-        "landcover",
-        "ndvi_mean_500m",
-        "ndbi_mean_500m",
-    }
+    assert set(gains) <= set(FEATURE_NAMES)
+
+    # Meteorology is constant across this single-window tile, so it cannot explain any
+    # spatial variation and must carry no gain. If it ever does, the booster is splitting
+    # on a column with one distinct value - a bug, not a finding.
+    for name in METEOROLOGY_VARIABLES:
+        assert gains.get(name, 0.0) == pytest.approx(0.0), name
 
 
 def test_mask_shape_is_validated(fitted: tuple[xr.Dataset, lgb.Booster]) -> None:

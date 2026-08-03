@@ -6,6 +6,7 @@ the artefact belongs to `scripts/train_thermal.py`, outside the core.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import lightgbm as lgb
@@ -46,8 +47,12 @@ class FoldScore(BaseModel):
     n_test: int
     mae: float
     # Predicting the training fold's mean everywhere. An MAE only means something next
-    # to the number it has to beat.
+    # to the number it has to beat. With `baseline_groups`, the mean is taken *within
+    # the row's window* - see `blocked_cv`.
     baseline_mae: float
+    # What was held out, when the folds mean something nameable (a window label). None
+    # for spatial blocks, which have no name worth printing.
+    label: str | None = None
 
 
 class CVReport(BaseModel):
@@ -126,6 +131,38 @@ def spatial_folds(
     return np.asarray(lookup[blocks], dtype="int16")
 
 
+def _naive_prediction(
+    target: np.ndarray,
+    train_rows: np.ndarray,
+    test: np.ndarray,
+    groups: np.ndarray | None,
+) -> np.ndarray:
+    """The baseline every fold has to beat: predict a mean and nothing else.
+
+    Without `groups` that is the pooled training mean. Across multiple windows that is
+    a straw man - it is one number for a set spanning 44 degC summers and 22 degC
+    winters, so its MAE is ~10 degC and any model looks brilliant next to it. Beating it
+    demonstrates only that the model can tell the seasons apart.
+
+    With `groups` (pass `window_index`) the baseline instead predicts *that window's own
+    training mean*, which is a real forecaster: "it is summer, so expect the summer
+    average". Skill against it is the fraction of the **within-window** spatial variation
+    explained, and is directly comparable to the single-window numbers of Phases 2 and 3.
+
+    A group with no training rows - which is every test row under
+    leave-one-window-out - falls back to the pooled mean, because a window the model
+    never saw is a window whose mean is genuinely unknown.
+    """
+    pooled = float(target[train_rows].mean())
+    if groups is None:
+        return np.full(int(test.sum()), pooled, dtype="float64")
+
+    means: dict[int, float] = {}
+    for group in np.unique(groups[train_rows]):
+        means[int(group)] = float(target[train_rows & (groups == group)].mean())
+    return np.array([means.get(int(g), pooled) for g in groups[test]], dtype="float64")
+
+
 def blocked_cv(
     features: pd.DataFrame,
     target: np.ndarray,
@@ -134,8 +171,18 @@ def blocked_cv(
     params: dict[str, Any] | None = None,
     num_boost_round: int = DEFAULT_ROUNDS,
     n_folds: int = N_FOLDS,
+    labels: Sequence[str] | None = None,
+    baseline_groups: np.ndarray | None = None,
 ) -> CVReport:
-    """Run spatially blocked CV. `features`, `target` and `folds` are row-aligned."""
+    """Run cross-validation over a precomputed fold assignment.
+
+    `features`, `target` and `folds` are row-aligned. The fold *meaning* is the caller's
+    to choose: `pooled_spatial_folds` for spatial generalisation, `window_index` straight
+    from the training frame for leave-one-window-out.
+
+    `baseline_groups` sharpens the naive comparison on a multi-window frame - pass
+    `window_index`. See `_naive_prediction` for why the default is too easy to beat.
+    """
     scores: list[FoldScore] = []
 
     for fold in range(n_folds):
@@ -151,7 +198,7 @@ def blocked_cv(
             num_boost_round=num_boost_round,
         )
         predicted = predict(booster, features[test])
-        naive = float(target[train_rows].mean())
+        naive = _naive_prediction(target, train_rows, test, baseline_groups)
 
         scores.append(
             FoldScore(
@@ -160,12 +207,69 @@ def blocked_cv(
                 n_test=int(test.sum()),
                 mae=float(np.abs(predicted - target[test]).mean()),
                 baseline_mae=float(np.abs(naive - target[test]).mean()),
+                label=labels[fold] if labels is not None and fold < len(labels) else None,
             )
         )
 
     if not scores:
         raise ValueError("no fold had both training and test rows")
     return CVReport(folds=scores)
+
+
+def pooled_spatial_folds(
+    shape: tuple[int, int],
+    cell_index: np.ndarray,
+    *,
+    block_cells: int = BLOCK_CELLS,
+    n_folds: int = N_FOLDS,
+    seed: int = 0,
+) -> np.ndarray:
+    """Spatial folds for a *multi-window* frame, holding each block out of every window.
+
+    This is the whole reason `TrainingFrame` carries `cell_index`. Assigning folds per
+    row would put grid cell (100, 100) from 2024-summer in training and the same cell
+    from 2023-summer in test. Land cover, elevation and the neighbourhood terms are
+    nearly identical between windows, so that is a near-duplicate row across the split -
+    the model looks up the answer instead of generalising, and the reported MAE flatters
+    it. Keying the fold off the cell rather than the row closes that.
+    """
+    per_cell = spatial_folds(shape, block_cells=block_cells, n_folds=n_folds, seed=seed)
+    return np.asarray(per_cell.reshape(-1)[cell_index], dtype="int16")
+
+
+def leave_one_window_out_cv(
+    features: pd.DataFrame,
+    target: np.ndarray,
+    window_index: np.ndarray,
+    windows: Sequence[str],
+    *,
+    params: dict[str, Any] | None = None,
+    num_boost_round: int = DEFAULT_ROUNDS,
+) -> CVReport:
+    """Hold out one whole window at a time — can the model reach an unseen date?
+
+    This is the harder question and the one multi-date training exists to answer. It is
+    also where the meteorology columns stop helping: held-out windows carry values the
+    model never saw, so a tree can only fall back on the nearest window it did see.
+    Expect a worse MAE here than the spatial split, and treat *that gap* as the honest
+    measure of how much the model is leaning on cross-sectional contrast alone.
+
+    Still not the hindcast (Phase 7): every window here is a different *time*, not a
+    different *land surface*. Nothing has actually changed on the ground between them.
+
+    The baseline here is necessarily the pooled training mean: the held-out window
+    contributes no training rows, so its own mean is exactly the thing that is unknown.
+    That is why `baseline_groups` is not passed - it would be a no-op.
+    """
+    return blocked_cv(
+        features,
+        target,
+        window_index,
+        params=params,
+        num_boost_round=num_boost_round,
+        n_folds=len(windows),
+        labels=list(windows),
+    )
 
 
 def importances(model: lgb.Booster) -> dict[str, float]:

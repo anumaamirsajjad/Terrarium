@@ -852,6 +852,13 @@ def test_a_lazy_read_failure_is_caught_and_isolated(
     import dask
     import dask.array as da
 
+    # Pin the synchronous scheduler for this test. Under the default threaded scheduler
+    # the delayed exception surfaces from a worker thread, and which of the several
+    # per-band tasks raises first is a race - the test passed alone and failed
+    # intermittently in the full suite. What is under test is that build_cube catches a
+    # compute-time failure at all, not how dask happens to schedule it.
+    monkeypatch.setitem(dask.config.config, "scheduler", "synchronous")
+
     real_loader = FakeLoader(grid)
 
     def exploding_on_compute() -> np.ndarray:
@@ -952,6 +959,10 @@ def test_gdal_configuration_is_applied() -> None:
     # The setting that turns hundreds of container listings into zero.
     assert os.environ["GDAL_DISABLE_READDIR_ON_OPEN"] == "EMPTY_DIR"
     assert int(os.environ["GDAL_HTTP_MAX_RETRY"]) >= 1
+    # A stalled read must be bounded. Without a timeout the per-source retry never gets
+    # to run - one real build hung 16.4 hours inside a single attempt.
+    assert 0 < int(os.environ["GDAL_HTTP_TIMEOUT"]) <= 600
+    assert 0 < int(os.environ["GDAL_HTTP_CONNECTTIMEOUT"]) <= 60
 
 
 def test_a_transient_failure_is_retried_and_succeeds() -> None:
