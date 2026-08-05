@@ -132,5 +132,6 @@ def test_meteorology_cannot_be_requested_as_a_map(client: TestClient) -> None:
     """It is one value per window. A raster of it would imply a field nobody measured."""
     response = client.get("/cube/layer/air_temp_c")
 
-    assert response.status_code == 400
+    # 422, the same code /simulate uses for a well-formed request it cannot carry out.
+    assert response.status_code == 422
     assert "not a map" in response.json()["detail"]

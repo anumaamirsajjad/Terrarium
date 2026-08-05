@@ -62,14 +62,14 @@ def _print_variables(ds, summary, label: str) -> None:
             # the mean of {tree cover, built-up} is not a land cover. See the composition
             # breakdown below instead.
             print(
-                f"  {spec.name:<22} {var.units:<8} {var.dtype:<8} {var.valid_fraction:>6.1%} "
+                f"  {spec.name:<22} {var.units:<8} {var.dtype:<8} {var.valid_text:>7}"
                 f"{'(categorical - see composition below)':>43}"
             )
             continue
         values = np.asarray(ds[spec.name].values)
         median = float(np.median(values[np.isfinite(values)].astype("float64")))
         print(
-            f"  {spec.name:<22} {var.units:<8} {var.dtype:<8} {var.valid_fraction:>6.1%} "
+            f"  {spec.name:<22} {var.units:<8} {var.dtype:<8} {var.valid_text:>7}"
             f"{var.vmin:>10.3f} {median:>10.3f} {var.vmean:>10.3f} {var.vmax:>10.3f}"
         )
     print()
@@ -158,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
         for label in labels:
             sliced = select_window(ds, label)
             by_name = {v.name: v for v in summarise(sliced, grid).variables}
-            cells = " ".join(f"{by_name[n].valid_fraction:>10.1%}" for n in temporal)
+            cells = " ".join(f"{by_name[n].valid_text:>10}" for n in temporal)
             print(f"    {label:<16} " + cells)
         print()
 

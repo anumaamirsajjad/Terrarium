@@ -18,6 +18,12 @@ import pandas as pd
 import xarray as xr
 from scipy.ndimage import uniform_filter
 
+# Layer 1, imported by Layer 2: downward, so allowed. `select_window` and `window_labels`
+# are pure array/coordinate operations - no I/O - which is what keeps this side of the
+# purity rule. Only `build_training_frame` needs them, because stacking windows is a
+# training concern; `simulate` still receives one 2-D window chosen by its caller.
+from terrarium.state.cube import select_window, window_labels
+
 # The cube variables the model reads. `lst_c` is the target, not a feature.
 BASE_VARIABLES: tuple[str, ...] = ("ndvi", "ndbi", "albedo", "elevation_m", "landcover")
 
@@ -174,8 +180,6 @@ def build_training_frame(cube: xr.Dataset, labels: Sequence[str] | None = None) 
     target. Windows whose meteorology is entirely missing contribute nothing and are
     reported rather than silently dropped.
     """
-    from terrarium.state.cube import select_window, window_labels
-
     chosen = list(labels) if labels is not None else window_labels(cube)
 
     frames: list[pd.DataFrame] = []

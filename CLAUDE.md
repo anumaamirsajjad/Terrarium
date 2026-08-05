@@ -229,7 +229,8 @@ terrarium/
 │   ├── build_tile.py       #   full ingest -> State Cube, with a build report
 │   ├── inspect_cube.py     #   read back and summarise a built cube
 │   ├── preview_cube.py     #   render PNGs for visual alignment checks
-│   └── train_thermal.py    #   train + blocked CV + one worked intervention
+│   ├── train_thermal.py    #   train + blocked CV + one worked intervention
+│   └── hindcast.py         #   change detection -> train before -> score after
 └── docs/
     └── IMPLEMENTATION_PLAN.md   # phases, decisions register, measured results
 ```
@@ -331,6 +332,9 @@ uv run python scripts/inspect_cube.py     # what is in the cube, incl. the tree-
 uv run python scripts/preview_cube.py     # PNG renders; one --window per run
 uv run python scripts/train_thermal.py    # train + blocked CV + worked intervention,
                                           #   on one --window (default: earliest summer)
+uv run python scripts/hindcast.py         # find a change, train before it, score after.
+                                          #   Needs >= 4 summer windows, so point --zarr
+                                          #   at a multi-year build, not the 4-window one
 
 cd web && npm install && npm run dev      # frontend on :5173 (the API's CORS allowlist
                                           #   is 5173 only — do not accept Vite's

@@ -115,6 +115,36 @@ def _collapse_time(data: xr.DataArray) -> xr.DataArray:
     return data
 
 
+def _composite_with_depth(data: xr.DataArray) -> tuple[xr.DataArray, tuple[int, float] | None]:
+    """Median composite, plus how many clear looks each pixel actually contributed.
+
+    Scene count is a poor proxy for whether a composite is thin. Cloud is patchy, so a
+    window with five scenes can still leave a pixel with one usable look, while a sixth
+    partly-cloudy scene genuinely deepens the pixels it happens to be clear over. Depth
+    is the number that settles it, and it is otherwise invisible: a composite reports
+    100 % valid whether every pixel had ten looks or one.
+
+    A minimum of 0 means some pixel had no clear observation at all, so its composite is
+    a hole rather than a measurement — worth a warning, because at 40,602 pixels a
+    handful of holes rounds to "100 % valid" in any report that shows one decimal.
+
+    Returns `(composite, (min_depth, median_depth))`, or `(data, None)` when there is no
+    time axis to reduce. Both reductions come from one `compute()` so the bands are read
+    once rather than twice.
+    """
+    if "time" not in data.dims:
+        return data, None
+
+    reduced = xr.Dataset(
+        {
+            "composite": data.median(dim="time", skipna=True),
+            "depth": data.notnull().sum(dim="time"),
+        }
+    ).compute()
+    depth = np.asarray(reduced["depth"].values)
+    return reduced["composite"], (int(depth.min()), float(np.median(depth)))
+
+
 def _search(
     catalog: pystac_client.Client,
     settings: Settings,
@@ -281,7 +311,33 @@ def _ingest_landsat(
     # the composite is assembled; see build_cube.
     lst_c = (st_dn * ST_SCALE + ST_OFFSET - KELVIN_TO_C).where(clear)
 
-    return {"lst_c": _collapse_time(lst_c).astype("float32")}, record
+    # LST is the target variable and the one the tree-vs-built contrast is read off, so
+    # it is the composite whose depth is worth paying an extra reduction for. Landsat is
+    # also the cheap source here — two bands over a handful of scenes.
+    composite, depth = _composite_with_depth(lst_c)
+    if depth is not None:
+        depth_min, depth_p50 = depth
+        record = record.model_copy(
+            update={"obs_depth_min": depth_min, "obs_depth_p50": depth_p50}
+        )
+        logger.info(
+            "%s %s: clear looks per pixel min=%d median=%.0f over %d scenes",
+            window.label,
+            COLLECTION_LANDSAT,
+            depth_min,
+            depth_p50,
+            len(result.items),
+        )
+        if depth_min == 0:
+            logger.warning(
+                "%s %s: some pixels have no clear observation at all - their composite "
+                "is a gap, not a measurement, and will read as ~100%% valid in a report "
+                "rounded to one decimal",
+                window.label,
+                COLLECTION_LANDSAT,
+            )
+
+    return {"lst_c": composite.astype("float32")}, record
 
 
 def _ingest_dem(
@@ -452,7 +508,16 @@ def _download_once(url: str, path: Path, timeout_s: float) -> Path:
     # raster could quietly be the half containing Lahore. Verify, then let the retry
     # wrapper have another go.
     written = partial.stat().st_size
-    if declared is not None and written != int(declared):
+    if declared is None:
+        # Chunked transfer encoding, or a server that simply omits the header. There is
+        # then nothing to compare against and this guard silently does nothing, so say so
+        # rather than letting a passing build imply a check that did not run. The read
+        # in _ingest_population is the remaining net: a truncated GeoTIFF fails there,
+        # inside the same retry wrapper.
+        logger.warning(
+            "%s served no Content-Length; cannot verify the download completed", url
+        )
+    elif written != int(declared):
         partial.unlink(missing_ok=True)
         raise OSError(f"truncated download: got {written} of {declared} bytes from {url}")
 

@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from terrarium import __version__
-from terrarium.api.deps import RUNTIME_ATTR
+from terrarium.api.deps import RUNTIME_ATTR, STARTUP_ERROR_ATTR
 from terrarium.api.routes import cube, health, simulate
 from terrarium.api.runtime import Runtime, StartupError, load_runtime
 from terrarium.config import Settings, get_settings
@@ -67,13 +67,18 @@ def create_app(
             # Deliberately not fatal. /health is what the frontend boots against and what
             # a container's readiness probe hits, so an app that cannot find its cube must
             # still start and say so - dying here turns a missing artefact into an opaque
-            # crash loop. The cube and simulate routes are simply not mounted.
-            logger.error("cube/model unavailable, serving /health only: %s", exc)
+            # crash loop.
+            logger.error("cube/model unavailable; /health is up, data routes 503: %s", exc)
+            setattr(app.state, STARTUP_ERROR_ATTR, str(exc))
+
+    # Mounted either way. The routes exist in this build whether or not the artefacts
+    # loaded, so `get_runtime` answers 503 with the reason rather than the router's
+    # absence answering 404 - which would claim the endpoint itself does not exist.
+    app.include_router(cube.router)
+    app.include_router(simulate.router)
 
     if loaded is not None:
         setattr(app.state, RUNTIME_ATTR, loaded)
-        app.include_router(cube.router)
-        app.include_router(simulate.router)
         logger.info(
             "loaded cube %s (%d windows) and model %s",
             loaded.cube_path,

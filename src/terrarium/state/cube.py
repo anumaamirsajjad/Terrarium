@@ -265,6 +265,21 @@ class VariableSummary(BaseModel):
     vmax: float | None = None
     vmean: float | None = None
 
+    @property
+    def valid_text(self) -> str:
+        """Coverage as text that cannot round a gap away.
+
+        9 empty pixels out of 40,602 is 99.978 % valid, which `.1%` renders as a clean
+        `100.0%` — which is exactly how a real gap in a winter LST composite went
+        unnoticed in a build report. Full coverage prints without a decimal so the two
+        can never be mistaken for each other, and anything short of it escalates
+        precision rather than wearing a full-coverage label.
+        """
+        if self.valid_fraction >= 1.0:
+            return "100%"
+        text = f"{self.valid_fraction:.1%}"
+        return f"{self.valid_fraction:.3%}" if text == "100.0%" else text
+
 
 class CubeSummary(BaseModel):
     """Everything you need to decide whether a build is trustworthy."""

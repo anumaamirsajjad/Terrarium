@@ -18,6 +18,7 @@ import lightgbm as lgb
 import xarray as xr
 
 from terrarium.config import Season, Settings
+from terrarium.cores.thermal.features import FEATURE_NAMES
 from terrarium.state.cube import (
     VARIABLES_BY_NAME,
     CubeSummary,
@@ -109,6 +110,7 @@ def load_runtime(settings: Settings) -> Runtime:
 
     grid = grid_for_tile(settings.tile)
     model = lgb.Booster(model_file=str(model_path))
+    _check_model_features(model, model_path)
 
     return Runtime(
         cube=cube,
@@ -117,6 +119,40 @@ def load_runtime(settings: Settings) -> Runtime:
         summary=summarise(cube, grid),
         cube_path=cube_path,
         model_path=model_path,
+    )
+
+
+def _check_model_features(model: lgb.Booster, model_path: Path) -> None:
+    """Refuse a booster whose features are not the ones `cores/thermal` builds today.
+
+    The same rule the cube already gets, applied to the other artefact: **validate it
+    when you load it, not when you built it.** A model file carries no version, so a
+    booster trained before meteorology became a feature loads perfectly, answers
+    `/health` and `/cube/*` perfectly, and fails only on `/simulate` — the one endpoint
+    the whole product exists for — with a LightGBM shape error 500 that says nothing
+    about which artefact is stale. That is exactly what was on disk when this check was
+    written.
+
+    Order matters as much as membership: LightGBM matches the frame positionally, so a
+    model trained on the same names in a different order predicts confidently and
+    wrongly, with no error anywhere. Compare the sequence, not a set.
+    """
+    trained_on = list(model.feature_name())
+    if trained_on == list(FEATURE_NAMES):
+        return
+
+    missing = [name for name in FEATURE_NAMES if name not in trained_on]
+    extra = [name for name in trained_on if name not in FEATURE_NAMES]
+    detail = f"missing {missing}" if missing else ""
+    if extra:
+        detail = f"{detail}, unexpected {extra}" if detail else f"unexpected {extra}"
+    if not detail:
+        detail = f"same features in a different order: trained on {trained_on}"
+
+    raise StartupError(
+        f"thermal model at {model_path} was trained on a different feature set "
+        f"({detail}). Retrain it with scripts/train_thermal.py against the cube you "
+        "intend to serve."
     )
 
 

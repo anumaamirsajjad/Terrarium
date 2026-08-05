@@ -12,7 +12,7 @@ with the team.
 | 4 | Thermal core v2 — multi-date retrain + meteorology | ✅ **DONE** |
 | 5 | API — expose cube and simulation | ✅ **DONE** |
 | 6 | Frontend — map, draw, compare | ✅ **DONE** |
-| 7 | Hindcast validation | ▶ **NEXT** |
+| 7 | Hindcast validation | ✅ **DONE** — model over-states cooling ~2.5x |
 | 8 | Equity | ⬜ |
 | 9 | Air dispersion core | ⬜ |
 | 10 | DSL + agent layer | ⬜ |
@@ -377,9 +377,12 @@ as a feature; the cube stores what was measured.
 **`cores/` was not touched.** `select_window(cube, label)` returns the 2-D cube the
 thermal core already consumes, and the caller picks the slice. Purity intact.
 
-### Verified, not assumed — build `3723544fdc64`, 259 s, 10/10 variables at 100 % valid
+### Verified, not assumed — build `3723544fdc64`, 259 s, 10/10 variables populated
 
-The default `window_years = [2023, 2024]`, four windows, ~65 s per window:
+The default `window_years = [2023, 2024]`, four windows, ~65 s per window. Coverage is
+100 % everywhere **except 2023-winter `lst_c`, which is 99.978 %** — 9 pixels no clear
+Landsat scene ever saw. This was first reported as a flat "100 % valid" because the
+report rounded to one decimal; see next action 6.
 
 | window | air temp | wind | RH | Landsat scenes |
 |---|---|---|---|---|
@@ -839,7 +842,7 @@ mid-build leaving a valid-looking Zarr, and now a basemap whose every request re
   "click a few points and close the ring".
 - **The window is a visible control, and the result echoes it.** Not a hidden default.
 
-## Phase 7 — Hindcast validation ⬜
+## Phase 7 — Hindcast validation ✅ DONE
 
 **The credibility weapon.** Needs Phase 3.
 
@@ -848,6 +851,146 @@ cells with large sustained NDVI or land-cover transitions between years, rank ca
 pick one big enough to resolve at 100 m. Then train strictly on data *before* the change,
 predict the post-change field, and compare to observed Landsat ST_B10. Report MAE and
 spatial R² — including if they are bad.
+
+### Delivered
+
+`cores/thermal/hindcast.py` (pure) + `scripts/hindcast.py` (I/O) + 11 offline tests.
+
+**Land cover cannot be the change signal.** WorldCover ships two epochs (2020, 2021) and
+the cube carries it as `(y, x)` — static. NDVI is the only variable that both varies per
+window and responds to planting, so change detection runs on it alone. That is a cube
+limitation, not a modelling choice, and it means a car park paved over grass is detected
+while a change of building material is not.
+
+**The archive had to be widened first.** Sentinel-2 L2A over this tile starts in **2016** —
+2015 returns zero scenes — so `cube_hindcast.zarr` covers 2016–2024, nine summers.
+
+### Why MAE alone cannot answer this, and what replaces it
+
+Phase 4 measured **2.9 °C** of error just for reaching an unseen *date*. A hindcast window
+is exactly that, so its MAE inherits a whole-window offset that has nothing to do with the
+change and would swamp the tenths of a degree a real greening buys.
+
+The estimator that survives it is a **difference-in-differences**:
+
+```
+change_effect_error = bias(changed cells) - bias(unchanged cells)
+```
+
+Both groups sit in the same window and share the same offset, so it cancels. Near zero
+means the model tracked the change as well as it tracks anything that year — *whatever*
+the year-level error happened to be. MAE and spatial R² are reported alongside because
+the plan asks for them, not because they settle the question.
+
+**Three design decisions worth not re-litigating:**
+
+- **The threshold is derived from the tile, not from a paper.** Between any two periods
+  the whole tile greens or browns with rainfall and phenology; only the excess over that
+  common drift is a site. A fixed 0.1 cutoff reports the entire tile in a wet year and
+  nothing in a dry one — there is a test that pins exactly this.
+- **Sustained, not annual.** Change is a median over several windows on each side. One
+  dry summer moves NDVI everywhere.
+- **Sites, not cells.** A robust 3σ cutoff flags ~0.3 % of an unchanged tile *by
+  construction*. Those specks are noise; the hindcast scores against contiguous patches
+  of ≥ 9 cells, which is also the smallest thing resolvable as a site at 100 m.
+
+### Known limitation, stated before the numbers
+
+The control group is every unchanged cell, **not a matched one**. If the places that
+changed differ systematically from those that did not, part of the bias difference is that
+covariate gap rather than mistracking. So a non-zero change-effect error is an **upper
+bound** on the model's error at the change, not a point estimate. Matching on land cover
+and baseline NDVI would tighten it.
+
+Separately, the tests surfaced the extrapolation risk concretely: a patch greener than
+anything in training gets the cooling of the greenest cell the model ever saw and no more,
+because a tree predicts a constant beyond its last split. `test_greening_beyond_the_
+training_range_under_predicts_and_is_visible` pins it, and it is the most likely way a
+real hindcast under-states a large intervention.
+
+### Measured — build `4a812f30ad48`, 9 summers 2016–2024, 1,098 s
+
+Change detection over 2016–2019 vs 2020–2024, threshold **0.091 NDVI** derived from the
+tile (median tile-wide drift +0.025): **2,295 cells over threshold, 1,154 inside a site,
+57 sites**. The eight largest are all *greening*, +0.16 to +0.26 ΔNDVI, 29–119 cells.
+
+**Do not read a single run.** The per-run verdict swings between WEAK, OK and INCONCLUSIVE
+purely on which year you score in, so the phase was re-run across a grid of **12
+configurations** — three scored years × four site-size cutoffs (≥9, ≥30, ≥60, ≥100 cells,
+i.e. 29 sites down to the single largest one). That grid is the result, not any row of it.
+
+Controls are **matched** on land-cover class × baseline-NDVI decile. That is not a detail:
+it changes the answer, and an earlier draft of this section got it wrong without it.
+
+| | observed effect | change-effect error |
+|---|---|---|
+| raw controls, mean over 12 | +0.020 °C | −1.115 °C |
+| raw, standard deviation | 1.126 | 0.880 |
+| **matched controls, mean** | **−0.468 °C** | **−0.714 °C** |
+| **matched, standard deviation** | **0.533** | **0.472** |
+| sign consistency, matched | negative **10/12** | negative **12/12** |
+
+**Matching halves the noise, and that is the evidence it is doing real work** — the spread
+on the observed effect drops from 1.126 to 0.533, and on the error from 0.880 to 0.472.
+Support is near-total: 667 of 671 changed cells find a control at the loosest cutoff, 114
+of 114 at the strictest.
+
+**1. Greening does cool this tile — by about half a degree.** Against matched land the
+observed effect is **−0.47 °C**, negative in 10 of 12 configurations. *An earlier version
+of this section reported +0.02 °C and concluded nothing measurable had happened. That was
+an artefact of comparing greened land against the whole tile.* Land that greens starts
+low-NDVI and often urban-fringe — warmer than tile average for reasons that have nothing
+to do with the change — and that bias almost exactly cancelled the real cooling signal.
+
+**2. The model over-states that cooling by roughly 2.5×.** It implies **−1.18 °C** where
+matched observation shows **−0.47 °C**, an error of **−0.71 °C** that is negative in
+**12 of 12** configurations. Matching shrank this from −1.12 °C, so about a third of the
+apparent over-prediction was confounding and two thirds is real.
+
+**This is the first direct evidence for the standing space-for-time risk.** Contrast-
+between-places over-states effect-of-changing-a-place, here by a factor of ~2.5. The
+simulator is not worthless — the sign and rough scale are right — but **every modelled
+ΔLST should be read as roughly 2.5× the realised figure**, and a demo quoting −0.5 °C
+should say the honest expectation is nearer −0.2 °C.
+
+Caveats that keep this honest: the 12 configurations share sites and overlapping windows,
+so they are **not** independent samples and no p-value follows from them; matching is on
+land cover and baseline NDVI only, so an unobserved covariate could still confound; and
+the sites are Lahore's, not anywhere else's.
+
+The plan's "pick one site big enough to resolve at 100 m" is `--min-site-cells 100`, which
+isolates the single largest patch (114 cells). It was run, and it remains the noisiest of
+the twelve even matched — one site is not enough to validate against on this tile, which is
+itself the answer to that instruction.
+
+**A negative R² was hiding a working model.** Raw spatial R² is −0.68 to −7.15, which reads
+like total failure. It is not — it is one constant offset:
+
+| | raw | offset removed |
+|---|---|---|
+| MAE | 1.94 – 5.26 °C | **0.91 – 1.24 °C** |
+| spatial R² | −0.68 – −7.15 | **+0.25 – +0.56** |
+
+The model still ranks the tile; it cannot reach an unseen year's *absolute* level. Those
+are different failures with different fixes, which is why `HindcastScore` now carries both.
+
+### Why the offset exists — and it is not what I first assumed
+
+The obvious explanation is that 2024 was hotter than anything in training and gradient
+boosting cannot extrapolate. **Checked, and false.** 2024's air temperature is 34.0 °C,
+rank 4 of 9 and comfortably inside the training range — yet its mean surface temperature
+is 46.5 °C, rank 9 of 9.
+
+Across the nine summers, `air_temp_c` correlates with mean summer LST at **r = 0.554,
+r² = 0.31**. The feature carrying **91.5 % of the model's gain** (Phase 4) explains under a
+third of the between-summer variation in the quantity it is supposed to predict. Pooled
+across seasons it looks decisive because it separates summer from winter; between summers
+it is close to useless, and the model has nothing else that varies with the year.
+
+That single fact explains the Phase 4 leave-one-window-out result (2.9 °C), this hindcast's
+1.9–5.3 °C offset, and why both grow with the gap. **It is the most actionable finding in
+this phase:** the temporal features are too weak, not the spatial ones. Adding windows will
+not fix it — adding a feature that actually tracks between-summer surface heating might.
 
 ## Phase 8 — Equity ⬜
 
@@ -934,10 +1077,18 @@ gap on screen.
 
 ## Standing risks
 
-- **Space-for-time substitution.** A single-date cube teaches only *why this pixel is
-  hotter than that one*. Using it for interventions assumes contrast-between-places
-  equals effect-of-changing-a-place. Standard and defensible, but it is the model's
-  softest spot — put it in limitations before anyone asks. Phase 3 partly relieves it.
+- **Space-for-time substitution — no longer a suspicion, now measured.** The cube teaches
+  *why this pixel is hotter than that one*; using it for interventions assumes
+  contrast-between-places equals effect-of-changing-a-place. Phase 7 tested that directly
+  and it holds only in sign, not magnitude: against controls matched on land cover and
+  baseline NDVI, greening cools **−0.47 °C** while the model implies **−1.18 °C**, an
+  error negative in 12/12 configurations. **Treat every modelled ΔLST as roughly 2.5x the
+  realised figure, and say so before anyone asks.** Quantified now, not hedged.
+- **An unmatched control group is worth about half a degree of bias, in the direction that
+  flatters nothing.** Comparing greened cells against the whole tile rather than against
+  comparable land reported the observed effect as +0.02 °C when it is −0.47 °C — the
+  covariate gap almost exactly cancelled the real signal. Any future group comparison on
+  this cube (Phase 8's equity deciles especially) should match before it concludes.
 - ~~**Phase 3 blocks four later phases.**~~ Unblocked — 4, 7, 8 and 9 all have the cube
   they were waiting on.
 - **Four windows is still a thin time axis.** Having a time dimension is not the same as
@@ -956,21 +1107,36 @@ gap on screen.
   importances no longer describe what drives the *intervention*, and anyone reading them
   as "canopy barely matters" will draw the wrong conclusion. Re-check as windows are
   added: more windows make the identifier less degenerate, not more.
-- **Winter rests on 3–5 Landsat scenes per window, summer on 12.** The winter contrast
-  varies more between years than the summer one almost certainly because of that, not
-  because of the weather. Do not read inter-annual winter differences as signal yet.
+- **Winter composites rest on 3–5 clear looks per pixel, summer on 6+.** Measured via
+  `obs_depth_*`, not inferred from scene counts. The winter contrast varies more between
+  years than the summer one almost certainly because of that, not because of the weather:
+  do not read inter-annual winter differences as signal yet. Relaxing the cloud ceiling
+  is **not** the remedy — it trades one extra look for ~1.7 °C of cold bias (see next
+  action 5).
 - **Build fragility.** Planetary Computer drops connections; retries handle it, but keep
   a known-good Zarr and never rebuild the night before a demo.
-- **"200 OK" is not "it worked", and this project keeps proving it.** Three instances so
+- **"200 OK" is not "it worked", and this project keeps proving it.** Five instances so
   far: WorldPop truncating a transfer without erroring, an ingest dying mid-build and
-  leaving a valid-looking four-window Zarr with two empty windows, and MapLibre's worker
+  leaving a valid-looking four-window Zarr with two empty windows, MapLibre's worker
   404ing while style, TileJSON, sprites and glyphs all returned 200 and the map rendered
-  nothing. None surfaced as an exception; each was found by checking the artefact rather
-  than the transport. Assume the next one behaves the same way.
+  nothing, a winter composite reporting "100.0 % valid" over 9 pixels no scene ever saw,
+  and a **stale `thermal.txt` that loaded cleanly, served `/health` and `/cube/*`
+  perfectly, and failed only on `/simulate`**. None surfaced as an exception; each was
+  found by checking the artefact rather than the transport. Assume the next one behaves
+  the same way.
+- **Artefacts go stale independently of the code that reads them.** The model file
+  carries no version, so a booster trained before meteorology existed is
+  indistinguishable from a current one until LightGBM counts columns at predict time.
+  `runtime._check_model_features` now compares `Booster.feature_name()` against
+  `FEATURE_NAMES` **as a sequence** — LightGBM matches positionally, so the same names in
+  a different order predict confidently and wrongly with no error anywhere. The cube got
+  this treatment in Phase 5 and the model did not; assume any *other* artefact added
+  later needs it too.
 - **The TypeScript API types are mirrored from Pydantic by hand.** `web/src/api/client.ts`
   will silently drift the first time a schema changes and nobody updates it — a renamed
   field becomes `undefined` on a panel, not a build error. Generate from `/openapi.json`
-  if it bites once.
+  if it bites once. (Audited 2026-08-05: all 9 interfaces match the live responses field
+  for field.)
 - **Purity drift.** The moment a core reads config or opens a file, API caching and
   offline tests both break. `cores/` importing `terrarium.config` is the canary.
 - **Extrapolation in the built-up core.** The tile has few high-canopy dense-urban
@@ -1016,7 +1182,31 @@ gap on screen.
    that check never ran. The lesson is that a cube's provenance cannot be trusted to a
    report that only prints on the happy path: validate the artefact when you *load* it,
    which is what the API now does.
-5. **Winter Landsat is thin: 3–5 clear scenes per window against summer's 12.** Coverage
-   is still 100 % because the composite fills, but any winter claim rests on less
-   evidence than the summer equivalent. Consider relaxing `max_cloud_cover` for winter
-   windows specifically before Phase 9 leans on them.
+5. **Winter Landsat is thin — but do *not* fix it by relaxing `max_cloud_cover`.**
+   Measured, not assumed. Raising the ceiling from 20 % to 60 % buys about one extra
+   clear look per pixel and costs **1.6–1.8 °C of cold bias**:
+
+   | window | ceiling | scenes | depth min/median | composite median LST |
+   |---|---|---|---|---|
+   | 2024-winter | 20 % | 5 | 3 / 4 | 22.39 °C |
+   | 2024-winter | 60 % | 7 | 4 / 5 | **20.83 °C** |
+   | 2023-winter | 20 % | 3 | 0 / 3 | 24.26 °C |
+   | 2023-winter | 60 % | 6 | 2 / 5 | **22.50 °C** |
+
+   That is residual cloud and cloud shadow surviving the QA bitmask and dragging the
+   median down — exactly the failure `_collapse_time`'s median is chosen to resist, and
+   it swamps the depth gained. **Keep the 20 % ceiling.** The earlier suggestion here to
+   relax it was written before this was measured and was wrong.
+
+   The real fix was reporting, not filtering: `obs_depth_min` / `obs_depth_p50` now ride
+   on every Landsat `SourceRecord` and into the catalogue, so "is this composite thin?"
+   is a number rather than a guess. Winter's honest depth is **3–5 clear looks per
+   pixel** — thinner than summer's 6+, but not the crisis "3 scenes" implied.
+
+6. **A composite can report 100 % valid and still have holes, and one did.** 2023-winter
+   `lst_c` has 9 pixels that no clear scene ever observed. `valid_fraction` of 99.978 %
+   renders as `100.0%` at one decimal, so the build report showed a complete map — the
+   same class of "200 OK is not it worked" failure as the other three above, this time
+   in our own reporting. `VariableSummary.valid_text` now prints full coverage as `100%`
+   with no decimal and escalates precision otherwise, and ingest logs a warning whenever
+   `obs_depth_min` hits 0. Both signals fire on the current cube.

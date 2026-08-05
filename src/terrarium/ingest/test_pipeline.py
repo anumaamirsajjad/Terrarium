@@ -7,6 +7,7 @@ selection, reprojection onto the canonical grid, QA masking, and unit conversion
 
 from __future__ import annotations
 
+import logging
 import os
 import urllib.request
 from collections.abc import Callable
@@ -756,6 +757,69 @@ def test_one_bad_window_does_not_cost_the_others(
     }
 
 
+def test_observation_depth_is_measured_and_an_unobserved_pixel_is_flagged(
+    monkeypatch: pytest.MonkeyPatch,
+    settings: Settings,
+    grid: Grid,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Scene count says nothing about whether a given pixel was ever seen clearly.
+
+    Three scenes can still leave a pixel cloudy in all three, and the median composite
+    reports that pixel as one NaN among 40,602 — which rounds to "100 % valid" in any
+    report showing a single decimal. Depth is what makes it visible.
+    """
+    height, width = grid.shape
+    coords = {"y": grid.y_coords(), "x": grid.x_coords()}
+    n_scenes = 3
+    cloud_bit = 1 << 3
+
+    def load(
+        items: list[pystac.Item],
+        bands: tuple[str, ...],
+        grid: Grid,
+        *,
+        resampling: str | dict[str, str],
+        groupby: str | None = None,
+        **kwargs: object,
+    ) -> xr.Dataset:
+        qa = np.zeros((n_scenes, height, width), dtype="uint16")
+        qa[:, 0, 0] = cloud_bit  # cloudy in every scene -> never observed
+        qa[:2, 0, 1] = cloud_bit  # cloudy in all but one -> a single look
+        stack = {"time": np.arange(n_scenes), **coords}
+        return xr.Dataset(
+            {
+                "lwir11": xr.DataArray(
+                    np.full((n_scenes, height, width), 45_000.0, dtype="float32"),
+                    dims=("time", "y", "x"),
+                    coords=stack,
+                ),
+                "qa_pixel": xr.DataArray(qa, dims=("time", "y", "x"), coords=stack),
+            }
+        )
+
+    monkeypatch.setattr(pipeline, "load_items", load)
+    monkeypatch.setattr(
+        pipeline, "search_collection", _fake_search({COLLECTION_LANDSAT: (n_scenes, n_scenes)})
+    )
+
+    with caplog.at_level(logging.WARNING):
+        cube, records = pipeline.build_cube(catalog=FAKE_CATALOG, settings=settings, grid=grid)
+
+    landsat = [r for r in records if r.collection_id == COLLECTION_LANDSAT]
+    assert landsat, "no Landsat record to carry the depth"
+    for record in landsat:
+        assert record.obs_depth_min == 0, "the always-cloudy pixel must show as unobserved"
+        assert record.obs_depth_p50 == n_scenes, "the rest of the tile saw every scene"
+
+    assert "no clear observation" in caplog.text
+
+    # And the thing depth exists to expose: a real gap that coverage alone rounds away.
+    lst = np.asarray(select_window(cube, cube["window"].values[0]).lst_c.values)
+    assert np.isnan(lst[0, 0]), "a never-observed pixel must be NaN, not interpolated"
+    assert not np.isnan(lst[0, 1]), "one clear look is still a measurement"
+
+
 def test_implausible_temperatures_are_rejected(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, grid: Grid
 ) -> None:
@@ -1070,6 +1134,73 @@ def test_a_complete_download_is_cached_and_not_refetched(
 
     monkeypatch.setattr(urllib.request, "urlopen", explode)
     assert pipeline._download_once("http://example.invalid/x.tif", target, 1.0) == target
+
+
+class _CompleteResponse:
+    """A response that delivers exactly what it promised."""
+
+    def __init__(self, size: int = 1000) -> None:
+        self.headers = {"Content-Length": str(size)}
+        self._payload: bytes | None = b"x" * size
+
+    def read(self, _size: int) -> bytes:
+        payload, self._payload = self._payload, None
+        return payload or b""
+
+    def __enter__(self) -> _CompleteResponse:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+def test_a_truncated_download_recovers_on_the_next_attempt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Rejecting a short read is only half the guard — the retry has to be able to win.
+
+    A rejected download that left a stale `.partial` behind, or that somehow poisoned the
+    target path, would turn one transient truncation into a permanently failing build.
+    This is the composition the retry wrapper actually relies on, and it was previously
+    tested only as far as the rejection.
+    """
+    responses = iter([_ShortResponse(), _CompleteResponse()])
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda url, timeout=None: next(responses)
+    )
+    target = tmp_path / "worldpop.tif"
+    url = "http://example.invalid/x.tif"
+
+    with pytest.raises(OSError, match="truncated"):
+        pipeline._download_once(url, target, 1.0)
+
+    # Exactly what _ingest_with_retries does next.
+    assert pipeline._download_once(url, target, 1.0) == target
+    assert target.read_bytes() == b"x" * 1000
+
+
+class _NoLengthResponse(_CompleteResponse):
+    """A server using chunked encoding: no Content-Length to check against."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.headers = {}
+
+
+def test_a_download_without_content_length_says_it_could_not_be_verified(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Silence here would mean a passing build implying a check that never ran."""
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda url, timeout=None: _NoLengthResponse()
+    )
+    target = tmp_path / "worldpop.tif"
+
+    with caplog.at_level(logging.WARNING):
+        assert pipeline._download_once("http://example.invalid/x.tif", target, 1.0) == target
+
+    assert target.exists(), "an unverifiable download is still the best we have"
+    assert "Content-Length" in caplog.text
 
 
 # --------------------------------------------------------------------------------

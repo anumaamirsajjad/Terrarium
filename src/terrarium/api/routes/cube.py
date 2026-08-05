@@ -121,7 +121,9 @@ async def cube_layer(
             detail=f"no variable {name!r}; have {sorted(VARIABLES_BY_NAME)}",
         ) from None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
+        # 422, matching /simulate's treatment of a well-formed request that cannot be
+        # carried out: the variable exists and the URL is fine, but it is not a map.
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
     try:
         label = runtime.resolve_window(window)

@@ -17,6 +17,7 @@ from terrarium.config import SeasonWindow, Settings, Tile, season_windows
 from terrarium.state.cube import (
     CUBE_VARIABLES,
     Dims,
+    VariableSummary,
     empty_cube,
     select_window,
     summarise,
@@ -186,3 +187,27 @@ def test_summarise_reports_the_windows_it_covered(
 def test_settings_windows_match_the_declared_years() -> None:
     settings = Settings(window_years=[2022])
     assert [w.label for w in settings.windows] == ["2022-summer", "2022-winter"]
+
+
+def test_a_handful_of_empty_pixels_never_reports_as_full_coverage() -> None:
+    """The rounding that hid a real gap in a winter LST composite.
+
+    9 unobserved pixels out of 40,602 is 99.978 % valid, and `.1%` renders that as a
+    clean `100.0%` — indistinguishable from a complete map in the build report. Full
+    coverage now prints without a decimal, so the two cannot be confused at a glance.
+    """
+
+    def coverage(fraction: float) -> str:
+        return VariableSummary(
+            name="lst_c",
+            units="degC",
+            dtype="float32",
+            dims=Dims.TIME_SPACE,
+            populated=True,
+            valid_fraction=fraction,
+        ).valid_text
+
+    assert coverage(1.0) == "100%"
+    assert coverage(1 - 9 / 40_602) == "99.978%"
+    # Ordinary partial coverage stays readable rather than gaining noise decimals.
+    assert coverage(0.739) == "73.9%"

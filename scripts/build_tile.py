@@ -76,7 +76,7 @@ def _print_summary(summary: CubeSummary) -> None:
         if var.populated:
             print(
                 f"  {var.name:<22} {var.units:<8} {axes:<11} "
-                f"{var.valid_fraction:>6.1%} {var.vmin:>10.3f} {var.vmean:>10.3f} "
+                f"{var.valid_text:>7} {var.vmin:>10.3f} {var.vmean:>10.3f} "
                 f"{var.vmax:>10.3f}"
             )
         else:
@@ -107,7 +107,7 @@ def _print_per_window(cube, grid: Grid, summary: CubeSummary) -> list[str]:
             elif var.dims is Dims.TIME:
                 cells.append(f"{var.vmean:>12.2f}")
             else:
-                cells.append(f"{var.valid_fraction:>11.1%} ")
+                cells.append(f"{var.valid_text:>12}")
         print(f"  {label:<16} " + " ".join(cells))
     print("\n  (maps show valid-pixel share, scalars show the value)\n")
     return gaps

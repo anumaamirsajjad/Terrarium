@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS build_variables (
 -- functions) and every reference to it would need quoting forever after.
 ALTER TABLE builds        ADD COLUMN IF NOT EXISTS windows      VARCHAR;
 ALTER TABLE build_sources ADD COLUMN IF NOT EXISTS window_label VARCHAR;
+ALTER TABLE build_sources ADD COLUMN IF NOT EXISTS obs_depth_min INTEGER;
+ALTER TABLE build_sources ADD COLUMN IF NOT EXISTS obs_depth_p50 DOUBLE;
 """
 
 
@@ -87,6 +89,13 @@ class SourceRecord(BaseModel):
     # Which seasonal window these counts belong to. `None` for the static sources, which
     # are ingested once for the whole cube rather than per window.
     window: str | None = None
+    # How many *clear observations* each pixel actually contributed to the composite.
+    # Scene count is a poor proxy: cloud is patchy, so five scenes can still leave a
+    # pixel with a single usable look while a sixth partly-cloudy one genuinely deepens
+    # the pixels it is clear over. `obs_depth_min` of 0 means some pixel was never
+    # observed and its composite is a hole. None for sources with no time axis to reduce.
+    obs_depth_min: int | None = None
+    obs_depth_p50: float | None = None
 
 
 class BuildRecord(BaseModel):
@@ -187,7 +196,8 @@ def record_build(conn: duckdb.DuckDBPyConnection, record: BuildRecord) -> None:
     for source in record.sources:
         conn.execute(
             "INSERT INTO build_sources (build_id, collection_id, n_found, n_kept, "
-            "n_composited, max_cloud_cover, window_label) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "n_composited, max_cloud_cover, window_label, obs_depth_min, obs_depth_p50) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 record.build_id,
                 source.collection_id,
@@ -196,6 +206,8 @@ def record_build(conn: duckdb.DuckDBPyConnection, record: BuildRecord) -> None:
                 source.n_composited,
                 source.max_cloud_cover,
                 source.window,
+                source.obs_depth_min,
+                source.obs_depth_p50,
             ],
         )
 
