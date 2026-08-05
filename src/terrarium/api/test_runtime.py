@@ -17,7 +17,7 @@ from terrarium.cores.thermal.features import (
     TrainingFrame,
     build_training_frame,
 )
-from terrarium.cores.thermal.model import train
+from terrarium.cores.thermal.model import DEFAULT_PARAMS, train
 from terrarium.state.cube import validate_windows, window_valid_fractions
 from terrarium.state.grid import grid_for_tile
 from terrarium.state.store import write_cube
@@ -148,9 +148,14 @@ def test_a_missing_model_is_a_clear_startup_error(tmp_path: Path) -> None:
 
 
 def _booster_over(training: TrainingFrame, columns: list[str]) -> lgb.Booster:
-    """A booster fitted on `columns` verbatim, bypassing `train`'s FEATURE_NAMES pin."""
+    """A booster fitted on `columns` verbatim, bypassing `train`'s FEATURE_NAMES pin.
+
+    Uses the production params so it inherits their `seed` and `deterministic` — a test
+    booster trained without them varies between runs, which is how a suite acquires a
+    flake nobody can reproduce.
+    """
     dataset = lgb.Dataset(training.features[columns], label=training.target, free_raw_data=False)
-    return lgb.train({"objective": "regression", "verbose": -1}, dataset, num_boost_round=5)
+    return lgb.train(DEFAULT_PARAMS, dataset, num_boost_round=5)
 
 
 def _write_cube_and_frame(tmp_path: Path) -> tuple[Path, TrainingFrame]:

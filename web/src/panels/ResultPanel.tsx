@@ -94,9 +94,12 @@ export default function ResultPanel({ result }: ResultPanelProps) {
       )}
 
       <p className="result__caveat">
-        Modelled, not measured. Spatially blocked cross-validation shows the emulator
-        generalises across space; it does not establish that it predicts the effect of a
-        change. That is the hindcast, and it is not built yet.
+        Modelled, not measured — and measured against reality it runs <strong>hot</strong>.
+        Hindcasting nine summers of real greening across this tile, the emulator implies
+        about 2.5&times; the cooling that actually materialised (−1.18 °C modelled against
+        −0.47 °C observed, over-predicting in 12 of 12 test configurations). Read the
+        figure above as an upper bound: the realised change is likely nearer{" "}
+        <strong>{signed(stats.mean_delta_inside / 2.5, 2)} °C</strong>.
       </p>
     </div>
   );

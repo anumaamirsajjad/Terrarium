@@ -17,12 +17,15 @@ from terrarium.api.geometry import GeometryError, mask_from_geojson
 from terrarium.api.routes.cube import build_layer
 from terrarium.api.runtime import Runtime
 from terrarium.api.schemas.simulate import (
+    DecileShareResponse,
     DeltaStatsResponse,
+    EquityResponse,
     PlausibilityContext,
     SimulateRequest,
     SimulateResponse,
 )
 from terrarium.cores.base import Intervention
+from terrarium.cores.equity import benefit_distribution
 from terrarium.cores.thermal.features import BASE_VARIABLES
 from terrarium.cores.thermal.simulate import (
     effective_fraction,
@@ -37,6 +40,44 @@ router = APIRouter(tags=["simulate"])
 # 0.31-0.80 degC, so a ratio there is a small number over a smaller one and swings on
 # noise that means nothing physically. Report null instead of a confident-looking number.
 MIN_CONTRAST_FOR_RATIO_C = 1.0
+
+
+def _equity(delta: np.ndarray, runtime: Runtime) -> EquityResponse | None:
+    """Distribute the delta across population deciles, or `None` if we cannot.
+
+    Returns `None` rather than an empty distribution when the cube has no population:
+    a client that sees zeroes has no way to tell "nobody benefits" from "nobody counted",
+    and those are opposite findings.
+    """
+    if "population" not in runtime.cube:
+        return None
+
+    population = np.asarray(runtime.cube["population"].values)
+    try:
+        distribution = benefit_distribution(delta, population)
+    except ValueError:
+        # An uninhabited tile is a property of the cube, not a bad request. The delta is
+        # still a valid answer, so serve it without the panel rather than failing.
+        return None
+
+    return EquityResponse(
+        deciles=[
+            DecileShareResponse(
+                decile=d.decile,
+                people=d.people,
+                mean_delta_c=d.mean_delta_c,
+                share=d.share,
+            )
+            for d in distribution.deciles
+        ],
+        stratified_by=distribution.stratified_by,
+        population_covered=distribution.population_covered,
+        top_three_share=distribution.top_three_share,
+        concentrated=distribution.concentrated,
+        shares_reliable=distribution.shares_reliable,
+        net_to_gross=distribution.net_to_gross,
+        uninhabited_fraction=distribution.uninhabited_fraction,
+    )
 
 
 @router.post(
@@ -92,6 +133,7 @@ async def run_simulation(
 
     stats = result.stats
     return SimulateResponse(
+        equity=_equity(result.delta, runtime),
         variable=result.variable,
         units=result.units,
         window=label,

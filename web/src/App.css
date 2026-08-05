@@ -261,7 +261,149 @@ select {
   border-top: 1px solid var(--border);
 }
 
+/* --------------------------------------------------------------- equity --- */
+
+.equity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.625rem;
+  background: var(--bg);
+}
+
+.equity h2 {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.equity__verdict {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  padding-left: 0.625rem;
+  border-left: 2px solid var(--border);
+}
+
+/* The verdict is the one place colour carries meaning, so it is never the only
+   signal: the headline text says the same thing for anyone who cannot see it. */
+.equity__verdict--even { border-left-color: var(--ok); }
+.equity__verdict--skewed { border-left-color: #fbbf24; }
+.equity__verdict--wasted { border-left-color: var(--error); }
+.equity__verdict--no-net-effect { border-left-color: var(--fg-muted); }
+
+.equity__chart {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+
+.equity__row {
+  display: grid;
+  grid-template-columns: 1.25rem 1fr 2.75rem;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.equity__label,
+.equity__share {
+  font-size: 0.6875rem;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.equity__share { text-align: right; }
+
+.equity__track {
+  position: relative;
+  height: 0.75rem;
+  background: var(--badge-bg);
+  border-radius: 0.1875rem;
+  overflow: hidden;
+}
+
+.equity__bar {
+  display: block;
+  height: 100%;
+  background: var(--ok);
+  border-radius: 0.1875rem;
+}
+
+/* A decile the plan made hotter. Distinct in hue *and* stripe, so the difference does
+   not rest on colour alone. */
+.equity__bar--warming {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--error),
+    var(--error) 3px,
+    transparent 3px,
+    transparent 6px
+  );
+}
+
+/* The 10 % reference line. Sits above the bars, inset by the label column so it lines
+   up with the tracks rather than the row. */
+.equity__marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  margin-left: calc(1.25rem + 0.5rem);
+  width: 0;
+  border-left: 1px dashed var(--fg-muted);
+  pointer-events: none;
+}
+
+.equity__marker span {
+  position: absolute;
+  top: -0.9rem;
+  left: 0.25rem;
+  font-size: 0.5625rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.equity__axis {
+  margin: 0.5rem 0 0;
+  font-size: 0.6875rem;
+}
+
+.equity__stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.625rem;
+  margin: 0;
+}
+
+.equity__stats dt {
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+}
+
+.equity__stats dd {
+  margin: 0.125rem 0 0;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.equity__caveat {
+  margin: 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.6875rem;
+  line-height: 1.55;
+  color: var(--fg-muted);
+}
+
 /* ----------------------------------------------------------------- boot --- */
+
 
 .boot {
   display: flex;

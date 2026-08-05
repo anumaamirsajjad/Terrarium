@@ -104,6 +104,40 @@ export interface PlausibilityContext {
   ratio_to_linear: number | null;
 }
 
+export interface DecileShare {
+  /** 1 = least densely populated, 10 = most. */
+  decile: number;
+  people: number;
+  mean_delta_c: number;
+  /** Share of total person-degrees. 0.10 is an even share. */
+  share: number;
+}
+
+/**
+ * Who receives the cooling. Deciles hold a tenth of the *population* each, not a tenth
+ * of the pixels, so an even distribution is 0.10 everywhere and any skew shows without
+ * arithmetic.
+ */
+export interface Equity {
+  deciles: DecileShare[];
+  /** "population density" today — no free, keyless deprivation layer exists. */
+  stratified_by: string;
+  population_covered: number;
+  /** Held by the three best-served deciles. Even sharing is 0.30. */
+  top_three_share: number;
+  /** Always false when `shares_reliable` is false. */
+  concentrated: boolean;
+  /**
+   * False when the plan cools and warms in near-equal measure. Shares divide by the net
+   * benefit, so a vanishing denominator makes them explode. Do not draw the bars.
+   */
+  shares_reliable: boolean;
+  /** Net benefit over total temperature movement. 1.0 is pure cooling. */
+  net_to_gross: number;
+  /** Share of cooling, as degree-cells, landing where nobody lives. */
+  uninhabited_fraction: number;
+}
+
 export interface SimulateResponse {
   variable: string;
   units: string;
@@ -112,6 +146,8 @@ export interface SimulateResponse {
   season: string;
   stats: DeltaStats;
   context: PlausibilityContext;
+  /** Null when the served cube carries no population layer — never render 0 for this. */
+  equity: Equity | null;
   delta: LayerResponse;
 }
 

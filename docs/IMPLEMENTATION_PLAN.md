@@ -13,7 +13,7 @@ with the team.
 | 5 | API — expose cube and simulation | ✅ **DONE** |
 | 6 | Frontend — map, draw, compare | ✅ **DONE** |
 | 7 | Hindcast validation | ✅ **DONE** — model over-states cooling ~2.5x |
-| 8 | Equity | ⬜ |
+| 8 | Equity | ✅ **DONE** — panel shipped; demo plan gives the densest decile 0 % |
 | 9 | Air dispersion core | ⬜ |
 | 10 | DSL + agent layer | ⬜ |
 | 11 | Voice, VLM, council brief | ⬜ |
@@ -992,7 +992,7 @@ That single fact explains the Phase 4 leave-one-window-out result (2.9 °C), thi
 this phase:** the temporal features are too weak, not the spatial ones. Adding windows will
 not fix it — adding a feature that actually tracks between-summer surface heating might.
 
-## Phase 8 — Equity ⬜
+## Phase 8 — Equity ✅ DONE
 
 Needs population from Phase 3. A pure function, not yet a full core:
 `benefit_distribution(delta_lst, population, deprivation_proxy) -> deciles`.
@@ -1000,6 +1000,138 @@ Needs population from Phase 3. A pure function, not yet a full core:
 Output: share of total cooling person-degrees per population decile, and a flag when the
 top three deciles capture the majority. This is the panel that critiques the user's own
 plan — the moment the description says wins the room.
+
+### Delivered
+
+`cores/equity.py` (pure) + `EquityResponse` on `POST /simulate` + TS types + 11 tests.
+
+**Deciles hold a tenth of the *people*, not a tenth of the pixels.** That single choice is
+what makes the panel readable without arithmetic: even sharing is 10 % per decile, so any
+skew is visible at a glance. Equal-pixel deciles would put most of Lahore in one bucket.
+
+**Warming counts as negative benefit rather than being clipped to zero**, so a plan that
+cools the wealthy and warms the poor cannot report the same headline as one that simply
+cools less.
+
+### The panel works — it ranks two plans opposite to how ΔLST does
+
+Three interventions, +30 % canopy, 2024-summer, on `cube_phase4.zarr`:
+
+| plan | mean ΔLST inside | top-3 share | concentrated | on empty land | densest decile |
+|---|---|---|---|---|---|
+| canal (central) | −0.507 °C | 65.9 % | yes | 0.0 % | **0.0 %** |
+| river Ravi (NW) | **−0.595 °C** | 55.0 % | yes | **26.4 %** | 6.9 % |
+| whole tile | −0.776 °C | 31.5 % | no | 8.0 % | 10.2 % |
+
+**The Ravi plan cools more and helps fewer people.** It beats the canal on raw ΔLST
+(−0.595 vs −0.507) while dumping **26 %** of that cooling on land where nobody lives. A
+tool that reported only ΔLST would rank it the better plan. That inversion is the entire
+argument for this phase existing.
+
+And the demo intervention indicts itself: the canal planting delivers **0.0 %** of its
+benefit to the densest decile — the people with the worst heat exposure — while deciles
+5–7 take two thirds. Only the whole-tile plan is unconcentrated, at 31.5 % against the
+even 30 %.
+
+### Cooling on empty land is measured in degree-cells, not person-degrees
+
+An empty cell has zero residents, so its person-degrees are zero *by construction* and
+"how much of my cooling reached nobody" would answer itself with 0 %. The first
+implementation had exactly this bug and a test caught it. The wasted-cooling figure is
+therefore area-weighted (sum of −Δ over uninhabited cells) while everything else is
+people-weighted. 8.5 % of the tile is genuinely uninhabited, so the metric is live — the
+canal's 0.0 % is a real result, not a dead code path.
+
+### The deprivation proxy is absent, deliberately, and the argument is kept
+
+The plan's default assumption was nightlights plus building density. **Neither VIIRS
+nightlights nor GHSL built-up is on Planetary Computer** — checked, zero matching
+collections — so a deprivation layer needs a new external HTTP source in the style of
+WorldPop. That is a cube expansion, not equity work.
+
+What was *not* done meanwhile: substituting NDBI or built-up density and calling it
+deprivation. Dense built-up in Lahore contains both the wealthiest and the poorest
+districts, so that swap would produce a confident equity claim the data cannot support.
+The third argument stays in the signature and is exercised by a test, so a real layer
+drops in without a rewrite. Stratifying by population density answers a narrower but
+honest question: **does the cooling reach the crowded places, where heat stress is worst?**
+On the demo intervention, no.
+
+### The React panel
+
+`web/src/panels/EquityPanel.tsx`, with its interpretation logic split into a tested
+`equity.ts` — the same pure-function/render split `raster/decode` and `units` already use,
+so no testing-library and no jsdom were added for it. 19 new web tests.
+
+Three rendering decisions carry the same weight as the estimator's:
+
+- **Bars normalise to the widest bar, not to 100 %.** An even distribution puts every
+  decile at 10 %, which against a fixed axis renders as ten identical slivers and shows
+  nothing. The 10 % reference line moves with the scale.
+- **A warmed decile is drawn, not clipped.** Distinct hue *and* a stripe pattern, so the
+  difference does not rest on colour alone.
+- **Wasted cooling outranks concentration in the headline.** A plan can be perfectly even
+  across the deciles it reaches and still deliver a quarter of its effect to a riverbank —
+  and that is the failure a ΔLST number hides most completely.
+
+`equity: null` renders **nothing**, never a row of zeroes: "nobody counted" and "nobody
+benefits" are opposite findings and must not look alike.
+
+### Two defects found by auditing the phase after calling it done
+
+**1. Shares divide by the net benefit, and the net benefit can vanish.** A tile split half
+cooling, half warming nets out to almost nothing, so each decile's share became its own
+value over a denominator near zero: shares of **±2010 %** and a `top_three_share` of
+**6030 %**, which cleared the concentration threshold and would have rendered to the
+screen as a confident finding. `shares_reliable` (net-to-gross ≥ 0.2) now gates it,
+`concentrated` is false whenever the split is unreliable, and the panel draws no bars at
+all — it says the plan has no net effect to share out. Real planting sits at net/gross
+0.979, so the guard never fires on a genuine scenario.
+
+**2. The panel used a non-null assertion where a tested safe helper already existed.**
+`shares.at(-1)!` would render `NaN%` on an empty distribution; `densestShare()` handles it
+and was already covered by a test. Using the helper.
+
+### Does Phase 7's over-prediction contaminate these shares?
+
+Shares are ratios, so a *uniform* modelling error cancels out of them entirely. A
+**density-dependent** one would not — and it is. Measured on the 2024-summer hindcast,
+model bias by population decile:
+
+| decile | 1 (sparsest) | 5 | 10 (densest) |
+|---|---|---|---|
+| bias | −5.43 °C | −5.31 °C | −4.54 °C |
+
+A **1.02 °C monotonic spread**: the model is systematically further off in sparse areas
+than crowded ones. That is measured on *absolute* prediction, and ΔLST differences two
+predictions, so most of it cancels — but "most" is not "all", so it was measured properly
+rather than left as a worry.
+
+**Measured: the tilt is bounded at 2.2 percentage points.** Planting +30 % canopy over the
+*whole* tile makes the response comparable across deciles, and the share each decile
+receives can then be set against the share it would receive if the model's canopy response
+were identical everywhere:
+
+| decile | 1 | 5 | 10 |
+|---|---|---|---|
+| actual share | 11.9 % | 9.6 % | 9.8 % |
+| if response were flat | 9.7 % | 10.0 % | 10.3 % |
+
+Worst distortion **2.18 pp**, at decile 1; every other decile is within ~0.7 pp. The
+sensitivity spread looks large as a ratio (75 % of the mean) but is driven almost entirely
+by decile 1 — deciles 2–10 sit between −2.5 and −3.5 °C per unit canopy.
+
+**The Phase 8 conclusion survives this comfortably.** The canal planting gives the densest
+decile **0.0 %** against an even 10 % — a ten-point gap that a 2.2-point modelling artefact
+cannot produce. Quote the decile numbers, but quote them with ±2 pp of slack rather than to
+one decimal.
+
+### `ResultPanel`'s caveat was stale and is now the hindcast number
+
+It read *"That is the hindcast, and it is not built yet."* It is built, and it found the
+emulator over-states cooling ~2.5x. The panel now says so and shows the discounted figure
+next to the modelled one, so the correction reaches the screen rather than living only in
+this document.
 
 ## Phase 9 — Air dispersion core ⬜
 

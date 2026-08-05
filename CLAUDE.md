@@ -27,8 +27,8 @@ Data flows strictly downward. Nothing in a lower layer imports from a higher one
 │                       dsl/          later: DSL + agents      │
 ├──────────────────────────────────────────────────────────────┤
 │  2. PHYSICS CORE      cores/        pure simulators:         │
-│                                     thermal, later air,      │
-│                                     equity                   │
+│                                     thermal + equity,        │
+│                                     later air                │
 ├──────────────────────────────────────────────────────────────┤
 │  1. STATE CUBE        ingest/       satellite + vector →     │
 │                       state/        one aligned raster cube  │
@@ -93,12 +93,26 @@ Geometry reaches a core as a boolean `(y, x)` mask on the canonical grid. Conver
 GeoJSON to that mask is the API's job, because it is the layer that knows about the grid.
 
 The first core is **thermal**: a LightGBM emulator predicting mid-morning land surface
-temperature from NDVI, NDBI, albedo, elevation, land cover, and 500 m neighbourhood means
-of NDVI and NDBI. It is trained against observed Landsat ST_B10 so it learns the local
-empirical relationship rather than us hand-rolling a surface energy balance. Meteorology
-is **not** a feature yet — with a single-date composite, wind and air temperature are
-constant across all 40,602 pixels and carry exactly zero information. They arrive with the
-time dimension.
+temperature from NDVI, NDBI, albedo, elevation, land cover, 500 m neighbourhood means of
+NDVI and NDBI, **and the window's meteorology**. It is trained against observed Landsat
+ST_B10 so it learns the local empirical relationship rather than us hand-rolling a surface
+energy balance.
+
+Meteorology arrived with the time dimension and immediately dominated: `air_temp_c` carries
+**91.5 %** of the model's gain, because across pooled windows it works as a *window
+identifier* and identifying the window explains most of a target spanning 22 °C. Two things
+follow, and neither is optional reading before quoting a number:
+
+- **It does not contaminate an intervention.** `simulate` holds meteorology fixed across
+  baseline and scenario, so every meteorology split lands identically on both sides and
+  cancels in the difference. The gain ranking describes what separates windows, not what
+  drives the intervention.
+- **It is a weak temporal feature.** Across nine summers `air_temp_c` correlates with mean
+  summer LST at only r = 0.55. That is why an unseen year costs 1.9–5.3 °C of offset — the
+  model has nothing else that varies with the year.
+
+`cores/equity.py` is the second, and is a pure function rather than a `Core`: it takes a
+delta field and a population field and returns who received the cooling.
 
 ### Layer 3 — Intelligence (`api/`)
 
@@ -113,8 +127,12 @@ Three rules this layer earned the hard way:
   died partway keeps its full time axis with the unreached windows still holding fill
   values, and shapes, coordinates and whole-cube summaries all still pass.
   `state.cube.validate_windows` checks per *variable-window*, and `api/runtime.py` refuses
-  to serve a cube that fails it. Startup logs and degrades to `/health` rather than
-  dying — a readiness probe needs an answer, not a restart loop.
+  to serve a cube that fails it. The **model** gets the same treatment: a booster whose
+  `feature_name()` does not match `FEATURE_NAMES` exactly — order included, since LightGBM
+  matches positionally — is refused at startup rather than 500-ing on `/simulate`. Startup
+  logs and keeps `/health` up while the data routes answer **503 with the reason**; it does
+  not die, because a readiness probe needs an answer rather than a restart loop, and it
+  does not 404, because that would claim the endpoint never existed.
 - **A raster crosses the wire as base64 float32 plus bounds, never as GeoJSON features.**
   40,602 cells as features is tens of megabytes describing a grid three numbers already
   define. The encoding is named in the payload so a client never guesses.
@@ -210,6 +228,7 @@ terrarium/
 │   │   └── store.py        #   Zarr + DuckDB persistence
 │   ├── cores/              # ← PURE. no I/O, no network, no globals.
 │   │   ├── base.py         #   Intervention, CoreResult, DeltaStats, Core protocol
+│   │   ├── equity.py       #   who receives the cooling: person-degrees by decile
 │   │   └── thermal/
 │   │       ├── features.py #   cube → feature matrix, incl. neighbourhood means
 │   │       ├── model.py    #   LightGBM train / predict / spatially blocked CV
@@ -319,6 +338,7 @@ uv run terrarium-api             # API on :8000, docs at /docs
                                  #   GET  /cube/summary    variables, windows, validity
                                  #   GET  /cube/layer/lst_c?window=2024-summer
                                  #   POST /simulate        GeoJSON polygon -> ΔLST
+                                 #                         + equity deciles
                                  #   serves TERRARIUM_SERVE_ZARR_STORE, not the build path
 uv run pytest                    # tests
 uv run ruff check src/ scripts/  # lint
@@ -339,7 +359,8 @@ uv run python scripts/hindcast.py         # find a change, train before it, scor
 cd web && npm install && npm run dev      # frontend on :5173 (the API's CORS allowlist
                                           #   is 5173 only — do not accept Vite's
                                           #   fallback port, free 5173 instead)
-cd web && npm run test                    # vitest: raster decode, ramps, compare split
+cd web && npm run test                    # vitest: raster decode, ramps, compare split,
+                                          #   equity verdicts + panel render
 cd web && npm run build                   # tsc -b + production bundle
 ```
 

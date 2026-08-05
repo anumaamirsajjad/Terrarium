@@ -100,6 +100,66 @@ class PlausibilityContext(BaseModel):
     )
 
 
+class DecileShareResponse(BaseModel):
+    """One tenth of the tile's residents, and what the intervention did for them."""
+
+    model_config = ConfigDict(frozen=True)
+
+    decile: int = Field(description="1 = least densely populated, 10 = most")
+    people: float
+    mean_delta_c: float = Field(description="Population-weighted mean ΔLST for this group")
+    share: float = Field(description="Share of total person-degrees. 0.10 is an even share")
+
+
+class EquityResponse(BaseModel):
+    """Who actually receives the cooling.
+
+    Deciles hold a tenth of the *population* each, not a tenth of the pixels, so an even
+    distribution is 0.10 everywhere and any skew is visible without arithmetic. The unit
+    behind `share` is person-degrees: a degree delivered where 500 people live counts 500
+    times a degree delivered where nobody does.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    deciles: list[DecileShareResponse]
+    stratified_by: str = Field(
+        description=(
+            "What ordered the deciles. 'population density' today — no deprivation layer "
+            "is free and keyless, and substituting built-up density for deprivation would "
+            "be a claim the data cannot support."
+        )
+    )
+    population_covered: float
+    top_three_share: float = Field(
+        description="Held by the three best-served deciles. Even sharing is 0.30"
+    )
+    concentrated: bool = Field(
+        description=(
+            "True when a majority of the benefit reaches three deciles out of ten. "
+            "Always false when `shares_reliable` is false."
+        )
+    )
+    shares_reliable: bool = Field(
+        description=(
+            "False when the plan cools and warms in near-equal measure. Shares divide by "
+            "the net benefit, so a vanishing denominator makes them explode — a half-"
+            "cooling, half-warming tile produces shares of ±2010%. Do not draw the "
+            "distribution when this is false; say the plan has no net effect to share."
+        )
+    )
+    net_to_gross: float = Field(
+        description="Net benefit over total temperature movement. 1.0 is pure cooling"
+    )
+    uninhabited_fraction: float = Field(
+        description=(
+            "Share of the cooling, measured as degree-cells, landing where nobody lives. "
+            "Not person-degrees: an empty cell scores zero of those by construction, so "
+            "the question would answer itself."
+        )
+    )
+
+
 class SimulateResponse(BaseModel):
     """The modelled effect of one intervention."""
 
@@ -111,6 +171,13 @@ class SimulateResponse(BaseModel):
     season: str
     stats: DeltaStatsResponse
     context: PlausibilityContext
+    equity: EquityResponse | None = Field(
+        default=None,
+        description=(
+            "Null when the served cube carries no population layer. Absent rather than "
+            "zeroed, so a client never reports a distribution that was never computed."
+        ),
+    )
     delta: LayerResponse = Field(
         description=(
             "Whole-tile ΔLST, scenario minus baseline — both predicted by the same model. "

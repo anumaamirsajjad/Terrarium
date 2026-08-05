@@ -18,6 +18,7 @@ import { type LoadedLayer, loadLayer, useCubeLayer } from "./hooks/useCubeLayer"
 import MapView, { type RasterOverlay } from "./map/MapView";
 import { type Position, useDrawnPolygon } from "./map/useDrawnPolygon";
 import Legend from "./panels/Legend";
+import EquityPanel from "./panels/EquityPanel";
 import ResultPanel from "./panels/ResultPanel";
 import { decodeLayer } from "./raster/decode";
 import { toCanvas } from "./raster/canvas";
@@ -458,6 +459,7 @@ export default function App() {
         )}
 
         {result && <ResultPanel result={result} />}
+        {result && <EquityPanel equity={result.equity} />}
 
         <footer className="sidebar__footer muted">
           {/* D9: this label must appear wherever the temperature does. Worded as a
