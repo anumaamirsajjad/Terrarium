@@ -14,14 +14,17 @@ import {
   type PlanResponse,
   type Preset,
   type SimulateResponse,
+  type StoredObservation,
   api,
 } from "./api/client";
 import { type LoadedLayer, loadLayer, useCubeLayer } from "./hooks/useCubeLayer";
 import MapView, { type RasterOverlay } from "./map/MapView";
 import { type Position, useDrawnPolygon } from "./map/useDrawnPolygon";
 import Legend from "./panels/Legend";
+import BriefDocument from "./panels/BriefDocument";
 import BriefPanel from "./panels/BriefPanel";
 import EquityPanel from "./panels/EquityPanel";
+import ObservationsPanel from "./panels/ObservationsPanel";
 import ResultPanel from "./panels/ResultPanel";
 import ScenarioPanel from "./panels/ScenarioPanel";
 import { decodeLayer } from "./raster/decode";
@@ -67,6 +70,11 @@ export default function App() {
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [planning, setPlanning] = useState(false);
+  const [observations, setObservations] = useState<StoredObservation[]>([]);
+  const [reader, setReader] = useState("no vision model configured");
+  // Where the next citizen photo is about. The map's last click, defaulting to the tile
+  // centre — nothing reads EXIF, so a photo can never silently report somewhere else.
+  const [photoAt, setPhotoAt] = useState<Position | null>(null);
 
   const draw = useDrawnPolygon();
 
@@ -110,6 +118,18 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  const refreshObservations = useCallback(() => {
+    api
+      .observations()
+      .then((response) => {
+        setObservations(response.observations);
+        setReader(response.reader);
+      })
+      .catch(() => setObservations([]));
+  }, []);
+
+  useEffect(refreshObservations, [refreshObservations]);
 
   const baseline = useCubeLayer(variable, selectedWindow);
 
@@ -204,7 +224,12 @@ export default function App() {
 
   const handleMapClick = useCallback(
     (position: Position) => {
-      if (draw.drawing) draw.addVertex(position);
+      if (draw.drawing) {
+        draw.addVertex(position);
+        return;
+      }
+      // Not drawing: the click is choosing where the next citizen photo is about.
+      setPhotoAt(position);
     },
     [draw],
   );
@@ -555,6 +580,28 @@ export default function App() {
         {result && <EquityPanel equity={result.equity} />}
         {result && <BriefPanel brief={result.brief} />}
 
+        {result && (
+          <section className="control">
+            <h2>Council brief</h2>
+            <button type="button" onClick={() => window.print()}>
+              Save as PDF
+            </button>
+            <p className="hint">
+              Opens the browser&rsquo;s print dialog — choose &ldquo;Save as PDF&rdquo;. No
+              rendering service and no extra dependency: the numbers, the findings and every
+              caveat, on one sheet.
+            </p>
+          </section>
+        )}
+
+        <ObservationsPanel
+          lon={photoAt ? photoAt[0] : health.tile.centroid[0]}
+          lat={photoAt ? photoAt[1] : health.tile.centroid[1]}
+          observations={observations}
+          reader={reader}
+          onSubmitted={refreshObservations}
+        />
+
         <footer className="sidebar__footer muted">
           {/* D9: this label must appear wherever the temperature does. Worded as a
               statement about lst_c and ΔLST specifically, because it sits below a layer
@@ -564,6 +611,17 @@ export default function App() {
           temperature, and not the afternoon peak.
         </footer>
       </aside>
+
+      {/* Hidden on screen, and the only thing on the page when printed. Rendered here
+          rather than in a new window so it always describes the result currently loaded. */}
+      {result && (
+        <BriefDocument
+          result={result}
+          plan={plan}
+          tile={health.tile}
+          producedAt={new Date()}
+        />
+      )}
     </div>
   );
 }

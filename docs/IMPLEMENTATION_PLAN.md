@@ -16,7 +16,7 @@ with the team.
 | 8 | Equity | ✅ **DONE** — panel shipped; demo plan gives the densest decile 0 % |
 | 9 | Air dispersion core | ✅ **DONE** — inventory + core shipped; OpenAQ scoring built but unrun |
 | 10 | DSL + agent layer | ✅ **DONE** — DSL, presets and brief ship; no LLM key, and it does not need one |
-| 11 | Voice, VLM, council brief | ⬜ |
+| 11 | Voice, VLM, council brief | ✅ **DONE** — voice + brief ship keyless; the photo reader is built and has never seen a photo |
 | 12 | Deployment | ⬜ |
 
 ---
@@ -45,6 +45,8 @@ Settled 2026-07-31. These are closed — reopen deliberately, not by drift.
 | D16 | Air validation source | OpenAQ **v3**, which unlike every other source in this project needs a key. Free and no card, so it stays inside D13, but it is the one thing that will not run out of the box — `scripts/validate_air.py` says so and stops rather than half-validating |
 | D17 | Agent framework | **No LangGraph.** Budgeted for in Phase 10 and not taken, for the reason D15 dropped `osmnx`: it is a graph runtime, and the planner is two nodes — parse, then validate — with no branching, no cycles and no shared state to checkpoint. `dsl/planner.py` is one function that tries a model and falls back to a regex parser. If agents later need to *choose* between interventions and iterate, that is a real graph and this reopens |
 | D18 | Where the LLM may live | **One module, `dsl/llm.py`, and nowhere else.** `ingest/` remains the only layer that fetches *data for the cube*; a planner call is a different thing — Layer 3, made on the user's behalf, with nothing downstream treating its output as a measurement. It is confined to one adapter for the same reason, and everything it returns is re-validated as a `Plan` before a core can see it. The key is optional: with none, `/plan` uses the rule parser and the rest of the layer never calls out at all |
+| D19 | Citizen observations vs the cube | **They get the grid, not the cube.** Phase 11's brief said "writing observations back into the cube"; what shipped keeps them in their own in-memory store, their own endpoint and their own layer, with `measured: false` on every response. Every cube variable is an instrument reading with a known error; a language model's reading of a phone photo is not, and merging them would make "what does the cube say" unanswerable. They render on the same 201×202 grid so the two *can* be compared — which is the whole value — and unpersisted, because storing user-submitted content means owning moderation and retention, which is out of scope in the same way user accounts are |
+| D20 | Voice capture | **Browser Web Speech API**, not LiveKit (meters minutes) and not self-hosted Whisper (needs somewhere to run). Free, keyless, no dependency. Uneven support is handled by detecting the constructor and rendering no microphone where there is none. Consequence that was not obvious: capturing Urdu is worthless unless the *parser* reads Urdu, because with no LLM key the rule parser is what receives the transcript — so Phase 11 put Urdu into `dsl/planner.py`, digits included |
 
 ### Assumptions I am defaulting (overturn any of these freely)
 
@@ -1386,23 +1388,129 @@ default — did run on the real cube, which is the part of that story that matte
 measurement above is the rule parser's. The adapter is tested against a stubbed transport
 and nothing else.
 
-## Phase 11 — Voice, VLM, council brief ⬜
+## Phase 11 — Voice, VLM, council brief ✅ DONE
 
-Citizen-photo VLM writing observations back into the cube — **reuse the Phase 10 Gemini
-key**, its free tier is multimodal, so this costs nothing extra. Note that Phase 10 shipped
-without ever obtaining one: `TERRARIUM_GEMINI_API_KEY` is wired through `dsl/llm.py` and
-unset, so getting a key is this phase's first step rather than a step it inherits.
+Three features that share one property: each was supposed to need a paid service and none
+of them does. Voice is the browser's own recogniser, the brief is the browser's own print
+dialog, and the photo reader is the Phase 10 Gemini key — which nobody has, so that third
+one is built, tested against a stub, and has never read a real photograph.
 
-The council brief is **half built**: `dsl/explain.py` already writes the findings and the
-uncertainties, and `/simulate` returns them. What is left is rendering, not authorship.
+**Delivered:**
 
-Voice in English and Urdu. LiveKit Cloud meters minutes, so prefer the free path:
-**browser Web Speech API** for capture, or self-hosted **Whisper** for transcription.
-Verify Urdu quality early — it is weaker than English in every engine, and this is the
-phase most likely to be dropped anyway.
+- `dsl/observe.py` — `Observation`, the vision prompt, and the parse. Pure: the adapter is
+  an argument, so the whole path is tested offline.
+- `dsl/llm.py` gains `VisionAdapter` and `complete_json_with_image`. Still **the only file
+  in the project that talks to a model** (D18).
+- `api/observations.py`, `api/schemas/observations.py`, `api/routes/observations.py`, and
+  `cell_from_lonlat` in `api/geometry.py` — `POST /observations`, `GET /observations`,
+  `GET /observations/layer`.
+- **Urdu in the rule parser** (`dsl/planner.py`): digit normalisation and the vocabulary
+  for the two things the DSL can express. See below — this is the part that was not on the
+  plan and had to be.
+- `web/src/voice/` — Web Speech capture in English and Urdu, and the honest support check.
+- `web/src/panels/BriefDocument.tsx` + a print stylesheet — the council brief as a printed
+  sheet, via `window.print()`.
+- `web/src/panels/ObservationsPanel.tsx` — submit a photo, see what the model made of it.
+- **33 new Python tests and 24 new browser tests.** Nothing touches the network: the vision
+  model is stubbed at the adapter seam, exactly as the planner's is.
 
-Council brief: render to PDF locally (WeasyPrint or the browser's print-to-PDF). No
-service required.
+### Voice: the transcript was the easy half
+
+**Web Speech API, not LiveKit and not self-hosted Whisper.** LiveKit Cloud meters minutes
+and Whisper needs somewhere to run; `webkitSpeechRecognition` is already in the browser,
+free, keyless, and adds no dependency — the same argument that chose OpenFreeMap over
+MapTiler. The cost is uneven support: Chrome and Edge have it, Firefox does not, so
+`recognitionConstructor()` returns the constructor or `null` and the panel renders no
+microphone at all rather than a button that does nothing.
+
+The transcript lands **in the text box, not in a request**. A recogniser that mishears
+should cost an edit, not a wrong simulation.
+
+### The Urdu finding: capturing Urdu is not supporting Urdu
+
+Setting `lang = "ur-PK"` took one line and would have shipped a feature that does not work.
+The speech API hands back Urdu text, that text goes to `/plan`, and `/plan` has no key — so
+the **rule parser** is what reads it. The rule parser was English-only. "Voice in English
+and Urdu" would have meant English, plus a microphone that produces a 422 in Urdu.
+
+Two things had to change, and the first is the one that would have been missed:
+
+- **Eastern Arabic-Indic digits match no `\d`.** ۵۰۰۰ is not 5000 to any pattern in the
+  parser, so an Urdu sentence with a tree count in it parsed as a plan with no quantity —
+  which reads as "it does not understand Urdu" rather than "it does not understand its
+  digits". `_normalise` folds ۰-۹ and ٠-٩ to ASCII before any pattern runs, so one set of
+  number patterns serves both scripts.
+- **A small, deliberate vocabulary**: درخت, پودے, شجرکاری for planting; گاڑیوں, ٹریفک with
+  پابندی for restriction; فیصد and ٪ for percentages; سردیوں and گرمیوں for the season —
+  which matters most, since winter is where the air result changes by 6-7x. Urdu also puts
+  the count after the noun, so there is a reversed pattern for "درخت ۲۰۰۰".
+
+The refusal message names the Urdu vocabulary too. Someone who just spoke Urdu into a
+microphone needs to be told what Urdu it understands, not what English it understands.
+
+**The honest caveat is on screen**: Urdu recognition is materially weaker than English in
+every browser engine. The parser understands Urdu; the microphone is the weak link, and the
+UI says which half failed.
+
+### The council brief: the browser already had a PDF renderer
+
+No WeasyPrint. It would have been a Python dependency, a font stack and a second rendering
+path, to reproduce a button every browser ships. `BriefDocument` is `display: none` on
+screen and the only thing on the page under `@media print`, so the sidebar keeps its shape
+and the document keeps its own.
+
+Two details that make a printed sheet honest, both of which only matter because paper
+outlives the session that produced it:
+
+- **Every number comes from the API.** The component computes nothing except which sections
+  exist. A figure invented on the client would be the hardest kind of error to trace once
+  it is on paper and nobody can click through to what produced it.
+- **`break-inside: avoid` on each section.** A caveat list split across a page break loses
+  its heading, which is precisely how "what this does not prove" becomes a page nobody
+  reads. The sheet carries the window, the tile, the hindcast-corrected figure beside the
+  raw one, the confidence, and a footer saying these are model outputs.
+
+### Citizen photos land on the grid and stay out of the cube
+
+This is the phase's one real architectural decision. "Writing observations back into the
+cube" was the plan's wording, and it is **not** what shipped: observations get the grid and
+nothing else — the same 201×202 cells, their own store, their own endpoint, and no route
+into `cube.zarr`.
+
+The reason is the cube's contract. Every variable in it is an instrument reading with a
+known error, aligned by `state/`. A language model's reading of a phone photo is not, and
+mixing the two makes "what does the cube say" unanswerable. So they are drawn *beside* the
+model output, which is what makes the comparison useful, and `measured: false` is on the
+response so no client can lose track of which is which.
+
+Five smaller choices, each of which has a wrong version that looks fine:
+
+| | shipped | the wrong version |
+|---|---|---|
+| unreported cells | **NaN** | 0 — draws 40,000 unphotographed cells as "checked, nothing wrong" |
+| two reports in one cell | **max severity** | mean — averages a shaded street with a burning waste pile |
+| the cell a photo lands in | **assigned by the API** from submitted coordinates | asked of the model, which is shown pixels and no location |
+| store size | **bounded at 500** | unbounded — a memory leak with a public door on it |
+| no key | **503 with the reason** | an empty observation, which renders as a report nobody made |
+
+The prompt forbids identifying a person, a plate or an address, and that instruction is
+asserted in a test rather than trusted to survive an edit — it is the only thing between
+this feature and a surveillance tool. Nothing reads EXIF either: the location is the one
+the user clicked, so a photo cannot silently report where it was really taken.
+
+### What did not run
+
+**No photograph has ever been read.** `TERRARIUM_GEMINI_API_KEY` is unset, so every test of
+the vision path uses a stub, and the quality of the model's categories, severities and
+confidences is completely unmeasured. What is verified is the plumbing: the prompt, the
+validation, the refusal of anything that is not an `Observation`, the placement on the grid,
+and the 503. Treat the feature as built and unproven — the same posture Phase 9 takes about
+OpenAQ, for the same reason.
+
+**Voice was not tested in a browser by an automated test.** `SpeechRecognition` cannot be
+driven from vitest, so what is covered is support detection, transcript assembly, the error
+messages, and the language list matching what the parser can read. The recogniser itself was
+exercised by hand only.
 
 ## Phase 12 — Deployment ⬜
 
@@ -1417,8 +1525,8 @@ decision (D12) — never blocks physics work.
 
 | | Track A — data & physics | Track B — product & interface |
 |---|---|---|
-| done | **Phase 7** hindcast, **Phase 9** air core | **Phase 8** equity panel, **Phase 10** DSL + brief |
-| now | rebuild `cube_phase9.zarr` when Overpass answers, then run the OpenAQ calibration once a key exists | Phase 11, or Phase 12 if voice is cut |
+| done | **Phase 7** hindcast, **Phase 9** air core | **Phase 8** equity, **Phase 10** DSL, **Phase 11** voice + brief + photos |
+| now | rebuild `cube_phase9.zarr` when Overpass answers, then run the OpenAQ calibration once a key exists | **Phase 12** deployment — the last one |
 
 Phases 2–6 are done, so the **cut-order minimum is met**: one tile, a thermal core, and a
 map showing the delta. Everything from here is upside on a submission that already stands

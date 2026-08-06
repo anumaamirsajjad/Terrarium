@@ -12,9 +12,11 @@
  * small delta, which looks exactly like a plan that simply worked badly.
  */
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import type { PlanResponse, Preset } from "../api/client";
+import { LANGUAGES, URDU_CAVEAT } from "../voice/speech";
+import { useSpeech } from "../voice/useSpeech";
 
 export interface ScenarioPanelProps {
   presets: Preset[];
@@ -49,6 +51,11 @@ export default function ScenarioPanel({
 }: ScenarioPanelProps) {
   const [text, setText] = useState("");
   const selected = plan?.plan.name;
+
+  // The transcript lands in the box rather than being sent: a recogniser that mishears
+  // should cost an edit, not a wrong simulation. That matters most in Urdu, where the
+  // microphone is the weak link and the parser is not.
+  const speech = useSpeech(useCallback((transcript: string) => setText(transcript), []));
 
   return (
     <section className="control scenario" aria-labelledby="scenario-heading">
@@ -85,8 +92,40 @@ export default function ScenarioPanel({
             placeholder="plant 5,000 trees and ban cars here in winter"
             onChange={(event) => setText(event.target.value)}
             disabled={!hasPolygon || busy}
+            dir="auto"
           />
         </label>
+
+        {speech.supported && (
+          <div className="row scenario__voice">
+            <button
+              type="button"
+              className={speech.listening ? "is-active" : ""}
+              disabled={!hasPolygon || busy}
+              onClick={() => (speech.listening ? speech.stop() : speech.start())}
+            >
+              {speech.listening ? "Listening…" : "🎙 Speak"}
+            </button>
+            <select
+              value={speech.language}
+              disabled={speech.listening}
+              onChange={(event) =>
+                speech.setLanguage(event.target.value as (typeof LANGUAGES)[number]["tag"])
+              }
+            >
+              {LANGUAGES.map((language) => (
+                <option key={language.tag} value={language.tag}>
+                  {language.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {speech.error && <p className="error-text">{speech.error}</p>}
+        {speech.supported && speech.language === "ur-PK" && (
+          <p className="hint">{URDU_CAVEAT}</p>
+        )}
+
         <div className="row">
           <button type="submit" disabled={!hasPolygon || busy || !text.trim()}>
             {busy ? "Checking…" : "Check plan"}

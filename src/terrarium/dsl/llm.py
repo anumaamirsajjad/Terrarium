@@ -55,6 +55,23 @@ class LLMAdapter(Protocol):
         ...
 
 
+class VisionAdapter(Protocol):
+    """The same seam, with an image attached.
+
+    Separate from `LLMAdapter` because the two capabilities are separable: a text-only
+    provider can serve the planner and not the photo reader, and typing them as one would
+    make `dsl.observe` accept adapters that cannot do the job. Gemini implements both, and
+    the free tier is multimodal, which is why Phase 11 costs nothing extra over Phase 10.
+    """
+
+    @property
+    def name(self) -> str: ...
+
+    def complete_json_with_image(
+        self, *, system: str, user: str, image_base64: str, mime_type: str
+    ) -> str: ...
+
+
 @dataclass(frozen=True)
 class GeminiAdapter:
     """Google AI Studio's `generateContent`, over plain urllib.
@@ -79,9 +96,29 @@ class GeminiAdapter:
         return f"gemini:{self.model}"
 
     def complete_json(self, *, system: str, user: str) -> str:
+        return self._generate([{"text": user}], system=system)
+
+    def complete_json_with_image(
+        self, *, system: str, user: str, image_base64: str, mime_type: str
+    ) -> str:
+        """The same call with an inline image part.
+
+        Inline rather than the Files API: a citizen photo is a few hundred kB, it is used
+        once, and uploading it first would mean two round trips and a resource on Google's
+        side that this project would then own the lifecycle of.
+        """
+        return self._generate(
+            [
+                {"text": user},
+                {"inlineData": {"mimeType": mime_type, "data": image_base64}},
+            ],
+            system=system,
+        )
+
+    def _generate(self, parts: list[dict[str, Any]], *, system: str) -> str:
         payload: dict[str, Any] = {
             "systemInstruction": {"parts": [{"text": system}]},
-            "contents": [{"role": "user", "parts": [{"text": user}]}],
+            "contents": [{"role": "user", "parts": parts}],
             "generationConfig": {
                 "temperature": 0.0,
                 "responseMimeType": "application/json",
@@ -117,12 +154,17 @@ def adapter_from_key(
     *,
     model: str = DEFAULT_GEMINI_MODEL,
     base_url: str = DEFAULT_GEMINI_URL,
-) -> LLMAdapter | None:
+) -> GeminiAdapter | None:
     """Build an adapter, or `None` when no key is configured.
 
     `None` is the expected state, not a degraded one. The rule-based parser handles the
     phrasings a demo actually uses, so a missing key costs flexibility, not function — and
-    a deployment with no key still answers `/plan`.
+    a deployment with no key still answers `/plan`. The one thing it does cost is
+    `/observations`, which has no offline reading of a photograph to fall back to.
+
+    Returns the concrete adapter rather than `LLMAdapter`, because Gemini satisfies both
+    that protocol and `VisionAdapter`, and narrowing the return type here would make the
+    photo path unable to use the same construction.
     """
     if not api_key:
         return None

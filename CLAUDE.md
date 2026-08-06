@@ -174,6 +174,23 @@ stops being read.
 Costs are `calibrated=False` everywhere: literature unit figures, in the same category as
 the air core's emission factors. Good for ranking two plans, not a budget.
 
+**Citizen observations get the grid, not the cube** (D19). `dsl/observe.py` reads a photo
+into a typed `Observation`; `api/observations.py` places it on the canonical 201×202 grid
+and keeps it there — its own store, its own endpoint, `measured: false` on every response,
+and no route into `cube.zarr`. Every cube variable is an instrument reading with a known
+error, and a language model's reading of a phone photo is not; merging them would make
+"what does the cube say" unanswerable. The store is bounded and unpersisted, unreported
+cells are **NaN** rather than 0, and a cell holds the **worst** severity reported rather
+than the mean. This is also the one path in the project with no offline fallback — no rule
+parser can read a photograph — so with no key it answers **503 with the reason** rather
+than an empty observation, which would render as a report nobody made.
+
+The rule parser reads **English and Urdu** (D20). That is not decoration: voice capture is
+`ur-PK`-capable, and with no LLM key the transcript goes straight to this parser, so an
+English-only parser would make "voice in Urdu" a microphone that produces a 422. Eastern
+Arabic-Indic digits are folded to ASCII before any pattern runs — ۵۰۰۰ matches no `\d`, and
+without that pass an Urdu sentence parses as a plan with no quantity in it.
+
 Three rules this layer earned the hard way:
 
 - **Validate the artefact when you load it, not when you built it.** A cube whose ingest
@@ -297,18 +314,23 @@ terrarium/
 │   │   ├── schema.py       #   Plan, PlantTrees, RestrictVehicles. No geometry, by design
 │   │   ├── validate.py     #   plan + measured polygon -> what /simulate takes, or refusal
 │   │   ├── library.py      #   costed presets. calibrated=False everywhere
-│   │   ├── planner.py      #   text -> Plan: model first, deterministic regex always
+│   │   ├── planner.py      #   text -> Plan: model first, deterministic regex always.
+│   │   │                   #   English + Urdu, digits folded (D20)
 │   │   ├── explain.py      #   numbers -> brief. Templates, never a model
+│   │   ├── observe.py      #   citizen photo -> typed Observation. Never enters the cube
 │   │   └── llm.py          #   ← the ONLY file that talks to an LLM (D18). Optional
 │   └── api/
 │       ├── main.py         #   app factory, CORS, router wiring, loads the runtime
 │       ├── runtime.py      #   cube + model loaded ONCE; per-window validation
-│       ├── geometry.py     #   GeoJSON -> boolean grid mask (D6). Only place doing this
+│       ├── geometry.py     #   GeoJSON -> mask, lon/lat -> cell (D6). Only place doing this
 │       ├── measure.py      #   what the tile says a polygon can hold, for dsl/validate
+│       ├── observations.py #   in-memory citizen reports, rendered onto the grid (D19)
 │       ├── deps.py         #   the runtime as a FastAPI dependency
 │       ├── routes/         #   HTTP endpoints (thin)
 │       └── schemas/        #   Pydantic request/response contracts
 ├── web/                    # React + Vite + MapLibre + deck.gl
+│                           #   src/voice/     Web Speech capture, en + ur (D20)
+│                           #   src/panels/BriefDocument.tsx  print-to-PDF council brief
 ├── data/                   # gitignored: raw/ interim/ processed/
 │                           #   raw/pak_ppp_2020_constrained.tif (WorldPop, cached)
 │                           #   processed/cube.zarr, terrarium.duckdb, thermal.txt
@@ -407,7 +429,13 @@ cannot be done free, the plan changes, not the budget.
 The LLM went one better than free: it is **optional**. `TERRARIUM_GEMINI_API_KEY` is unset
 and everything still works, because the DSL, the validators, the costs and the brief are
 all deterministic and the planner falls back to a regex parser. Keep it that way — the
-demo must never require a key that a rate limit can revoke mid-pitch.
+demo must never require a key that a rate limit can revoke mid-pitch. The single exception
+is `POST /observations`, where no fallback is possible and the route says so.
+
+Phase 11 added two more services that were budgeted for and not bought: **voice** is the
+browser's own `SpeechRecognition` (LiveKit meters minutes; Whisper needs a host), and the
+**council brief PDF** is the browser's own print dialog (WeasyPrint would have been a
+dependency and a font stack to reproduce a button every browser ships).
 
 ---
 
@@ -429,6 +457,11 @@ uv run terrarium-api             # API on :8000, docs at /docs
                                  #                         + ΔPM2.5 when the request
                                  #                           removes emissions
                                  #                         + brief (findings + uncertainties)
+                                 #   POST /observations    citizen photo -> typed observation
+                                 #                         on the grid. The ONE route that
+                                 #                         needs a key: 503 without one
+                                 #   GET  /observations    what has been reported this run
+                                 #   GET  /observations/layer  those reports as a raster
                                  #   serves TERRARIUM_SERVE_ZARR_STORE, not the build path
 uv run pytest                    # tests
 uv run ruff check src/ scripts/  # lint
@@ -456,7 +489,8 @@ cd web && npm install && npm run dev      # frontend on :5173 (the API's CORS al
                                           #   fallback port, free 5173 instead)
 cd web && npm run test                    # vitest: raster decode, ramps, compare split,
                                           #   equity verdicts + panel render, scenario
-                                          #   presets + brief render
+                                          #   presets + brief render, speech support
+                                          #   detection, printable brief, photo panel
 cd web && npm run build                   # tsc -b + production bundle
 ```
 

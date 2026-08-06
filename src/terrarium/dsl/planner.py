@@ -54,31 +54,79 @@ class ParsedPlan(BaseModel):
 
 # ------------------------------------------------------------------ rule parser ---
 
+# Urdu (Phase 11). The voice path captures `ur-PK`, so an Urdu sentence has to reach a
+# parser that can read it — otherwise "voice in English and Urdu" means English, plus a
+# microphone that produces a 422 in Urdu. The vocabulary is small on purpose: these are the
+# words for the two things the DSL can express, not an attempt at Urdu NLP. Everything
+# else about the sentence is ignored, exactly as it is in English.
+#
+# Note the script is right-to-left and the digits are usually Eastern Arabic-Indic
+# (۰-۹), which no `\d` in a naive pattern matches. `_normalise` folds them to
+# ASCII before any pattern runs, which is why one set of number patterns serves both
+# languages.
+_URDU_DIGITS = {
+    **{chr(0x06F0 + i): str(i) for i in range(10)},  # Urdu ۰-۹
+    **{chr(0x0660 + i): str(i) for i in range(10)},  # Arabic ٠-٩
+}
+_URDU_PERCENT = "٪"  # ٪
+# درخت tree, پودے saplings, شجرکاری afforestation
+_URDU_TREE_WORDS = r"درخت|پودے|پودوں|شجرکاری|شجر کاری"
+# سایہ shade, ہریالی greenery
+_URDU_CANOPY_WORDS = r"سایہ|سائبان|ہریالی|درختوں کا"
+# گاڑی vehicle, ٹریفک traffic, پابندی ban, دھواں smoke
+_URDU_TRAFFIC_WORDS = r"گاڑیوں|گاڑیاں|گاڑی|ٹریفک|دھواں|ڈیزل"
+_URDU_BAN_WORDS = r"پابندی|بند کریں|بند کر|منع"
+_URDU_WINTER = r"سردی|سردیوں|موسم سرما|جاڑا"
+_URDU_SUMMER = r"گرمی|گرمیوں|موسم گرما"
+
 # "5,000 trees", "5000 trees", "5k trees", "two thousand" is deliberately not supported:
 # spelled-out numerals are a rabbit hole and a demo types digits.
-_TREES = re.compile(r"(\d[\d,\s]*(?:\.\d+)?)\s*(k|thousand)?\s*(?:more\s+)?trees?\b")
+_TREES = re.compile(
+    rf"(\d[\d,\s]*(?:\.\d+)?)\s*(k|thousand|ہزار)?\s*(?:more\s+)?(?:trees?|{_URDU_TREE_WORDS})"
+)
+# Urdu puts the number before the noun too ("5000 درخت"), so the same pattern covers both
+# once the digits are folded — but Urdu also says "درخت 5000", hence the reversed form.
+_TREES_REVERSED = re.compile(rf"(?:{_URDU_TREE_WORDS})\s*(\d[\d,\s]*)\s*(ہزار)?")
 # A percentage near a greenery word, either order: "30% canopy" and "canopy by 30%".
-_CANOPY_FIRST = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|per\s*cent)\D{0,24}?(canopy|tree|shade|green)")
+_CANOPY_FIRST = re.compile(
+    rf"(\d+(?:\.\d+)?)\s*(?:%|{_URDU_PERCENT}|per\s*cent|فیصد)"
+    rf"[^.]{{0,24}}?(canopy|tree|shade|green|{_URDU_CANOPY_WORDS}|{_URDU_TREE_WORDS})"
+)
 _CANOPY_LAST = re.compile(
-    r"(canopy|tree cover|shade|greening)\D{0,24}?(\d+(?:\.\d+)?)\s*(?:%|per\s*cent)"
+    rf"(canopy|tree cover|shade|greening|{_URDU_CANOPY_WORDS})"
+    rf"[^.]{{0,24}}?(\d+(?:\.\d+)?)\s*(?:%|{_URDU_PERCENT}|per\s*cent|فیصد)"
 )
 # A percentage near a traffic word: "remove 40% of traffic".
 _TRAFFIC_SHARE = re.compile(
-    r"(\d+(?:\.\d+)?)\s*(?:%|per\s*cent)\s*(?:of\s*)?(?:the\s*)?"
-    r"(traffic|vehicles?|cars?|emissions?|lorr|truck)"
+    rf"(\d+(?:\.\d+)?)\s*(?:%|{_URDU_PERCENT}|per\s*cent|فیصد)\s*(?:of\s*)?(?:the\s*)?"
+    rf"(traffic|vehicles?|cars?|emissions?|lorr|truck|{_URDU_TRAFFIC_WORDS})"
 )
 _TRAFFIC_WORDS = re.compile(
-    r"\b(ban|banning|car[- ]free|pedestriani[sz]|low[- ]emission zone|lez|congestion charge|"
-    r"combustion|no cars|no traffic|remove traffic|close .{0,12}to traffic|diesel)\b"
+    rf"\b(ban|banning|car[- ]free|pedestriani[sz]|low[- ]emission zone|lez|congestion charge|"
+    rf"combustion|no cars|no traffic|remove traffic|close .{{0,12}}to traffic|diesel)\b"
+    rf"|(?:{_URDU_TRAFFIC_WORDS})[^.]{{0,20}}?(?:{_URDU_BAN_WORDS})"
+    rf"|(?:{_URDU_BAN_WORDS})[^.]{{0,20}}?(?:{_URDU_TRAFFIC_WORDS})"
 )
 _WINDOW = re.compile(r"\b(20\d\d)\s*[-/ ]\s*(summer|winter)\b")
 _WINDOW_REVERSED = re.compile(r"\b(summer|winter)\s*(?:of\s*)?(20\d\d)\b")
 _SEASON = re.compile(r"\b(summer|winter)\b")
+_URDU_SEASON = re.compile(rf"({_URDU_WINTER})|({_URDU_SUMMER})")
+
+
+def _normalise(text: str) -> str:
+    """Lowercase, and fold Urdu/Arabic digits to ASCII.
+
+    One pass so that every number pattern below works in either script. Without it an Urdu
+    sentence carrying ۵۰۰۰ parses as a plan with no quantity in it, which then reads as the
+    parser not understanding Urdu at all rather than not understanding its digits.
+    """
+    return "".join(_URDU_DIGITS.get(ch, ch) for ch in text).lower()
 
 
 def _number(raw: str, multiplier: str | None) -> int:
     value = float(raw.replace(",", "").replace(" ", ""))
     if multiplier:
+        # "k", "thousand", and ہزار all mean the same thing.
         value *= 1_000
     return round(value)
 
@@ -97,11 +145,11 @@ def parse_rules(text: str) -> ParsedPlan:
 
     Deterministic, offline, and the only parser the tests use.
     """
-    lowered = text.lower()
+    lowered = _normalise(text)
     warnings: list[str] = []
     actions: list[PlantTrees | RestrictVehicles] = []
 
-    trees = _TREES.search(lowered)
+    trees = _TREES.search(lowered) or _TREES_REVERSED.search(lowered)
     canopy_first = _CANOPY_FIRST.search(lowered)
     canopy_last = _CANOPY_LAST.search(lowered)
 
@@ -133,15 +181,16 @@ def parse_rules(text: str) -> ParsedPlan:
     if not actions:
         raise PlanParseError(
             "no intervention found in that. This layer understands two things: planting "
-            "('5,000 trees', '30% canopy') and vehicle restriction ('ban combustion "
-            "vehicles', 'remove 40% of traffic'), optionally with a season "
-            "('in winter', '2024-winter')."
+            "('5,000 trees', '30% canopy', '۵۰۰۰ درخت') and vehicle restriction ('ban "
+            "combustion vehicles', 'remove 40% of traffic', 'گاڑیوں پر پابندی'), "
+            "optionally with a season ('in winter', '2024-winter', 'سردیوں میں')."
         )
 
     window: str | None = None
     season: Season | None = None
     explicit = _WINDOW.search(lowered)
     reversed_ = _WINDOW_REVERSED.search(lowered)
+    urdu_season = _URDU_SEASON.search(lowered)
     if explicit is not None:
         window = f"{explicit.group(1)}-{explicit.group(2)}"
     elif reversed_ is not None:
@@ -150,6 +199,10 @@ def parse_rules(text: str) -> ParsedPlan:
         loose = _SEASON.search(lowered)
         if loose is not None:
             season = Season(loose.group(1))
+        elif urdu_season is not None:
+            # A year in Urdu text still reads as ASCII digits after `_normalise`, but the
+            # season word does not, so the two halves of a window are handled separately.
+            season = Season.WINTER if urdu_season.group(1) else Season.SUMMER
 
     return ParsedPlan(
         plan=Plan(

@@ -62,6 +62,29 @@ def _as_geometry(geojson: dict[str, Any]) -> dict[str, Any]:
     return geojson
 
 
+def cell_from_lonlat(lon: float, lat: float, grid: Grid) -> tuple[int, int]:
+    """Which grid cell a WGS84 point falls in, as `(row, col)`.
+
+    The point-shaped counterpart to `mask_from_geojson`, and it lives here for the same
+    reason: this is the one module that speaks both WGS84 and the analysis CRS.
+
+    Raises `GeometryError` outside the tile. Clamping instead would silently pin a photo
+    taken in another city to the nearest edge cell, which is a wrong answer wearing a
+    plausible one's clothes.
+    """
+    to_grid = Transformer.from_crs(WGS84, grid.crs, always_xy=True)
+    x, y = to_grid.transform(lon, lat)
+
+    left, bottom, right, top = grid.bounds
+    if not (left <= x < right and bottom <= y < top):
+        raise GeometryError(
+            f"({lon:.4f}, {lat:.4f}) is outside the tile. Terrarium models one tile "
+            "(Lahore) and has nothing to say about anywhere else."
+        )
+
+    return (int((top - y) // grid.resolution_m), int((x - left) // grid.resolution_m))
+
+
 def mask_from_geojson(geojson: dict[str, Any], grid: Grid) -> np.ndarray:
     """Rasterise a WGS84 GeoJSON polygon onto the canonical grid.
 
