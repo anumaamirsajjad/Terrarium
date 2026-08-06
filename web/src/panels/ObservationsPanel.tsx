@@ -81,8 +81,9 @@ export default function ObservationsPanel({
 
       <p className="hint">
         A photo of a street, read into a typed observation and placed on the grid at{" "}
-        {lat.toFixed(4)}, {lon.toFixed(4)} — click the map to move that. <strong>Reports,
-        not measurements:</strong> they sit beside the cube and never inside it.
+        {lat.toFixed(4)}, {lon.toFixed(4)} — marked in amber on the map; click elsewhere to
+        move it. <strong>Reports, not measurements:</strong> they sit beside the cube and
+        never inside it.
       </p>
 
       <input

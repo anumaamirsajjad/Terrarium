@@ -42,6 +42,8 @@ export interface MapViewProps {
   drawing: boolean;
   /** Longitude of the compare divider, or null when not comparing. */
   dividerLongitude: number | null;
+  /** Where the next citizen photo is about, or null while nothing has been clicked. */
+  photoAt: Position | null;
   onMapClick: (position: Position) => void;
 }
 
@@ -49,6 +51,11 @@ const DRAW_FILL: [number, number, number, number] = [56, 189, 248, 55];
 const DRAW_FILL_OPEN: [number, number, number, number] = [56, 189, 248, 12];
 const DRAW_LINE: [number, number, number, number] = [56, 189, 248, 255];
 const DIVIDER_COLOUR: [number, number, number, number] = [255, 255, 255, 200];
+// Amber, deliberately not the draw palette's cyan: this marker answers a different
+// question ("where is this photo about") from the polygon ("where is the intervention"),
+// and the two are placed by the same click depending on mode.
+const PHOTO_COLOUR: [number, number, number, number] = [217, 119, 6, 255];
+const PHOTO_HALO: [number, number, number, number] = [255, 255, 255, 230];
 
 export default function MapView({
   tile,
@@ -57,6 +64,7 @@ export default function MapView({
   polygonClosed,
   drawing,
   dividerLongitude,
+  photoAt,
   onMapClick,
 }: MapViewProps) {
   const container = useRef<HTMLDivElement>(null);
@@ -192,8 +200,30 @@ export default function MapView({
       );
     }
 
+    // Where the next citizen photo is about. Drawn last so it stays on top of the
+    // overlay: the panel tells the user to "click the map to move that", and without a
+    // marker there is nothing on screen saying the click landed.
+    if (photoAt) {
+      layers.push(
+        new ScatterplotLayer({
+          id: "photo-location",
+          data: [photoAt],
+          getPosition: (d: Position) => d,
+          getFillColor: PHOTO_COLOUR,
+          getLineColor: PHOTO_HALO,
+          // A white ring, so it stays findable over the dark end of a heat overlay.
+          stroked: true,
+          lineWidthUnits: "pixels",
+          getLineWidth: 2,
+          getRadius: 7,
+          radiusUnits: "pixels",
+          pickable: false,
+        }),
+      );
+    }
+
     deck.current.setProps({ layers });
-  }, [overlay, vertices, polygonClosed, dividerLongitude, tile.bbox]);
+  }, [overlay, vertices, polygonClosed, dividerLongitude, photoAt, tile.bbox]);
 
   return <div ref={container} className="map" />;
 }

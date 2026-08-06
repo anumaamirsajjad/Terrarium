@@ -147,14 +147,24 @@ def _air(
 
 
 def _plan_name(request: SimulateRequest) -> str:
-    """Name the plan from what it actually does. `/simulate` takes no plan object."""
+    """Name the plan from what it actually does. `/simulate` takes no plan object.
+
+    The both-zero case is named rather than falling through to "Planting". It is only
+    reachable by posting here directly - `/plan` refuses an empty plan at the schema - but
+    the brief headlines the name, so falling through produced *"Planting over 4.00 km2
+    changes nothing measurable"* for a request that never asked to plant anything. That
+    reads as a modelled result for a planting, which is a different claim from "you asked
+    for nothing".
+    """
     planting = request.canopy_fraction_added > 0
     restricting = request.emission_fraction_removed > 0
     if planting and restricting:
         return "Planting and low-emission zone"
     if restricting:
         return "Low-emission zone"
-    return "Planting"
+    if planting:
+        return "Planting"
+    return "No intervention"
 
 
 def _brief(

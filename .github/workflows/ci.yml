@@ -1,0 +1,115 @@
+# Every check this repo already has, enforced rather than remembered.
+#
+# The suite is CI-safe by construction: **no test touches the network** (CLAUDE.md), the
+# cube fixtures are synthesised in-process, and the LLM is optional everywhere except
+# POST /observations, which answers 503 without a key and is tested for exactly that. So
+# no secrets are configured here on purpose - a workflow that needs TERRARIUM_GEMINI_API_KEY
+# would make a fork's first push fail for a reason that is not the fork's fault.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # So the network-isolation check below can be run on demand after touching ingest/.
+  workflow_dispatch:
+
+# A second push supersedes the first; there is nothing here worth finishing twice.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: python (pytest, ruff, mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # Pinned >=3.12,<3.13 in pyproject.toml: the geo stack lags on 3.13 wheels.
+      - name: Set up Python
+        run: uv python install 3.12
+
+      # --frozen: fail if uv.lock disagrees with pyproject.toml rather than silently
+      # resolving something new. CI installing different versions than a developer is how
+      # "works on my machine" gets built into the pipeline itself.
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+
+      - name: Lint
+        run: uv run ruff check src/ scripts/
+
+      - name: Types
+        run: uv run mypy
+
+      - name: Tests
+        run: uv run pytest
+
+  web:
+    name: web (vitest, tsc, oxlint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # ci, not install: install the lockfile, do not update it.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm run test
+
+      # `tsc -b` runs inside this, which is what catches the client/schema drift that
+      # shipped a SimulateResponse with no `air` field for the whole of Phase 9 (A18).
+      - name: Build
+        run: npm run build
+
+  network-isolation:
+    name: no test touches the network
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev --frozen
+
+      # "No test may touch the network" is a rule in CLAUDE.md, and the one time it was
+      # broken the test *passed for the wrong reason* - which is precisely the failure a
+      # green suite cannot report. Blocking the socket layer makes the rule enforceable
+      # instead of aspirational: a test that reaches out now fails loudly and names itself.
+      #
+      # Kept as its own job rather than folded into `python`, because a failure here means
+      # something quite different from a failing assertion, and because it must not be the
+      # reason a legitimate test failure goes unseen.
+      # Loaded with `-p`, so the patch is in place before any test module is imported.
+      - name: Run the suite with sockets blocked
+        run: PYTHONPATH=ci uv run pytest -p no_network -q

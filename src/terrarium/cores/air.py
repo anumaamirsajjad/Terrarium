@@ -193,7 +193,7 @@ def concentration(
     Not the total concentration - see the module docstring. The regional background is
     absent by construction, so read differences, not levels.
     """
-    # ponytail: one deposition velocity for the whole tile, weighted by its mean canopy.
+    # caveat: one deposition velocity for the whole tile, weighted by its mean canopy.
     # Making it vary per cell would mean integrating v_d along every source-receptor path,
     # which is a per-pair calculation and forfeits the single convolution the interactivity
     # claim rests on. The cost is that planting inside a small polygon credits the whole
@@ -264,7 +264,7 @@ def simulate(
       combustion vehicles" - though note that brake, tyre and road wear are roughly half of
       road PM2.5 and do not go away when the engine changes, only when the traffic does.
     - **Canopy added**, which raises dry deposition. Real but second-order, and attributed
-      tile-wide rather than locally - see the `ponytail:` note in `concentration`.
+      tile-wide rather than locally - see the `caveat:` note in `concentration`.
 
     `model` defaults to the parameters for the window's own season. Passing summer
     parameters to a winter window is a mistake worth ~3x, so the default is derived from

@@ -30,6 +30,21 @@ PLANTABLE = {
     ],
 }
 
+# The synthetic river down the western edge. Nothing plantable in it, which makes it the
+# way to ask for a planting that *achieves* nothing without asking for nothing.
+RIVER = {
+    "type": "Polygon",
+    "coordinates": [
+        [
+            [74.2540, 31.44],
+            [74.2570, 31.44],
+            [74.2570, 31.60],
+            [74.2540, 31.60],
+            [74.2540, 31.44],
+        ]
+    ],
+}
+
 
 def simulate(client: TestClient, **overrides: Any) -> dict[str, Any]:
     body: dict[str, Any] = {"geometry": PLANTABLE, "canopy_fraction_added": 0.30, **overrides}
@@ -81,6 +96,34 @@ def test_zero_canopy_changes_nothing(client: TestClient) -> None:
     delta = decode(body["delta"])
 
     assert np.all(delta[np.isfinite(delta)] == 0.0)
+
+
+def test_a_request_that_asks_for_nothing_is_not_headlined_as_a_planting(
+    client: TestClient,
+) -> None:
+    """Both levers at zero used to fall through to "Planting".
+
+    The brief then read *"Planting over N km2 changes nothing measurable"*, which states a
+    modelled result for a planting nobody requested. Only reachable by posting here
+    directly - `/plan` refuses an empty plan at the schema - so it is cosmetic, but the
+    sentence is the product's own summary of what it did.
+    """
+    body = simulate(client, canopy_fraction_added=0.0, emission_fraction_removed=0.0)
+    headline = body["brief"]["headline"]
+
+    assert "Planting" not in headline
+    assert headline.startswith("No intervention")
+
+
+def test_a_planting_with_no_headroom_is_still_called_a_planting(client: TestClient) -> None:
+    """The distinction A19 draws is *requested*, not *achieved*.
+
+    Planting over water adds no canopy and cools nothing, but the plan did ask to plant -
+    "changes nothing measurable" is then the right answer to the right question.
+    """
+    body = simulate(client, canopy_fraction_added=0.4, geometry=RIVER)
+
+    assert body["brief"]["headline"].startswith("Planting")
 
 
 # ------------------------------------------------------------------- the window ---
@@ -181,19 +224,7 @@ def test_a_canopy_fraction_above_one_is_rejected_by_the_schema(client: TestClien
 
 def test_planting_on_water_adds_nothing(client: TestClient) -> None:
     """The synthetic river runs down the western edge; you cannot plant a river."""
-    river = {
-        "type": "Polygon",
-        "coordinates": [
-            [
-                [74.2540, 31.44],
-                [74.2570, 31.44],
-                [74.2570, 31.60],
-                [74.2540, 31.60],
-                [74.2540, 31.44],
-            ]
-        ],
-    }
-    response = client.post("/simulate", json={"geometry": river})
+    response = client.post("/simulate", json={"geometry": RIVER})
 
     # Either the mask holds no plantable cell at all (n_cells_changed == 0), or the few
     # non-water cells it caught cool slightly. What must never happen is the river itself

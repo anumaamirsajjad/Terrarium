@@ -111,6 +111,7 @@ odc-geo==0.5.3
     # via
     #   odc-loader
     #   odc-stac
+    #   terrarium
 odc-loader==0.6.4
     # via odc-stac
 odc-stac==0.5.2
@@ -152,6 +153,7 @@ pyproj==3.7.2
     #   geopandas
     #   odc-geo
     #   rioxarray
+    #   terrarium
 pystac==1.15.2
     # via
     #   odc-stac
@@ -251,6 +253,7 @@ rasterio==1.5.0
     #   odc-loader
     #   odc-stac
     #   rioxarray
+    #   terrarium
 referencing==0.37.0
     # via
     #   jsonschema
@@ -271,6 +274,7 @@ scipy==1.18.0
     # via
     #   lightgbm
     #   scikit-learn
+    #   terrarium
 shapely==2.1.2
     # via
     #   geopandas

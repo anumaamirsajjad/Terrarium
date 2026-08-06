@@ -1,7 +1,12 @@
 # Terrarium — Implementation Plan
 
-Status as of **2026-07-31**. Rewritten after a full repository audit and a decision pass
-with the team.
+Phases and decisions current to **2026-08-06**, after Phase 11. Originally written
+2026-07-31 following a full repository audit and a decision pass with the team.
+
+**Phase status is not the same as working software.** [AUDIT.md](AUDIT.md) is the snapshot
+of what is currently broken, missing or invisible — including the fact that no cube on this
+machine is servable today, so a repository of eleven done phases currently answers 503 on
+every data route. Read it before trusting a ✅ below to mean "runs".
 
 | | Phase | Status |
 |---|---|---|
@@ -1206,7 +1211,7 @@ kilometre downwind — which is why the air block reports spillover over 10 cell
 thermal block over 2.
 
 Planting alone, +30 % canopy over the same 4 km², moves air by **−0.0003 µg/m³**. That is
-honest and it is small, and the `ponytail:` note in `concentration` says why: deposition
+honest and it is small, and the `caveat:` note in `concentration` says why: deposition
 uses one tile-mean velocity, so a small planting credits the whole tile with a marginally
 better sink rather than crediting the polygon. Trees are a thermal instrument here, not an
 air one.

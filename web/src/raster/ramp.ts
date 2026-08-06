@@ -93,12 +93,42 @@ export const DIVERGING = rampFrom([
   [150, 26, 30, 255],
 ]);
 
-export const RAMPS = { HEAT, VEGETATION, NEUTRAL, DIVERGING } as const;
+/**
+ * Emissions: pale straw → ochre → deep plum. For the PM2.5 inventory.
+ *
+ * Sequential and mostly transparent at the bottom, because emissions are genuinely zero
+ * over most of the tile — 8,768 of 40,602 cells have no source at all. Greyscale would
+ * paint those the same dark as the basemap's own labels, and the roads are the signal.
+ */
+export const EMISSION = rampFrom([
+  [250, 244, 214, 20],
+  [240, 200, 120, 160],
+  [214, 130, 70, 220],
+  [120, 40, 80, 255],
+]);
+
+/**
+ * Citizen-report severity, 1–5: pale amber → deep red.
+ *
+ * A *reported* severity, not a measured field, which is why it never shares a ramp with a
+ * cube variable — the whole point of D19 is that these two things stay distinguishable.
+ * Fully opaque throughout: a report is a discrete point somebody made, and fading the
+ * quiet ones would read as uncertainty the store does not model.
+ */
+export const SEVERITY = rampFrom([
+  [253, 231, 176, 255],
+  [246, 178, 92, 255],
+  [222, 108, 58, 255],
+  [150, 26, 30, 255],
+]);
+
+export const RAMPS = { HEAT, VEGETATION, NEUTRAL, DIVERGING, EMISSION, SEVERITY } as const;
 
 /** Which ramp suits a cube variable. */
 export function rampForVariable(name: string): Ramp {
   if (name === "lst_c") return HEAT;
   if (name === "ndvi") return VEGETATION;
+  if (name === "pm25_emission_g_s") return EMISSION;
   return NEUTRAL;
 }
 

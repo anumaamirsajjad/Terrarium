@@ -75,6 +75,15 @@ class Dims(StrEnum):
         return self is not Dims.TIME
 
 
+# Which script can put a variable into a cube that does not have one. These are the two
+# remedies, and they are not interchangeable: `build_tile.py` is a network-heavy rebuild
+# against Planetary Computer that takes ~70 s per window, while `build_air_layers.py`
+# grafts two variables onto an existing cube in seconds. Telling someone to do the first
+# when the second would do costs them minutes and a chance for the network to drop.
+BUILD_TILE_SCRIPT = "scripts/build_tile.py"
+BUILD_AIR_LAYERS_SCRIPT = "scripts/build_air_layers.py"
+
+
 class VariableSpec(BaseModel):
     """Declaration of one cube variable."""
 
@@ -84,6 +93,10 @@ class VariableSpec(BaseModel):
     description: str
     units: str
     dtype: str
+    # The script that can add this variable to a cube built before it was declared.
+    # Declared here rather than branched on in the validator, so that adding a variable
+    # and adding the script that backfills it are one edit in one place.
+    added_by: str = BUILD_TILE_SCRIPT
     # None for variables that never touch the grid — nothing is resampled onto a
     # dimension that does not exist.
     resampling: Resampling | None
@@ -213,6 +226,7 @@ CUBE_VARIABLES: tuple[VariableSpec, ...] = (
         ),
         units="g s-1",
         dtype="float32",
+        added_by=BUILD_AIR_LAYERS_SCRIPT,
         resampling=Resampling.SUM,
         dims=Dims.SPACE,
         source_collection=SOURCE_OSM,
@@ -276,6 +290,7 @@ CUBE_VARIABLES: tuple[VariableSpec, ...] = (
         ),
         units="deg",
         dtype="float32",
+        added_by=BUILD_AIR_LAYERS_SCRIPT,
         resampling=None,
         dims=Dims.TIME,
         source_collection=SOURCE_OPEN_METEO,
@@ -470,9 +485,12 @@ def window_valid_fractions(ds: xr.Dataset) -> dict[str, dict[str, float]]:
                 continue  # static: identical in every window, nothing per-window to say
             if spec.name not in window:
                 # A cube built before this variable was declared. Zero valid, not a
-                # KeyError: `validate_windows` then names it in the same "rebuild this"
-                # message as an empty one, instead of the API dying on an import-time
-                # traceback that says nothing about which artefact is stale.
+                # KeyError, so that a caller reporting coverage has a number for every
+                # declared variable rather than a ragged table.
+                #
+                # `validate_windows` no longer reads this entry as "empty", though: it
+                # asks `absent_variables` first and reports absence separately, because
+                # absent and present-but-empty have different remedies (A8).
                 per_variable[spec.name] = 0.0
                 continue
             values = np.asarray(window[spec.name].values)
@@ -481,6 +499,39 @@ def window_valid_fractions(ds: xr.Dataset) -> dict[str, dict[str, float]]:
         report[label] = per_variable
 
     return report
+
+
+def absent_variables(ds: xr.Dataset) -> list[str]:
+    """Declared variables the cube does not carry *at all*, in declaration order.
+
+    Deliberately separate from `window_valid_fractions`, and deliberately covering every
+    `Dims` rather than only the per-window ones. A static variable is identical in every
+    window, so the per-window pass skips it — correctly — and therefore never notices
+    when it is missing entirely. `pm25_emission_g_s` is static, so a cube without an
+    emission inventory used to start, serve maps, simulate temperatures, and return
+    `air: null` for every traffic plan, with a log warning as the only trace. From the
+    client's side that is indistinguishable from "this plan says nothing about traffic",
+    and those are opposite findings.
+    """
+    return [spec.name for spec in CUBE_VARIABLES if spec.name not in ds.data_vars]
+
+
+def static_valid_fractions(ds: xr.Dataset) -> dict[str, float]:
+    """Valid-value share of every *static* variable it carries.
+
+    The other half of the same hole: a static variable that is present but entirely fill
+    value is as useless as an absent one, and no per-window pass will ever look at it.
+    Absent variables are excluded here — `absent_variables` reports those, with a
+    different remedy.
+    """
+    fractions: dict[str, float] = {}
+    for spec in CUBE_VARIABLES:
+        if spec.dims is not Dims.SPACE or spec.name not in ds.data_vars:
+            continue
+        values = np.asarray(ds[spec.name].values)
+        valid = _valid_mask(values, spec)
+        fractions[spec.name] = float(valid.sum() / valid.size) if valid.size else 0.0
+    return fractions
 
 
 def validate_windows(ds: xr.Dataset, *, minimum_valid_fraction: float = 0.0) -> None:
@@ -496,18 +547,57 @@ def validate_windows(ds: xr.Dataset, *, minimum_valid_fraction: float = 0.0) -> 
     `minimum_valid_fraction` defaults to 0.0, which fails only on a *completely* empty
     variable-window. Raise it to demand real coverage - an API serving map tiles wants
     more than one valid pixel.
+
+    Three failures, reported separately because they have three different remedies. A
+    variable the cube never had needs a *graft* onto the existing cube, which takes
+    seconds; a variable-window nothing was written into needs a *rebuild*, which is
+    network-heavy minutes. Collapsing both into "rebuild it - see build_tile.py" sent the
+    Phase 9 audit down the slow path for a cube that only needed two layers added.
     """
-    empty = [
+    absent = absent_variables(ds)
+    absent_names = set(absent)
+
+    empty_windows = [
         f"{name}@{label} ({fraction:.1%} valid)"
         for label, per_variable in window_valid_fractions(ds).items()
         for name, fraction in per_variable.items()
-        if fraction <= minimum_valid_fraction
+        if fraction <= minimum_valid_fraction and name not in absent_names
     ]
-    if empty:
-        raise ValueError(
+    empty_static: dict[str, list[str]] = {}
+    for name, fraction in static_valid_fractions(ds).items():
+        if fraction <= minimum_valid_fraction:
+            script = VARIABLES_BY_NAME[name].added_by
+            empty_static.setdefault(script, []).append(f"{name} ({fraction:.1%} valid)")
+
+    problems: list[str] = []
+
+    if absent:
+        by_script: dict[str, list[str]] = {}
+        for name in absent:
+            by_script.setdefault(VARIABLES_BY_NAME[name].added_by, []).append(name)
+        for script, names in sorted(by_script.items()):
+            plural = "these variables" if len(names) > 1 else "this variable"
+            them = "them" if len(names) > 1 else "it"
+            problems.append(
+                f"cube does not carry {', '.join(names)} at all, so it predates "
+                f"{plural} rather than being a partial build. Add {them} with {script}."
+            )
+
+    if empty_windows:
+        problems.append(
             "cube has unpopulated variable-windows, so it is a partial build: "
-            f"{', '.join(empty)}. Rebuild it - see scripts/build_tile.py."
+            f"{', '.join(empty_windows)}. Rebuild it - see {BUILD_TILE_SCRIPT}."
         )
+
+    for script, entries in sorted(empty_static.items()):
+        problems.append(
+            "cube carries static variables that hold no valid data: "
+            f"{', '.join(entries)}. Rewrite {'them' if len(entries) > 1 else 'it'} "
+            f"with {script}."
+        )
+
+    if problems:
+        raise ValueError(" ".join(problems))
 
 
 def select_window(ds: xr.Dataset, label: str) -> xr.Dataset:

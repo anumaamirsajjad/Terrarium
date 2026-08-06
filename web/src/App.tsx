@@ -18,9 +18,11 @@ import {
   api,
 } from "./api/client";
 import { type LoadedLayer, loadLayer, useCubeLayer } from "./hooks/useCubeLayer";
+import { useObservationLayer } from "./hooks/useObservationLayer";
 import MapView, { type RasterOverlay } from "./map/MapView";
 import { type Position, useDrawnPolygon } from "./map/useDrawnPolygon";
 import Legend from "./panels/Legend";
+import AirPanel from "./panels/AirPanel";
 import BriefDocument from "./panels/BriefDocument";
 import BriefPanel from "./panels/BriefPanel";
 import EquityPanel from "./panels/EquityPanel";
@@ -36,17 +38,49 @@ import {
   finiteExtent,
   splitRasters,
 } from "./raster/image";
-import { DIVERGING, HEAT, rampForVariable, symmetricDomain } from "./raster/ramp";
+import {
+  DIVERGING,
+  HEAT,
+  SEVERITY,
+  rampForVariable,
+  symmetricDomain,
+} from "./raster/ramp";
 import { labelWithUnits } from "./units";
 import "./App.css";
 
-/** The variables worth putting on a map. Meteorology is (time,) and has no map. */
-const MAPPABLE = ["lst_c", "ndvi", "ndbi", "albedo", "elevation_m", "population"];
+/**
+ * The variables worth putting on a map. Meteorology is (time,) and has no map.
+ *
+ * `pm25_emission_g_s` is here so the emission inventory itself can be inspected — without
+ * it a user can run a low-emission zone and never see what it is removing.
+ */
+const MAPPABLE = [
+  "lst_c",
+  "ndvi",
+  "ndbi",
+  "albedo",
+  "elevation_m",
+  "population",
+  "pm25_emission_g_s",
+];
+
+/**
+ * Sentinel value in the base-layer picker for the citizen-report raster.
+ *
+ * It shares the picker because it is a thing to look at, and shares nothing else: it comes
+ * from `/observations/layer` rather than `/cube/layer/*`, and the legend says `not
+ * measured` (D19). A double underscore because it must never collide with a cube variable
+ * name arriving from `/cube/summary`.
+ */
+const OBSERVATIONS_LAYER = "__observations";
 
 const TEMPERATURE = "lst_c";
 const MIN_VERTICES = 3;
 
-type View = "baseline" | "delta" | "compare";
+/** Severity is a fixed 1–5 scale, so its legend does not move with what got reported. */
+const SEVERITY_DOMAIN: [number, number] = [1, 5];
+
+type View = "baseline" | "delta" | "air" | "compare";
 
 type Boot =
   | { kind: "loading" }
@@ -59,6 +93,9 @@ export default function App() {
   const [variable, setVariable] = useState(TEMPERATURE);
   const [opacity, setOpacity] = useState(0.85);
   const [canopy, setCanopy] = useState(0.3);
+  // The traffic lever. 0 means the plan says nothing about emissions and no air block
+  // comes back — which is a different answer from "the cube cannot model air".
+  const [emissions, setEmissions] = useState(0);
   const [view, setView] = useState<View>("baseline");
   const [result, setResult] = useState<SimulateResponse | null>(null);
   const [running, setRunning] = useState(false);
@@ -131,7 +168,14 @@ export default function App() {
 
   useEffect(refreshObservations, [refreshObservations]);
 
-  const baseline = useCubeLayer(variable, selectedWindow);
+  const showingObservations = variable === OBSERVATIONS_LAYER;
+
+  const cubeBaseline = useCubeLayer(showingObservations ? null : variable, selectedWindow);
+  // Keyed on the report count so a newly submitted photo redraws the map rather than
+  // sitting in the list while the raster still says nobody reported anything.
+  const observationLayer = useObservationLayer(showingObservations, observations.length);
+
+  const baseline = showingObservations ? observationLayer : cubeBaseline;
 
   // Compare always works in temperature, whatever the base-layer picker shows, because
   // the delta the core returns is a temperature field.
@@ -161,6 +205,20 @@ export default function App() {
     return symmetricDomain(extent[0], extent[1]);
   }, [deltaRaster]);
 
+  // The air delta arrives in the same LayerResponse shape as everything else, so it needs
+  // no decode path of its own — the whole reason A3 was a panel and a switch entry rather
+  // than a renderer.
+  const airRaster = useMemo(
+    () => (result?.air ? decodeLayer(result.air.delta) : null),
+    [result],
+  );
+
+  const airDomain = useMemo<[number, number] | null>(() => {
+    if (!airRaster) return null;
+    const extent = finiteExtent(airRaster) ?? [-1, 1];
+    return symmetricDomain(extent[0], extent[1]);
+  }, [airRaster]);
+
   // ------------------------------------------------------------- simulate ---
 
   /**
@@ -180,6 +238,9 @@ export default function App() {
         const response = await api.plan({ geometry: draw.geometry, ...body });
         setPlan(response);
         setCanopy(response.canopy_fraction_added);
+        // Both levers, not just canopy. Adopting only the canopy left the emission slider
+        // showing 0 while the plan the button posted removed 80 % of the traffic.
+        setEmissions(response.emission_fraction_removed);
         setSelectedWindow(response.window);
       } catch (error) {
         // A 422 here carries the validator's arithmetic. Showing it verbatim is the whole
@@ -209,18 +270,21 @@ export default function App() {
           : {
               geometry: draw.geometry,
               canopy_fraction_added: canopy,
+              emission_fraction_removed: emissions,
               window: selectedWindow,
             },
       );
       setResult(response);
-      setView("delta");
+      // Land on whichever result the plan actually produced. A traffic-only plan changes
+      // no temperature, so opening on ΔLST would show an empty map for a run that worked.
+      setView(response.air && response.stats.n_cells_changed === 0 ? "air" : "delta");
     } catch (error) {
       setSimulateError((error as Error).message);
       setResult(null);
     } finally {
       setRunning(false);
     }
-  }, [draw.geometry, selectedWindow, canopy, plan]);
+  }, [draw.geometry, selectedWindow, canopy, emissions, plan]);
 
   const handleMapClick = useCallback(
     (position: Position) => {
@@ -256,15 +320,40 @@ export default function App() {
     if (view === "baseline" || !result || !deltaRaster) {
       if (!baseline.data) return null;
       const { raster, layer } = baseline.data;
-      const extent = finiteExtent(raster);
+      // Severity is a fixed 1-5 scale. Stretching it to whatever got reported would make
+      // one mild report render as the same red as a burning waste pile.
+      const extent = showingObservations ? SEVERITY_DOMAIN : finiteExtent(raster);
       if (!extent) return null;
       return {
         id: `baseline-${variable}-${layer.window ?? "static"}`,
         image: toCanvas(
-          colourise(raster, { ramp: rampForVariable(variable), domain: extent, opacity }),
+          colourise(raster, {
+            ramp: showingObservations ? SEVERITY : rampForVariable(variable),
+            domain: extent,
+            opacity,
+          }),
           raster,
         ),
         bounds: layer.grid.bounds_wgs84,
+      };
+    }
+
+    if (view === "air") {
+      // Guarded rather than assumed: `air` is null whenever the plan did not touch
+      // traffic, and the switch entry is hidden in that case.
+      if (!airRaster || !result.air) return null;
+      return {
+        id: `air-${result.window}-${result.air.stats.n_cells_changed}`,
+        image: toCanvas(
+          colourise(airRaster, {
+            ramp: DIVERGING,
+            domain: airDomain ?? [-1, 1],
+            transparentAtZero: true,
+            opacity,
+          }),
+          airRaster,
+        ),
+        bounds: result.air.delta.grid.bounds_wgs84,
       };
     }
 
@@ -299,7 +388,20 @@ export default function App() {
       image: toCanvas(colourise(composited, { ramp: HEAT, domain: extent, opacity }), composited),
       bounds: scenarioBase.layer.grid.bounds_wgs84,
     };
-  }, [view, baseline.data, variable, opacity, result, deltaRaster, deltaDomain, scenarioBase, splitFraction]);
+  }, [
+    view,
+    baseline.data,
+    variable,
+    showingObservations,
+    opacity,
+    result,
+    deltaRaster,
+    deltaDomain,
+    airRaster,
+    airDomain,
+    scenarioBase,
+    splitFraction,
+  ]);
 
   const dividerLongitude = useMemo(() => {
     if (view !== "compare" || !scenarioBase) return null;
@@ -315,9 +417,17 @@ export default function App() {
     if (view === "delta" && deltaDomain) {
       return { ramp: DIVERGING, domain: deltaDomain, units: "°C", diverging: true };
     }
+    if (view === "air" && airDomain && result?.air) {
+      return { ramp: DIVERGING, domain: airDomain, units: result.air.units, diverging: true };
+    }
     if (view === "compare" && scenarioBase) {
       const extent = finiteExtent(scenarioBase.raster) ?? [0, 1];
       return { ramp: HEAT, domain: extent, units: "°C", diverging: false };
+    }
+    if (showingObservations) {
+      // Shown even with nothing reported yet, so the scale explains what the colours
+      // would mean rather than appearing only once the map is already painted.
+      return { ramp: SEVERITY, domain: SEVERITY_DOMAIN, units: "severity", diverging: false };
     }
     if (baseline.data) {
       const extent = finiteExtent(baseline.data.raster);
@@ -331,7 +441,7 @@ export default function App() {
       }
     }
     return null;
-  }, [view, deltaDomain, scenarioBase, baseline.data, variable]);
+  }, [view, deltaDomain, airDomain, result, scenarioBase, showingObservations, baseline.data, variable]);
 
   // ----------------------------------------------------------------- view ---
 
@@ -364,6 +474,7 @@ export default function App() {
         polygonClosed={draw.complete}
         drawing={draw.drawing}
         dividerLongitude={dividerLongitude}
+        photoAt={photoAt}
         onMapClick={handleMapClick}
       />
 
@@ -406,9 +517,19 @@ export default function App() {
                   {labelWithUnits(v.name, v.units)}
                 </option>
               ))}
+            <option value={OBSERVATIONS_LAYER}>Citizen reports (not measured)</option>
           </select>
           {baseline.loading && <p className="hint">Loading…</p>}
-          {baseline.data && <p className="hint">{baseline.data.layer.description}</p>}
+          {showingObservations ? (
+            <p className="hint">
+              Worst severity reported per cell, from citizen photos read by a vision model.
+              <strong> Not measured</strong>, and never written into the cube — a cell with
+              no colour is one nobody has photographed, not one that is fine.
+              {observationLayer.count === 0 && " Nothing has been reported yet."}
+            </p>
+          ) : (
+            baseline.data && <p className="hint">{baseline.data.layer.description}</p>
+          )}
           {baseline.error && <p className="error-text">{baseline.error}</p>}
         </section>
 
@@ -472,6 +593,29 @@ export default function App() {
                 A ceiling, not a promise — each cell is capped at what is still plantable
                 there, and water is never planted.
               </p>
+
+              <label className="field">
+                <span>
+                  Vehicle emissions removed: <strong>{(emissions * 100).toFixed(0)}%</strong>
+                  {plan && plan.emission_fraction_removed !== emissions && (
+                    <span className="muted"> · edited since the plan was checked</span>
+                  )}
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={emissions}
+                  onChange={(event) => setEmissions(Number(event.target.value))}
+                />
+              </label>
+              <p className="hint">
+                1.0 means the traffic is gone, not electrified — brake, tyre and road wear
+                are roughly half of road PM2.5 and stay until the vehicles do. At 0 the plan
+                says nothing about traffic and no air result comes back.
+              </p>
+
               <div className="row">
                 <button
                   type="button"
@@ -523,6 +667,17 @@ export default function App() {
               >
                 ΔLST
               </button>
+              {/* Only when there is an air result. Offering the tab for a plan that never
+                  touched traffic would paint an empty map and read as a broken button. */}
+              {result.air && (
+                <button
+                  type="button"
+                  className={view === "air" ? "is-active" : ""}
+                  onClick={() => setView("air")}
+                >
+                  ΔPM2.5
+                </button>
+              )}
               <button
                 type="button"
                 className={view === "compare" ? "is-active" : ""}
@@ -577,6 +732,9 @@ export default function App() {
         )}
 
         {result && <ResultPanel result={result} />}
+        {result?.air && (
+          <AirPanel air={result.air} window={result.window} season={result.season} />
+        )}
         {result && <EquityPanel equity={result.equity} />}
         {result && <BriefPanel brief={result.brief} />}
 

@@ -18,7 +18,12 @@ from terrarium.cores.thermal.features import (
     build_training_frame,
 )
 from terrarium.cores.thermal.model import DEFAULT_PARAMS, train
-from terrarium.state.cube import validate_windows, window_valid_fractions
+from terrarium.state.cube import (
+    absent_variables,
+    static_valid_fractions,
+    validate_windows,
+    window_valid_fractions,
+)
 from terrarium.state.grid import grid_for_tile
 from terrarium.state.store import write_cube
 
@@ -111,6 +116,81 @@ def test_static_variables_are_not_reported_per_window() -> None:
     assert "elevation_m" not in fractions["2024-summer"]
     assert "population" not in fractions["2024-summer"]
     assert "lst_c" in fractions["2024-summer"]
+
+
+# ------------------------------------------------- the missing-static-variable hole ---
+#
+# The per-window pass skips static variables, correctly - there is nothing per-window to
+# say about a layer that is identical in every slice. The consequence was not correct:
+# nothing then noticed a static variable missing altogether.
+
+
+def test_a_missing_static_variable_is_caught() -> None:
+    """The hole: `pm25_emission_g_s` is static, so no per-window check ever saw it.
+
+    A cube without it started, served maps, simulated temperatures, and returned
+    `air: null` for every traffic plan - which from the client's side is the same value
+    as "this plan does not touch traffic", and those are opposite findings.
+    """
+    cube = synthetic_cube().drop_vars("pm25_emission_g_s")
+
+    assert absent_variables(cube) == ["pm25_emission_g_s"]
+    with pytest.raises(ValueError, match="does not carry pm25_emission_g_s"):
+        validate_windows(cube)
+
+
+def test_an_absent_variable_is_told_to_graft_not_to_rebuild() -> None:
+    """The two remedies differ by minutes and a network round trip.
+
+    `cube_phase4.zarr` was complete for the schema it was built against and simply
+    predated two variables. Telling its owner to run `build_tile.py` - a network-heavy
+    rebuild against Planetary Computer - was wrong in both halves of the sentence.
+    """
+    cube = synthetic_cube().drop_vars(["pm25_emission_g_s", "wind_direction_deg"])
+
+    with pytest.raises(ValueError) as excinfo:
+        validate_windows(cube)
+
+    message = str(excinfo.value)
+    assert "scripts/build_air_layers.py" in message
+    assert "predates" in message
+    # And it must not send them down the slow path for a cube that needs a graft. The
+    # absent sentence says "rather than being a partial build", so match the empty
+    # sentence's own phrasing rather than the two words they share.
+    assert "so it is a partial build" not in message
+    assert "scripts/build_tile.py" not in message
+
+
+def test_absent_and_empty_are_reported_as_separate_problems() -> None:
+    """A cube can be both stale *and* half-built, and each half has its own fix."""
+    cube = synthetic_cube().drop_vars("pm25_emission_g_s")
+    cube["ndvi"].values[1] = np.nan
+
+    with pytest.raises(ValueError) as excinfo:
+        validate_windows(cube)
+
+    message = str(excinfo.value)
+    assert "scripts/build_air_layers.py" in message  # the absent one
+    assert "partial build" in message  # the empty one
+    assert "scripts/build_tile.py" in message
+
+
+def test_a_present_but_entirely_empty_static_variable_is_caught() -> None:
+    """The other half of the same hole: present, declared, and holding nothing."""
+    cube = synthetic_cube()
+    cube["pm25_emission_g_s"].values[:] = np.nan
+
+    assert absent_variables(cube) == []
+    assert static_valid_fractions(cube)["pm25_emission_g_s"] == 0.0
+    with pytest.raises(ValueError, match="hold no valid data"):
+        validate_windows(cube)
+
+
+def test_a_full_cube_reports_no_absent_or_empty_statics() -> None:
+    cube = synthetic_cube()
+
+    assert absent_variables(cube) == []
+    assert all(fraction > 0.5 for fraction in static_valid_fractions(cube).values())
 
 
 # ------------------------------------------------------------------- load_runtime ---
