@@ -201,3 +201,47 @@ def test_planting_on_water_adds_nothing(client: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["stats"]["mean_delta_inside"] <= 0
+
+
+# --------------------------------------------------------------------------------
+# The air block (Phase 9)
+# --------------------------------------------------------------------------------
+
+
+def test_no_air_block_unless_the_plan_touches_emissions(client: TestClient) -> None:
+    """A tree-planting request asks no air question, and must not be answered as if it did."""
+    assert simulate(client)["air"] is None
+
+
+def test_a_low_emission_zone_cleans_the_air(client: TestClient) -> None:
+    body = simulate(client, emission_fraction_removed=1.0)
+    air = body["air"]
+
+    assert air is not None
+    assert air["variable"] == "pm25_ugm3"
+    assert air["units"] == "ug m-3"
+    assert air["stats"]["mean_delta_inside"] < 0
+    # Downwind spillover is the point of a dispersion core: the streets behind the zone
+    # benefit too, over a far wider ring than cooling ever reaches.
+    assert air["stats"]["mean_delta_spillover"] < 0
+    assert air["stats"]["spillover_cells"] > body["stats"]["spillover_cells"]
+    assert decode(air["delta"]).shape == (201, 202)
+
+
+def test_the_air_answer_names_its_window_and_its_inversion(client: TestClient) -> None:
+    """Winter is not a scale factor on summer, so the parameters travel with the answer."""
+    summer = simulate(client, emission_fraction_removed=0.5, window="2024-summer")["air"]
+    winter = simulate(client, emission_fraction_removed=0.5, window="2024-winter")["air"]
+
+    assert winter["mixing_height_m"] < summer["mixing_height_m"]
+    assert winter["wind_direction_deg"] != summer["wind_direction_deg"]
+    # Same emissions removed, much larger effect under the inversion.
+    assert abs(winter["stats"]["min_delta"]) > 3 * abs(summer["stats"]["min_delta"])
+
+
+def test_a_removal_fraction_above_one_is_rejected_by_the_schema(client: TestClient) -> None:
+    response = client.post(
+        "/simulate", json={"geometry": PLANTABLE, "emission_fraction_removed": 1.4}
+    )
+
+    assert response.status_code == 422

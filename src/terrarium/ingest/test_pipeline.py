@@ -21,6 +21,7 @@ import pytest
 import xarray as xr
 from odc.geo.geobox import GeoBox
 from odc.geo.xr import wrap_xr, xr_reproject
+from pyproj import Transformer
 
 from terrarium.config import (
     COLLECTION_DEM,
@@ -28,6 +29,7 @@ from terrarium.config import (
     COLLECTION_SENTINEL2,
     COLLECTION_WORLDCOVER,
     SOURCE_OPEN_METEO,
+    SOURCE_OSM,
     SOURCE_WORLDPOP,
     SeasonWindow,
     Settings,
@@ -436,6 +438,7 @@ def _fake_open_meteo(settings: Settings, window: SeasonWindow) -> dict[str, list
     stamps: list[str] = []
     temps: list[float | None] = []
     winds: list[float | None] = []
+    directions: list[float | None] = []
     humidity: list[float | None] = []
 
     day = window.start
@@ -444,6 +447,10 @@ def _fake_open_meteo(settings: Settings, window: SeasonWindow) -> dict[str, list
             stamps.append(f"{day.isoformat()}T{hour:02d}:00")
             temps.append(20.0 + hour)
             winds.append(hour / 10.0)
+            # A northerly that straddles 0: alternate days sit either side of it. Any
+            # scalar reduction lands near 180 - a plume pointing exactly backwards - so
+            # this is the series that separates a vector mean from a median.
+            directions.append(350.0 if day.toordinal() % 2 == 0 else 10.0)
             humidity.append(float(hour))
         day += timedelta(days=1)
 
@@ -451,7 +458,36 @@ def _fake_open_meteo(settings: Settings, window: SeasonWindow) -> dict[str, list
         "time": cast("list[float | None]", stamps),
         "temperature_2m": temps,
         "wind_speed_10m": winds,
+        "wind_direction_10m": directions,
         "relative_humidity_2m": humidity,
+    }
+
+
+def _fake_overpass(grid: Grid) -> dict[str, object]:
+    """One road and one kiln, placed on the test grid rather than on a real city."""
+    to_wgs84 = Transformer.from_crs(grid.crs, "EPSG:4326", always_xy=True).transform
+    left, _, _, top = grid.bounds
+    y = top - 2.5 * grid.resolution_m
+    start = to_wgs84(left + 1.5 * grid.resolution_m, y)
+    end = to_wgs84(left + 4.5 * grid.resolution_m, y)
+
+    return {
+        "elements": [
+            {
+                "type": "way",
+                "tags": {"highway": "primary"},
+                "geometry": [
+                    {"lon": start[0], "lat": start[1]},
+                    {"lon": end[0], "lat": end[1]},
+                ],
+            },
+            {
+                "type": "node",
+                "tags": {"man_made": "kiln"},
+                "lon": to_wgs84(left + 6.5 * grid.resolution_m, y)[0],
+                "lat": to_wgs84(left + 6.5 * grid.resolution_m, y)[1],
+            },
+        ]
     }
 
 
@@ -476,6 +512,9 @@ def mocked(monkeypatch: pytest.MonkeyPatch, grid: Grid, tmp_path: Path) -> FakeL
     worldpop = _write_fake_worldpop(tmp_path / "worldpop.tif", TEST_TILE)
     monkeypatch.setattr(pipeline, "_download_once", lambda url, path, timeout_s: worldpop)
     monkeypatch.setattr(pipeline, "_fetch_open_meteo", _fake_open_meteo)
+    monkeypatch.setattr(
+        pipeline, "fetch_overpass", lambda url, bbox, timeout_s: _fake_overpass(grid)
+    )
     return loader
 
 
@@ -494,6 +533,7 @@ def test_build_cube_populates_every_variable(
         COLLECTION_WORLDCOVER,
         SOURCE_OPEN_METEO,
         SOURCE_WORLDPOP,
+        SOURCE_OSM,
     }
 
 
@@ -651,6 +691,36 @@ def test_meteorology_is_sampled_at_the_overpass_hour(
     assert np.allclose(cube["wind_speed_ms"].values, pipeline.OVERPASS_HOUR / 10.0)
     assert np.allclose(cube["relative_humidity_pct"].values, pipeline.OVERPASS_HOUR)
     assert cube["air_temp_c"].shape == (len(windows),)
+
+
+def test_wind_direction_is_reduced_as_an_angle_not_a_number(
+    mocked: FakeLoader, settings: Settings, grid: Grid
+) -> None:
+    """350 deg and 10 deg are 20 deg apart, and their median is 180 - the exact opposite.
+
+    The air core turns this number into the direction a plume travels, so a scalar
+    reduction across the 0/360 seam does not degrade the answer, it reverses it.
+    """
+    cube, _ = pipeline.build_cube(catalog=FAKE_CATALOG, settings=settings, grid=grid)
+
+    values = np.asarray(cube["wind_direction_deg"].values)
+    # Near due north, either side of the seam. Cosine, because 359.5 and 0.5 are both right.
+    assert np.all(np.cos(np.radians(values)) > 0.95), values
+
+
+def test_the_emission_inventory_lands_on_the_grid(
+    mocked: FakeLoader, settings: Settings, grid: Grid
+) -> None:
+    """OSM is vector, and the cube is a raster. This is where the two meet."""
+    cube, _ = pipeline.build_cube(catalog=FAKE_CATALOG, settings=settings, grid=grid)
+
+    emissions = np.asarray(cube["pm25_emission_g_s"].values)
+    assert emissions.shape == grid.shape
+    # Finite everywhere: "no road here" is a real zero, and only a build whose OSM ingest
+    # never ran leaves NaN. Sources on some cells but not most, which is what a road
+    # network looks like.
+    assert np.isfinite(emissions).all()
+    assert 0 < (emissions > 0).sum() < emissions.size
 
 
 def test_population_survives_reprojection_as_a_head_count(
@@ -904,14 +974,20 @@ def test_scene_cap_is_reported_separately_from_the_cloud_filter(
 
 
 def test_a_lazy_read_failure_is_caught_and_isolated(
-    monkeypatch: pytest.MonkeyPatch, settings: Settings, grid: Grid
+    mocked: FakeLoader, monkeypatch: pytest.MonkeyPatch, settings: Settings, grid: Grid
 ) -> None:
     """The regression that broke the first real build.
 
     odc-stac returns dask arrays, so a failed remote read raises when the array is
     *computed*, not when it is constructed. If materialisation happens outside the
     per-source guard, one collection's network failure kills the entire build. Here
-    Sentinel-2 explodes only on compute; the other three sources must still land.
+    Sentinel-2 explodes only on compute; the other sources must still land.
+
+    Takes `mocked` for the plain-HTTP stubs and then overrides the STAC ones on top.
+    Without it this test stubbed only the STAC boundary and genuinely reached out to
+    WorldPop, Open-Meteo and Overpass - it passed because those sources happened to
+    succeed, which is exactly the kind of pass "no test touches the network" exists to
+    prevent.
     """
     import dask
     import dask.array as da

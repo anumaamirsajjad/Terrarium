@@ -49,6 +49,15 @@ RESULT_VARIABLE = "lst_c"
 RESULT_UNITS = "degC"
 
 
+def tree_median(arrays: dict[str, np.ndarray], name: str) -> float:
+    """Median of one variable over this tile's own tree-cover pixels."""
+    values = arrays[name].astype("float64")
+    usable = (arrays["landcover"] == TREE_COVER_CLASS) & np.isfinite(values)
+    if not usable.any():
+        raise ValueError(f"tile has no valid tree-cover pixels to derive {name} from")
+    return float(np.median(values[usable]))
+
+
 def tree_reference(arrays: dict[str, np.ndarray]) -> dict[str, float]:
     """Median feature values of this tile's own tree-cover pixels.
 
@@ -56,17 +65,23 @@ def tree_reference(arrays: dict[str, np.ndarray]) -> dict[str, float]:
     of this tile, and hardcoding a literature value would put the model's target outside
     the range it was trained on.
     """
-    is_tree = arrays["landcover"] == TREE_COVER_CLASS
-    reference: dict[str, float] = {}
+    return {name: tree_median(arrays, name) for name in PERTURBED_FEATURES}
 
-    for name in PERTURBED_FEATURES:
-        values = arrays[name].astype("float64")
-        usable = is_tree & np.isfinite(values)
-        if not usable.any():
-            raise ValueError(f"tile has no valid tree-cover pixels to derive {name} from")
-        reference[name] = float(np.median(values[usable]))
 
-    return reference
+def canopy_fraction(arrays: dict[str, np.ndarray]) -> np.ndarray:
+    """Per-cell canopy cover today, in [0, 1], read off NDVI.
+
+    A proxy, not a measurement: 0 is this tile's bare-ground NDVI and 1 is the median of
+    its own tree-cover pixels, so a cell reading like closed woodland scores 1 and has
+    nothing left to plant. Shared with the air core, which weights dry deposition by it -
+    same proxy, so the two cores cannot disagree about how green a cell is. It asks for
+    one variable's median rather than the whole `tree_reference` because the air core
+    carries no albedo: needing it would make `ndbi` and `albedo` a requirement of every
+    caller for no reason.
+    """
+    ndvi = arrays["ndvi"].astype("float64")
+    span = max(tree_median(arrays, "ndvi") - NDVI_BARE, 1e-6)
+    return np.clip((ndvi - NDVI_BARE) / span, 0.0, 1.0)
 
 
 def effective_fraction(arrays: dict[str, np.ndarray], intervention: Intervention) -> np.ndarray:
@@ -77,10 +92,7 @@ def effective_fraction(arrays: dict[str, np.ndarray], intervention: Intervention
     """
     ndvi = arrays["ndvi"].astype("float64")
     landcover = arrays["landcover"]
-
-    tree_ndvi = tree_reference(arrays)["ndvi"]
-    span = max(tree_ndvi - NDVI_BARE, 1e-6)
-    current_canopy = np.clip((ndvi - NDVI_BARE) / span, 0.0, 1.0)
+    current_canopy = canopy_fraction(arrays)
 
     plantable = (
         intervention.mask

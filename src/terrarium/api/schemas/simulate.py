@@ -36,12 +36,25 @@ class SimulateRequest(BaseModel):
             "ceiling and not a promise — the response reports what was really added."
         ),
     )
+    emission_fraction_removed: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Share of road and kiln PM2.5 emissions removed inside the polygon — a "
+            "low-emission zone. 0.0, the default, means the plan says nothing about "
+            "traffic and no air result is returned. Note that brake, tyre and road wear "
+            "are roughly half of road PM2.5 and do not fall when the engine changes, only "
+            "when the traffic does: 1.0 means the vehicles are gone, not electrified."
+        ),
+    )
     window: str | None = Field(
         default=None,
         description=(
             "Seasonal window to simulate. Defaults to the latest summer. This matters: "
             "the same planting cools ~0.51 degC in summer and ~0.13 degC in winter, so "
-            "the window is part of the answer and is echoed back."
+            "the window is part of the answer and is echoed back. It matters more for "
+            "air: the winter inversion concentrates identical emissions several-fold."
         ),
     )
 
@@ -160,6 +173,35 @@ class EquityResponse(BaseModel):
     )
 
 
+class AirResponse(BaseModel):
+    """The modelled change in locally-generated PM2.5.
+
+    **A local increment, not what a monitor reads.** The emission inventory covers this
+    tile's roads and kilns and nothing else, so the regional background — which dominates
+    Lahore's absolute PM2.5 — is absent by construction. It cancels in a difference, which
+    is why this block carries a delta and its statistics but never a concentration level.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    variable: str
+    units: str
+    stats: DeltaStatsResponse
+    mixing_height_m: float = Field(
+        description=(
+            "Depth the plume is assumed mixed through. ~250 m under the winter inversion "
+            "against ~800 m in summer, which is most of why the same emissions produce "
+            "much worse winter air."
+        )
+    )
+    wind_speed_ms: float
+    wind_direction_deg: float = Field(
+        description="Meteorological convention: the direction the wind comes *from*"
+    )
+    emission_fraction_removed: float
+    delta: LayerResponse
+
+
 class SimulateResponse(BaseModel):
     """The modelled effect of one intervention."""
 
@@ -184,4 +226,12 @@ class SimulateResponse(BaseModel):
             "Never prediction-minus-observation, which would leak the model's residual "
             "onto every untouched pixel."
         )
+    )
+    air: AirResponse | None = Field(
+        default=None,
+        description=(
+            "Null unless the request removed emissions *and* the served cube carries an "
+            "OSM emission inventory. Absent rather than zeroed: a client cannot tell a "
+            "plan that does nothing for air from a cube that cannot answer the question."
+        ),
     )

@@ -27,8 +27,7 @@ Data flows strictly downward. Nothing in a lower layer imports from a higher one
 │                       dsl/          later: DSL + agents      │
 ├──────────────────────────────────────────────────────────────┤
 │  2. PHYSICS CORE      cores/        pure simulators:         │
-│                                     thermal + equity,        │
-│                                     later air                │
+│                                     thermal, air, equity     │
 ├──────────────────────────────────────────────────────────────┤
 │  1. STATE CUBE        ingest/       satellite + vector →     │
 │                       state/        one aligned raster cube  │
@@ -114,6 +113,25 @@ follow, and neither is optional reading before quoting a number:
 `cores/equity.py` is the second, and is a pure function rather than a `Core`: it takes a
 delta field and a population field and returns who received the cooling.
 
+The third is **air**: a steady-state Gaussian plume over the OSM emission inventory. A
+uniform wind across a 20 km tile makes superposition a **convolution**, so the whole tile
+is one FFT — which is what keeps it interactive. `AirParameters` occupies the `model`
+argument slot the thermal core gives its booster, for the same reason (a core takes its
+model as an argument), with one difference that has to be stated whenever a number is
+quoted: **these are literature constants, not fitted ones.** Nothing in this core has seen
+Lahore's air.
+
+Two things about it are as load-bearing as the LST naming rule:
+
+- **It models a local increment, never a concentration a monitor reads.** The inventory
+  covers this tile's roads and nothing else, so the regional background that dominates
+  Lahore's PM2.5 is absent by construction. It cancels in a difference, which is why the
+  API ships a delta and never a level. Call it **locally-generated PM2.5** everywhere.
+- **Winter is not a scale factor on summer.** The inversion drops the mixing height ~3x
+  and slows lateral spread, so identical emissions produce **6-7x** the concentration. The
+  season is read from the cube rather than defaulted, because getting it wrong is worth
+  that factor.
+
 ### Layer 3 — Intelligence (`api/`)
 
 The composition root. Loads the cube and the model **once at startup**, validates
@@ -172,8 +190,7 @@ Microsoft Planetary Computer, anonymous access with request signing via
   urban-form proxy, but it is not terrain height
 - `esa-worldcover` — land cover classification, 10 m native
 
-Two sources are **not** on Planetary Computer and arrive over plain HTTP, still keyless
-and free:
+Three sources are **not** on Planetary Computer and arrive over plain HTTP, still free:
 
 - **Open-Meteo** ERA5 archive — air temperature, wind and humidity, sampled at the ~10:30
   local overpass hour and reduced by median over the window, matching how the LST
@@ -183,9 +200,15 @@ and free:
   in place. It also drops connections mid-transfer, so the download verifies
   `Content-Length` before renaming into place — a short read yields a valid-looking
   GeoTIFF with rows missing
+- **Overpass / OpenStreetMap** — road centrelines and brick kilns, binned into the PM2.5
+  emission inventory. Keyless. Deliberately *not* via `osmnx`: that builds a routable
+  graph, and an inventory does not route — it needs geometry, one tag, and length per
+  cell, which is one POST and a histogram
 
-Later phases add OSM via Overpass (emissions inventory) and OpenAQ (air validation) —
-also keyless and free.
+**OpenAQ v3 is the one source in this project that needs a key.** Free, no card, so it
+stays inside the zero-budget rule, but v2 was retired and v3 authenticates every request.
+It is used only by `scripts/validate_air.py`, which refuses to run without
+`TERRARIUM_OPENAQ_KEY` rather than half-validating.
 
 These are *source* resolutions. Everything is resampled onto the single analysis grid —
 **100 m**, `Tile.target_resolution_m` in `config.py` — which is what every physics core
@@ -220,6 +243,7 @@ terrarium/
 │   ├── config.py           # settings + THE tile bbox. Single source of truth.
 │   ├── ingest/             # ← ONLY layer permitted to do network I/O
 │   │   ├── client.py       #   PC STAC search, signing, odc-stac load
+│   │   ├── osm.py          #   Overpass -> PM2.5 emission inventory on the grid
 │   │   └── pipeline.py     #   masking, unit conversion, cube assembly
 │   ├── state/              # the cube: grid, alignment, Zarr, DuckDB catalog
 │   │   ├── grid.py         #   canonical CRS / resolution / transform (spatial only)
@@ -228,6 +252,7 @@ terrarium/
 │   │   └── store.py        #   Zarr + DuckDB persistence
 │   ├── cores/              # ← PURE. no I/O, no network, no globals.
 │   │   ├── base.py         #   Intervention, CoreResult, DeltaStats, Core protocol
+│   │   ├── air.py          #   Gaussian plume ΔPM2.5 + leave-one-station-out scoring
 │   │   ├── equity.py       #   who receives the cooling: person-degrees by decile
 │   │   └── thermal/
 │   │       ├── features.py #   cube → feature matrix, incl. neighbourhood means
@@ -246,6 +271,8 @@ terrarium/
 │                           #   processed/cube.zarr, terrarium.duckdb, thermal.txt
 ├── scripts/                # one-off CLI entrypoints. I/O around the cores lives here.
 │   ├── build_tile.py       #   full ingest -> State Cube, with a build report
+│   ├── build_air_layers.py #   add emissions + wind direction to an existing cube
+│   ├── validate_air.py     #   leave-one-station-out against OpenAQ (needs a key)
 │   ├── inspect_cube.py     #   read back and summarise a built cube
 │   ├── preview_cube.py     #   render PNGs for visual alignment checks
 │   ├── train_thermal.py    #   train + blocked CV + one worked intervention
@@ -278,6 +305,13 @@ Frozen unless there is a reason not to be.
 **Tests alongside each module.** `foo.py` is tested by `test_foo.py` in the same directory.
 Not a mirrored `tests/` tree — proximity keeps them honest and makes deletion obvious when
 a module dies. They are excluded from the built wheel. **No test may touch the network.**
+
+**Name the concentration precisely too.** The air core produces this tile's *own*
+contribution to PM2.5 from its roads, in a single pass, at the same ~10:30 hour. It is not
+what a monitor reads and it is not "air quality" unqualified — call it **locally-generated
+PM2.5**, and quote deltas rather than levels. Until `validate_air.py` has actually run
+against OpenAQ, also say the magnitudes are **uncalibrated**: the emission factors are
+literature figures for a South Asian fleet, not measurements of Lahore's.
 
 **Name the temperature precisely.** Landsat crosses Lahore at ~10:30 local and ST_B10
 measures the *surface*, not the air. Surface temperature runs several degrees above air
@@ -339,6 +373,8 @@ uv run terrarium-api             # API on :8000, docs at /docs
                                  #   GET  /cube/layer/lst_c?window=2024-summer
                                  #   POST /simulate        GeoJSON polygon -> ΔLST
                                  #                         + equity deciles
+                                 #                         + ΔPM2.5 when the request
+                                 #                           removes emissions
                                  #   serves TERRARIUM_SERVE_ZARR_STORE, not the build path
 uv run pytest                    # tests
 uv run ruff check src/ scripts/  # lint
@@ -355,6 +391,11 @@ uv run python scripts/train_thermal.py    # train + blocked CV + worked interven
 uv run python scripts/hindcast.py         # find a change, train before it, score after.
                                           #   Needs >= 4 summer windows, so point --zarr
                                           #   at a multi-year build, not the 4-window one
+uv run python scripts/build_air_layers.py # add pm25_emission_g_s + wind_direction_deg to
+                                          #   an existing cube. Seconds, not a rebuild:
+                                          #   --out a new path, then move serve_zarr_store
+uv run python scripts/validate_air.py     # OpenAQ leave-one-station-out. Needs
+                                          #   TERRARIUM_OPENAQ_KEY (free, no card)
 
 cd web && npm install && npm run dev      # frontend on :5173 (the API's CORS allowlist
                                           #   is 5173 only — do not accept Vite's

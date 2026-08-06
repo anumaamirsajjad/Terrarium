@@ -40,6 +40,7 @@ from terrarium.config import (
     COLLECTION_SENTINEL2,
     COLLECTION_WORLDCOVER,
     SOURCE_OPEN_METEO,
+    SOURCE_OSM,
     SOURCE_WORLDPOP,
     SeasonWindow,
     Settings,
@@ -51,6 +52,7 @@ from terrarium.ingest.client import (
     search_collection,
     select_clearest,
 )
+from terrarium.ingest.osm import emission_grid, fetch_overpass
 from terrarium.state.cube import (
     VARIABLES_BY_NAME,
     Dims,
@@ -400,8 +402,28 @@ OVERPASS_HOUR = 10
 METEO_FIELDS: dict[str, str] = {
     "temperature_2m": "air_temp_c",
     "wind_speed_10m": "wind_speed_ms",
+    "wind_direction_10m": "wind_direction_deg",
     "relative_humidity_2m": "relative_humidity_pct",
 }
+# The one field that cannot be reduced by median: it is an angle, so 350 deg and 10 deg
+# average to 180 - a plume pointing exactly backwards, with nothing downstream to catch it.
+CIRCULAR_FIELDS = frozenset({"wind_direction_deg"})
+
+
+def _reduce_meteorology(name: str, series: list[float]) -> float:
+    """Window reduction for one meteorology field. Median, except for angles."""
+    if not series:
+        return float("nan")
+    if name not in CIRCULAR_FIELDS:
+        return float(np.median(series))
+
+    # Vector mean: average the unit vectors, then take the resultant's bearing. This also
+    # makes a rose with no prevailing direction average to something arbitrary rather than
+    # to a confident wrong answer - but the tile's winter wind is steady, so that case does
+    # not arise here and a resultant-length check would be a guard on nothing.
+    radians = np.radians(series)
+    mean = np.degrees(np.arctan2(np.sin(radians).mean(), np.cos(radians).mean()))
+    return float(mean % 360.0)
 
 
 def _fetch_open_meteo(settings: Settings, window: SeasonWindow) -> dict[str, list[float | None]]:
@@ -452,7 +474,7 @@ def _ingest_meteorology(
     for field, name in METEO_FIELDS.items():
         series = [hourly[field][i] for i in at_overpass]
         finite = [float(v) for v in series if v is not None]
-        arrays[name] = xr.DataArray(np.float32(np.median(finite) if finite else np.nan))
+        arrays[name] = xr.DataArray(np.float32(_reduce_meteorology(name, finite)))
 
     logger.info(
         "%s %s: %d overpass hours from %d hourly records",
@@ -592,6 +614,32 @@ def _ingest_population(
     )
 
 
+# --- OpenStreetMap (emission inventory) ------------------------------------------
+
+
+def _ingest_osm(
+    catalog: pystac_client.Client, settings: Settings, grid: Grid
+) -> tuple[dict[str, xr.DataArray], SourceRecord]:
+    """PM2.5 emissions per cell from OSM roads and brick kilns. See `ingest/osm.py`.
+
+    Static: the road network does not change between two seasons of the same year, and
+    re-querying Overpass per window would multiply a rate-limited request by four for
+    identical geometry. The *seasonality* of the sources is real - kilns fire in winter -
+    but it belongs in the air core's parameters, not in a second copy of the inventory.
+    """
+    payload = fetch_overpass(settings.overpass_url, settings.tile.bbox, settings.http_timeout_s)
+    emissions = emission_grid(payload, grid)
+
+    return {
+        "pm25_emission_g_s": xr.DataArray(emissions, dims=("y", "x"), coords=grid.coords())
+    }, SourceRecord(
+        collection_id=SOURCE_OSM,
+        n_found=len(payload.get("elements", [])),
+        n_kept=len(payload.get("elements", [])),
+        n_composited=1,
+    )
+
+
 def _newest_epoch(result: SearchResult) -> SearchResult:
     """Keep only the items from the most recent year present in the search result."""
     years = {item.datetime.year for item in result.items if item.datetime is not None}
@@ -624,6 +672,7 @@ _STATIC_INGESTORS: tuple[tuple[str, StaticIngestor], ...] = (
     ("copernicus-dem", _ingest_dem),
     ("worldcover", _ingest_worldcover),
     ("worldpop", _ingest_population),
+    ("osm", _ingest_osm),
 )
 
 _TEMPORAL_INGESTORS: tuple[tuple[str, TemporalIngestor], ...] = (

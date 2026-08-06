@@ -38,6 +38,12 @@ class Intervention(BaseModel):
     # Canopy cover to *add*, as a fraction of cell area. Capped per cell against what is
     # actually still plantable there - see cores.thermal.simulate.
     canopy_fraction_added: float = Field(ge=0.0, le=1.0)
+    # Share of the cell's PM2.5 emissions removed inside the mask - a low-emission zone.
+    # Read only by the air core; the thermal core has no mechanism for it, and adding one
+    # would be inventing a link between traffic and surface temperature that the emulator
+    # was never trained on. One `Intervention` describes one plan, and a plan may say
+    # nothing about traffic, which is what the 0.0 default means (D14).
+    emission_fraction_removed: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class DeltaStats(BaseModel):

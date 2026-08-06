@@ -7,9 +7,11 @@ which this module calls exactly once and does not second-guess.
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 import numpy as np
+import xarray as xr
 from fastapi import APIRouter, Depends, HTTPException
 
 from terrarium.api.deps import get_runtime
@@ -17,6 +19,7 @@ from terrarium.api.geometry import GeometryError, mask_from_geojson
 from terrarium.api.routes.cube import build_layer
 from terrarium.api.runtime import Runtime
 from terrarium.api.schemas.simulate import (
+    AirResponse,
     DecileShareResponse,
     DeltaStatsResponse,
     EquityResponse,
@@ -24,6 +27,9 @@ from terrarium.api.schemas.simulate import (
     SimulateRequest,
     SimulateResponse,
 )
+from terrarium.cores.air import EMISSION_VARIABLE as AIR_EMISSION_VARIABLE
+from terrarium.cores.air import AirParameters
+from terrarium.cores.air import simulate as simulate_air
 from terrarium.cores.base import Intervention
 from terrarium.cores.equity import benefit_distribution
 from terrarium.cores.thermal.features import BASE_VARIABLES
@@ -33,6 +39,8 @@ from terrarium.cores.thermal.simulate import (
     tree_built_contrast,
 )
 from terrarium.state.cube import select_window
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["simulate"])
 
@@ -80,6 +88,62 @@ def _equity(delta: np.ndarray, runtime: Runtime) -> EquityResponse | None:
     )
 
 
+def _air(
+    window: xr.Dataset,
+    intervention: Intervention,
+    runtime: Runtime,
+    label: str,
+) -> AirResponse | None:
+    """Run the air core, or `None` if this request or this cube cannot support one.
+
+    Two different "no" answers deliberately collapse into one null, and the schema says
+    which is which: a plan that removes no emissions has no air question to ask, and a cube
+    with no OSM inventory cannot answer one. Returning zeros for either would let a client
+    report "no effect on air" for a cube that was never built to say.
+    """
+    if intervention.emission_fraction_removed <= 0 or AIR_EMISSION_VARIABLE not in window:
+        return None
+
+    params = AirParameters.for_season(str(np.asarray(window["season"].values).reshape(-1)[0]))
+    try:
+        result = simulate_air(window, intervention, params)
+    except ValueError as exc:
+        # An unpopulated inventory or a window with no wind is a property of the cube, not
+        # of the request. The thermal answer is still valid, so serve it without the air
+        # panel - but log the reason, because the client only sees `null` and cannot tell
+        # this from "the plan does not touch traffic".
+        logger.warning("air core skipped for %s: %s", label, exc)
+        return None
+
+    stats = result.stats
+    return AirResponse(
+        variable=result.variable,
+        units=result.units,
+        stats=DeltaStatsResponse(
+            n_cells_changed=stats.n_cells_changed,
+            mean_delta_inside=stats.mean_delta_inside,
+            mean_delta_spillover=stats.mean_delta_spillover,
+            spillover_cells=stats.spillover_cells,
+            min_delta=stats.min_delta,
+            max_delta=stats.max_delta,
+        ),
+        mixing_height_m=params.mixing_height_m,
+        wind_speed_ms=float(np.asarray(window["wind_speed_ms"].values).reshape(-1)[0]),
+        wind_direction_deg=float(
+            np.asarray(window["wind_direction_deg"].values).reshape(-1)[0]
+        ),
+        emission_fraction_removed=intervention.emission_fraction_removed,
+        delta=build_layer(
+            result.delta,
+            variable=result.variable,
+            description="Modelled change in locally-generated PM2.5 (this tile's own sources)",
+            units=result.units,
+            window=label,
+            grid=runtime.grid,
+        ),
+    )
+
+
 @router.post(
     "/simulate",
     response_model=SimulateResponse,
@@ -105,7 +169,9 @@ async def run_simulation(
 
     window = select_window(runtime.cube, label)
     intervention = Intervention(
-        mask=mask, canopy_fraction_added=request.canopy_fraction_added
+        mask=mask,
+        canopy_fraction_added=request.canopy_fraction_added,
+        emission_fraction_removed=request.emission_fraction_removed,
     )
 
     try:
@@ -160,4 +226,5 @@ async def run_simulation(
             window=label,
             grid=runtime.grid,
         ),
+        air=_air(window, intervention, runtime, label),
     )

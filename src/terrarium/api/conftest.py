@@ -31,10 +31,10 @@ from terrarium.state.grid import grid_for_tile
 # so the summer default has something to prefer.
 WINDOWS = ("2024-summer", "2024-winter")
 SEASONS = ("summer", "winter")
-# (air_temp_c, wind_speed_ms, relative_humidity_pct)
+# (air_temp_c, wind_speed_ms, relative_humidity_pct, wind_direction_deg)
 MET_BY_WINDOW = {
-    "2024-summer": (34.0, 2.25, 37.0),
-    "2024-winter": (14.1, 0.79, 71.0),
+    "2024-summer": (34.0, 2.25, 37.0, 250.0),
+    "2024-winter": (14.1, 0.79, 71.0, 320.0),
 }
 
 
@@ -80,11 +80,22 @@ def synthetic_cube() -> xr.Dataset:
 
     met = {
         name: ("time", np.array([MET_BY_WINDOW[w][i] for w in WINDOWS], dtype="float32"))
-        for i, name in enumerate(("air_temp_c", "wind_speed_ms", "relative_humidity_pct"))
+        for i, name in enumerate(
+            ("air_temp_c", "wind_speed_ms", "relative_humidity_pct", "wind_direction_deg")
+        )
     }
+
+    # A road grid: emissions on every tenth row and column, heavier where it is built up.
+    # Sparse and structured, like the real inventory - a uniform field would let a plume
+    # bug that smears everything look exactly like a correct answer.
+    emissions = np.zeros((height, width), dtype="float32")
+    emissions[::10, :] = 0.002
+    emissions[:, ::10] = 0.002
+    emissions[landcover == WATER_CLASS] = 0.0
 
     return xr.Dataset(
         {
+            "pm25_emission_g_s": (("y", "x"), emissions),
             "lst_c": (("time", "y", "x"), lst.astype("float32")),
             "ndvi": (("time", "y", "x"), stack(ndvi).astype("float32")),
             "ndbi": (("time", "y", "x"), stack(ndbi).astype("float32")),

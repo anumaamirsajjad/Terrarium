@@ -135,11 +135,12 @@ COLLECTION_LANDSAT = "landsat-c2-l2"
 COLLECTION_DEM = "cop-dem-glo-30"
 COLLECTION_WORLDCOVER = "esa-worldcover"
 
-# Not STAC collections: these two are plain HTTP, outside Planetary Computer. Both are
-# keyless and free (D13). They are named here anyway so `VariableSpec.source_collection`
-# stays a single vocabulary rather than sprouting a second field.
+# Not STAC collections: these are plain HTTP, outside Planetary Computer. All keyless and
+# free (D13). They are named here anyway so `VariableSpec.source_collection` stays a
+# single vocabulary rather than sprouting a second field.
 SOURCE_OPEN_METEO = "open-meteo"
 SOURCE_WORLDPOP = "worldpop"
+SOURCE_OSM = "osm-overpass"
 
 # Native ground sample distance of each source, in metres, *before* resampling onto
 # the target grid. Kept separate from Tile.target_resolution_m so the two concepts
@@ -213,6 +214,18 @@ class Settings(BaseSettings):
     # Ceiling on any single plain-HTTP fetch. The retry wrapper handles the rest.
     http_timeout_s: float = 300.0
 
+    # Overpass, for the Phase 9 emission inventory: road centrelines and brick kilns.
+    # Keyless and free, but rate-limited and frequently busy - the ingest retry wrapper is
+    # what makes that survivable. `osmnx` was budgeted for and not taken: it would pull
+    # networkx and a routing graph we never traverse, when what the inventory needs is
+    # geometry and tags, which is one Overpass query and a histogram.
+    overpass_url: str = "https://overpass-api.de/api/interpreter"
+    # OpenAQ v3, for air validation. **Free but no longer keyless** - v2 was retired and v3
+    # requires a (free, no-card) API key, so this is the one source that needs an env var.
+    # scripts/validate_air.py says so and stops rather than half-validating.
+    openaq_url: str = "https://api.openaq.org/v3"
+    openaq_key: str | None = None
+
     # Where `scripts/build_tile.py` writes by default.
     zarr_store: Path = DATA_DIR / "processed" / "cube.zarr"
     duckdb_path: Path = DATA_DIR / "processed" / "terrarium.duckdb"
@@ -222,7 +235,12 @@ class Settings(BaseSettings):
     # cube: builds go to `zarr_store` (or `--out`), and this only moves once a build has
     # been checked. `cube.zarr` is currently a failed partial build - its 2024 windows are
     # empty - which is precisely the accident this split exists to survive.
-    serve_zarr_store: Path = DATA_DIR / "processed" / "cube_phase4.zarr"
+    # Moved from cube_phase4.zarr in Phase 9, only after the new one was checked: 4
+    # windows, `validate_windows` clean, and a worked intervention through both cores.
+    # cube_phase4.zarr is still on disk and still good, but it predates
+    # `pm25_emission_g_s` and `wind_direction_deg`, so the API refuses it - which is the
+    # per-variable-window check doing exactly its job.
+    serve_zarr_store: Path = DATA_DIR / "processed" / "cube_phase9.zarr"
     # LightGBM native text format, written by scripts/train_thermal.py.
     thermal_model_path: Path = DATA_DIR / "processed" / "thermal.txt"
 

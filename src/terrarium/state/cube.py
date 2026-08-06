@@ -26,6 +26,7 @@ from terrarium.config import (
     COLLECTION_SENTINEL2,
     COLLECTION_WORLDCOVER,
     SOURCE_OPEN_METEO,
+    SOURCE_OSM,
     SOURCE_WORLDPOP,
     SeasonWindow,
 )
@@ -197,6 +198,33 @@ CUBE_VARIABLES: tuple[VariableSpec, ...] = (
         # neighbourhood, a units bug.
         valid_range=(0.0, 10_000.0),
     ),
+    VariableSpec(
+        name="pm25_emission_g_s",
+        # Like population, this is a *per-cell total*, not a rate per unit area, so it
+        # resamples by SUM. Unlike population it is never actually resampled: it is
+        # assembled directly on the analysis grid by binning road samples, because OSM
+        # arrives as vector geometry rather than as a raster with a resolution of its own.
+        # The method is declared anyway - it is a property of the variable's meaning, and
+        # the day something does resample it, averaging would be the wrong answer.
+        description=(
+            "Ground-level PM2.5 emission rate per 100 m cell: OSM road length x class "
+            "traffic x fleet emission factor, plus brick-kiln point sources. A modelled "
+            "inventory, not a measurement."
+        ),
+        units="g s-1",
+        dtype="float32",
+        resampling=Resampling.SUM,
+        dims=Dims.SPACE,
+        source_collection=SOURCE_OSM,
+        # NaN, not 0.0, and the ingest writes explicit zeros where there are no roads.
+        # Emissions are genuinely zero over most of the tile, so a 0.0 fill would make a
+        # cube whose OSM ingest never ran indistinguishable from one whose tile is empty -
+        # and it would report 100 % valid either way.
+        fill_value=float("nan"),
+        # A single 1 ha cell emitting 100 g/s is ~3 kt/year from one hectare: an inventory
+        # bug, not a hotspot. The tile's busiest road cell is ~0.01 g/s.
+        valid_range=(0.0, 100.0),
+    ),
     # --- meteorology: one value per window, not a map ---------------------------
     #
     # Sampled at the ~10:30 local Landsat overpass hour and reduced by median over the
@@ -232,6 +260,27 @@ CUBE_VARIABLES: tuple[VariableSpec, ...] = (
         source_collection=SOURCE_OPEN_METEO,
         fill_value=float("nan"),
         valid_range=(0.0, 60.0),
+    ),
+    VariableSpec(
+        name="wind_direction_deg",
+        # Meteorological convention: the direction the wind blows *from*, clockwise from
+        # north. 90 is an easterly, and the plume goes west. The air core depends on this
+        # sign being right and nothing else in the cube would notice if it were not.
+        #
+        # Reduced by *vector* mean over the window, not median: 350 deg and 10 deg average
+        # to 180 under any scalar reduction, which points the plume exactly backwards.
+        description=(
+            "10 m wind direction at the ~10:30 local overpass hour, window vector mean "
+            "(Open-Meteo ERA5 archive). Meteorological convention: the direction the wind "
+            "comes from, degrees clockwise from north."
+        ),
+        units="deg",
+        dtype="float32",
+        resampling=None,
+        dims=Dims.TIME,
+        source_collection=SOURCE_OPEN_METEO,
+        fill_value=float("nan"),
+        valid_range=(0.0, 360.0),
     ),
     VariableSpec(
         name="relative_humidity_pct",
@@ -419,6 +468,13 @@ def window_valid_fractions(ds: xr.Dataset) -> dict[str, dict[str, float]]:
         for spec in CUBE_VARIABLES:
             if spec.dims is Dims.SPACE:
                 continue  # static: identical in every window, nothing per-window to say
+            if spec.name not in window:
+                # A cube built before this variable was declared. Zero valid, not a
+                # KeyError: `validate_windows` then names it in the same "rebuild this"
+                # message as an empty one, instead of the API dying on an import-time
+                # traceback that says nothing about which artefact is stale.
+                per_variable[spec.name] = 0.0
+                continue
             values = np.asarray(window[spec.name].values)
             valid = _valid_mask(values, spec)
             per_variable[spec.name] = float(valid.sum() / valid.size) if valid.size else 0.0
@@ -501,7 +557,13 @@ def summarise(ds: xr.Dataset, grid: Grid) -> CubeSummary:
     summaries: list[VariableSummary] = []
 
     for spec in CUBE_VARIABLES:
-        values = np.asarray(ds[spec.name].values)
+        # Absent, not merely empty: a cube written before the variable was declared. It
+        # reports as unpopulated, which is what it is from a consumer's point of view.
+        values = (
+            np.asarray(ds[spec.name].values)
+            if spec.name in ds
+            else np.array([], dtype=spec.dtype)
+        )
         if spec.is_categorical:
             valid = values != np.asarray(spec.fill_value).astype(values.dtype)
         else:

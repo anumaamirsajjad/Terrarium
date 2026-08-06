@@ -14,7 +14,7 @@ with the team.
 | 6 | Frontend — map, draw, compare | ✅ **DONE** |
 | 7 | Hindcast validation | ✅ **DONE** — model over-states cooling ~2.5x |
 | 8 | Equity | ✅ **DONE** — panel shipped; demo plan gives the densest decile 0 % |
-| 9 | Air dispersion core | ⬜ |
+| 9 | Air dispersion core | ✅ **DONE** — inventory + core shipped; OpenAQ scoring built but unrun |
 | 10 | DSL + agent layer | ⬜ |
 | 11 | Voice, VLM, council brief | ⬜ |
 | 12 | Deployment | ⬜ |
@@ -40,6 +40,9 @@ Settled 2026-07-31. These are closed — reopen deliberately, not by drift.
 | D11 | `CLAUDE.md` | Full rewrite against the project description |
 | D12 | Deployment | Late phase, once the demo is solid. Never blocks physics work |
 | D13 | Budget | **Zero. Free tier only, everywhere, no credit card.** See §Cost register |
+| D14 | Air intervention | `Intervention` gains `emission_fraction_removed`, defaulting to 0.0. One `Intervention` describes one plan; a plan may say nothing about traffic. Only the air core reads it — giving the thermal emulator a traffic lever would invent a link it was never trained on |
+| D15 | OSM ingest | **No `osmnx`.** It was budgeted for and turned out to be the wrong tool: it builds a routable graph, and an inventory does not route. One Overpass POST plus a 2-D histogram of densified way samples, in `ingest/osm.py`, using dependencies already present |
+| D16 | Air validation source | OpenAQ **v3**, which unlike every other source in this project needs a key. Free and no card, so it stays inside D13, but it is the one thing that will not run out of the box — `scripts/validate_air.py` says so and stops rather than half-validating |
 
 ### Assumptions I am defaulting (overturn any of these freely)
 
@@ -61,8 +64,8 @@ dependency anywhere breaks the argument, not just the wallet.
 |---|---|
 | Microsoft Planetary Computer (Sentinel-2, Landsat, DEM, WorldCover, Sentinel-1) | Free, anonymous, no key. **Already in use** |
 | Open-Meteo (meteorology, Phase 3) | Free, keyless, non-commercial |
-| OpenStreetMap / Overpass (Phase 9) | Free |
-| OpenAQ (air validation, Phase 9) | Free |
+| OpenStreetMap / Overpass (Phase 9) | Free, keyless |
+| OpenAQ v3 (air validation, Phase 9) | Free, **but needs a key** — no card. The one keyed source (D16) |
 | WorldPop, GHSL, VIIRS nightlights (Phase 8) | Free, open licence |
 
 Every library in the stack — FastAPI, xarray, Zarr, DuckDB, LightGBM, React, deck.gl,
@@ -1133,13 +1136,138 @@ emulator over-states cooling ~2.5x. The panel now says so and shows the discount
 next to the modelled one, so the correction reaches the screen rather than living only in
 this document.
 
-## Phase 9 — Air dispersion core ⬜
+## Phase 9 — Air dispersion core ✅ DONE
 
-Gaussian puff on the 100 m grid, winter inversion parameterisation, emission inventory
-from OSM (road class × fleet mix, kiln points), canopy-weighted deposition. Needs an OSM
-ingest expansion (`osmnx`) — budget for it honestly rather than assuming the cube has it.
+Steady-state Gaussian plume on the 100 m grid, winter inversion parameterisation, emission
+inventory from OSM, canopy-weighted deposition. The second core (D8), and the one that
+answers *"ban combustion vehicles inside this ring"*.
 
-Validation: leave-one-station-out against OpenAQ.
+**Delivered:**
+
+- `ingest/osm.py` — one Overpass query, road class × fleet mix + kiln points, densified and
+  binned to g/s per cell. **No `osmnx`** (D15).
+- Two new cube variables: `pm25_emission_g_s` (static) and `wind_direction_deg` (per
+  window). Direction is reduced by **vector mean**, not median — 350° and 10° average to
+  180° under any scalar reduction, which points every plume exactly backwards.
+- `cores/air.py` — `AirParameters`, `plume_kernel`, `concentration`, `simulate`, and
+  `leave_one_station_out`. Pure, like every core. The whole tile is one FFT convolution,
+  because a uniform wind field makes superposition a convolution.
+- `POST /simulate` gains `emission_fraction_removed` (D14) and an optional `air` block.
+- `scripts/build_air_layers.py` — adds both variables to an existing cube in seconds, so
+  Phase 9 never required rebuilding a known-good Zarr against Planetary Computer.
+- `scripts/validate_air.py` — leave-one-station-out against OpenAQ (D16).
+- 36 new offline tests. Still no test that touches the network — and fixing this phase's
+  fixtures exposed one that already did (see below).
+
+### What the tile actually contains
+
+`build_air_layers.py` against `cube_phase4.zarr`, 4 windows:
+
+| | |
+|---|---|
+| road ways | **35,405** |
+| brick kilns | **0** — OSM has none tagged inside the bbox |
+| total emissions | **38.19 g/s** ≈ 1,200 t/year of PM2.5 |
+| cells carrying a source | 31,780 of 40,602 (**78 %**) |
+
+Zero kilns is a finding, not a bug: Lahore's kilns ring the city outside a 20 km tile, and
+OSM's coverage of them is patchy anyway. The kiln term is implemented and tested; on this
+tile it contributes nothing, and the inventory is road transport alone.
+
+### The seasonal result — this is the phase's own end-to-end proof
+
+Modelled **locally-generated** PM2.5 across the tile, same emissions every window:
+
+| window | wind | mixing height | mean | p95 | max |
+|---|---|---|---|---|---|
+| 2023-summer | 2.14 m/s from 131° | 800 m | 0.5 | 1.2 | 1.5 |
+| 2023-winter | 1.06 m/s from 102° | 250 m | 2.9 | 6.0 | 8.7 |
+| 2024-summer | 2.25 m/s from 300° | 800 m | 0.5 | 1.0 | 1.3 |
+| **2024-winter** | **0.79 m/s from 66°** | **250 m** | **3.8** | **8.1** | **10.9** |
+
+µg/m³. **7.4x the concentration from identical sources** in 2024 and 6.1x in 2023, which
+is the entire argument for putting winter in the cube back in Phase 3, now cashed in.
+
+A worked low-emission zone — 4 km² over the busiest cell, all vehicle emissions removed:
+
+| | 2024-winter | 2024-summer |
+|---|---|---|
+| inside the zone | **−0.91 µg/m³** | −0.10 |
+| 1 km ring outside (980 cells) | −0.36 | — |
+| best single cell | −3.47 | −0.37 |
+
+**The same plan buys 8.7x more in winter.** And the ring matters: unlike cooling,
+which stops at the edge of a 500 m feature neighbourhood, a plume is still measurable a
+kilometre downwind — which is why the air block reports spillover over 10 cells and the
+thermal block over 2.
+
+Planting alone, +30 % canopy over the same 4 km², moves air by **−0.0003 µg/m³**. That is
+honest and it is small, and the `ponytail:` note in `concentration` says why: deposition
+uses one tile-mean velocity, so a small planting credits the whole tile with a marginally
+better sink rather than crediting the polygon. Trees are a thermal instrument here, not an
+air one.
+
+### The kernel radius was a physics parameter wearing a numerical costume
+
+It first shipped at 30 cells, on the reasoning that 3 km is far enough that the kernel is
+negligible. That reasoning is right for a *point* source and wrong for an *area* source:
+concentration over a city accumulates roughly linearly with the length of upwind fetch
+still contributing, so truncating at 3 km returned 1.41 µg/m³ where 200 cells returns 3.84.
+**A 63 % truncation that would have read as a modelling result.**
+
+Measured, then fixed:
+
+| radius | 3 km | 6 km | 10 km | 15 km | 20 km |
+|---|---|---|---|---|---|
+| tile mean, 2024-winter | 1.41 | 2.41 | 3.23 | 3.72 | **3.84** |
+| cost | 4 ms | 5 ms | 10 ms | 17 ms | 37 ms |
+
+The default is now 200 cells — the tile itself. Past that is outside what the inventory
+knows about, which is the same limitation as the missing background, expressed in distance.
+
+Worth noting what the truncation did *not* affect: the low-emission zone's delta was
+identical at both radii, because a 4 km² removal is entirely near-field. The bug lived in
+the level, not the difference — the same reason the delta is the quotable object.
+
+### What this does not claim
+
+**These are local increments, not concentrations a monitor reads.** The inventory covers
+this tile's roads and nothing else, so a regional background that usually dominates
+Lahore's PM2.5 is absent by construction. 3.8 µg/m³ against a real winter reading of
+150–300 µg/m³ is not the model saying Lahore's air is clean; it is the model saying *this
+much of it comes from these streets, in a single pass, at 10:30 in the morning*. The
+background cancels in a difference, exactly as meteorology does in the thermal core, which
+is why the API ships a delta and never a level.
+
+Also absent by construction: multi-day accumulation under a persistent inversion (this is
+steady-state, single-pass), street-canyon trapping (sub-100 m), and secondary aerosol
+chemistry (hours, downwind of the tile).
+
+### Validation is built and has not been run
+
+`scripts/validate_air.py` implements leave-one-station-out with an affine fit — the
+intercept is the background the core does not model, the slope is the scale error in an
+inventory built from literature emission factors, and both terms are load-bearing. It is
+scored against a null model (predict each station from the mean of the others), because
+with a handful of monitors in one city a model that merely reproduces the city mean posts a
+respectable error while resolving nothing spatial.
+
+**It has not been run against real stations**, because OpenAQ v3 needs a key nobody has set
+(D16). The leave-one-out arithmetic is tested on synthetic data — it recovers a known scale
+and background exactly, refuses fewer than four stations, and refuses a set of stations that
+all model the same value rather than letting numpy invent a slope from nothing. Until it
+runs, **the emission factors are literature values and the modelled magnitudes are
+uncalibrated.** Say so when quoting them.
+
+### A test that was quietly using the network
+
+Fixing this phase's fixtures surfaced it: `test_a_lazy_read_failure_is_caught_and_isolated`
+stubbed only the STAC boundary, so it genuinely fetched WorldPop and Open-Meteo on every
+run, and passed because those happened to succeed. Adding Overpass to the ingest is what
+exposed it — the new call got a real HTTP 504 from `overpass-api.de` inside the test suite.
+It now takes the `mocked` fixture like every other build test. Worth recording because it is
+the exact failure mode the no-network rule exists to prevent: not a test that fails
+offline, but one that passes for the wrong reason.
 
 ## Phase 10 — DSL + agent layer ⬜
 
@@ -1182,8 +1310,8 @@ decision (D12) — never blocks physics work.
 
 | | Track A — data & physics | Track B — product & interface |
 |---|---|---|
-| now | **Phase 7** hindcast — starting with a wider `window_years` build | **Phase 8** equity panel |
-| then | Phase 9 air core | Phase 10 DSL |
+| done | **Phase 7** hindcast, **Phase 9** air core | **Phase 8** equity panel |
+| now | run the OpenAQ calibration once a key exists | Phase 10 DSL |
 
 Phases 2–6 are done, so the **cut-order minimum is met**: one tile, a thermal core, and a
 map showing the delta. Everything from here is upside on a submission that already stands
