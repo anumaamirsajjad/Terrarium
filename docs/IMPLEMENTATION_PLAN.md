@@ -15,7 +15,7 @@ with the team.
 | 7 | Hindcast validation | ✅ **DONE** — model over-states cooling ~2.5x |
 | 8 | Equity | ✅ **DONE** — panel shipped; demo plan gives the densest decile 0 % |
 | 9 | Air dispersion core | ✅ **DONE** — inventory + core shipped; OpenAQ scoring built but unrun |
-| 10 | DSL + agent layer | ⬜ |
+| 10 | DSL + agent layer | ✅ **DONE** — DSL, presets and brief ship; no LLM key, and it does not need one |
 | 11 | Voice, VLM, council brief | ⬜ |
 | 12 | Deployment | ⬜ |
 
@@ -43,6 +43,8 @@ Settled 2026-07-31. These are closed — reopen deliberately, not by drift.
 | D14 | Air intervention | `Intervention` gains `emission_fraction_removed`, defaulting to 0.0. One `Intervention` describes one plan; a plan may say nothing about traffic. Only the air core reads it — giving the thermal emulator a traffic lever would invent a link it was never trained on |
 | D15 | OSM ingest | **No `osmnx`.** It was budgeted for and turned out to be the wrong tool: it builds a routable graph, and an inventory does not route. One Overpass POST plus a 2-D histogram of densified way samples, in `ingest/osm.py`, using dependencies already present |
 | D16 | Air validation source | OpenAQ **v3**, which unlike every other source in this project needs a key. Free and no card, so it stays inside D13, but it is the one thing that will not run out of the box — `scripts/validate_air.py` says so and stops rather than half-validating |
+| D17 | Agent framework | **No LangGraph.** Budgeted for in Phase 10 and not taken, for the reason D15 dropped `osmnx`: it is a graph runtime, and the planner is two nodes — parse, then validate — with no branching, no cycles and no shared state to checkpoint. `dsl/planner.py` is one function that tries a model and falls back to a regex parser. If agents later need to *choose* between interventions and iterate, that is a real graph and this reopens |
+| D18 | Where the LLM may live | **One module, `dsl/llm.py`, and nowhere else.** `ingest/` remains the only layer that fetches *data for the cube*; a planner call is a different thing — Layer 3, made on the user's behalf, with nothing downstream treating its output as a measurement. It is confined to one adapter for the same reason, and everything it returns is re-validated as a `Plan` before a core can see it. The key is optional: with none, `/plan` uses the rule parser and the rest of the layer never calls out at all |
 
 ### Assumptions I am defaulting (overturn any of these freely)
 
@@ -1269,25 +1271,130 @@ It now takes the `mocked` fixture like every other build test. Worth recording b
 the exact failure mode the no-network rule exists to prevent: not a test that fails
 offline, but one that passes for the wrong reason.
 
-## Phase 10 — DSL + agent layer ⬜
+## Phase 10 — DSL + agent layer ✅ DONE
 
-`dsl/` first: Pydantic intervention schema, validators, costed intervention library. This
-is where tree count → canopy fraction lives, and where "you cannot plant 5,000 trees in
-0.3 km²" gets rejected.
+A typed intervention language, a validator that refuses plans the tile cannot hold, a
+costed preset library, a planner that reads plain text, and a deterministic explainer. The
+LLM is one optional module at the edge of all of it.
 
-Then LangGraph planner (NL → validated DSL) and explainer (tensors → brief with
-uncertainty). Cores are already pure functions, so exposing them as typed tool-calls is
-mechanical. **Fallback:** preset scenario buttons emitting the same DSL — the DSL is what
-matters, the LLM is a nicer front door onto it.
+**Delivered:**
 
-**Free tier: Google Gemini via AI Studio** (D13). Keep the provider behind one adapter so
-it can be swapped if credits appear. The DSL and validators are provider-independent by
-construction and are the part worth building carefully.
+- `dsl/schema.py` — `Plan`, `PlantTrees`, `RestrictVehicles` as a discriminated union.
+  A plan carries **no geometry**, for the same reason a core does not (D6): a plan says
+  *what*, and the polygon is the API's business. That is also what makes a preset reusable.
+- `dsl/validate.py` — `resolve(plan, measurement)`, the tree-count ↔ canopy-fraction
+  conversion at 25 m² of crown per tree, and the refusals.
+- `dsl/library.py` — five costed presets and two literature unit costs, `calibrated=False`
+  everywhere.
+- `dsl/planner.py` — text → `Plan`, model first when a key exists, regex parser always.
+- `dsl/explain.py` — numbers → a brief whose `uncertainties` list is never empty.
+- `dsl/llm.py` — the only file in the project that speaks to a model (D18).
+- `api/measure.py`, `POST /plan`, `GET /plan/presets`, and a `brief` block on `/simulate`.
+- Frontend: preset buttons, a free-text box, and a brief panel that renders the
+  uncertainties **in the open** rather than behind a toggle.
+- **97 new offline tests** (78 in `dsl/`, 19 on the routes).
+  Still nothing touching the network — `dsl/test_llm.py` stubs `urlopen` explicitly rather
+  than depending on whether a key happens to be set. Ten more in the browser suite.
+
+### The validator is the phase, and the refusal is the product
+
+Measured on the real cube, a 6.38 km² box over central Lahore, `2024-summer`:
+
+| asked for | answer |
+|---|---|
+| "street trees" preset (15 % canopy) | 38,280 trees, **$574k**, ΔLST **−0.27 °C** |
+| "plant 5,000 trees here" | 2 % canopy, **$75k**, ΔLST **−0.03 °C** |
+| "plant 900,000 trees here" | **422 refused** |
+| "ban combustion vehicles here in winter" | resolved to `2024-winter`, **$1.6M** |
+
+The refusal in full, because the wording is the deliverable:
+
+> 900,000 trees need 22.500 km² of crown at 25 m² each, but this 6.380 km² polygon has
+> only **3.433 km² still plantable** — room for about 137,305. Shrink the planting or
+> enlarge the polygon.
+
+**That 3.433 km² is measured, not assumed.** It is the thermal core's own
+`effective_fraction` asked for a canopy of 1.0, so what comes back per cell *is* the
+headroom that cell has left, with water and no-data already zeroed. Using the core's
+function rather than a parallel rule of thumb is what stops the DSL and the physics
+disagreeing about how green a cell already is — and it is why a polygon over the Ravi
+refuses a planting instead of quietly returning no cooling.
+
+The two units are treated differently on purpose, and the asymmetry is the units' existing
+contracts rather than a new rule: **a canopy fraction over the headroom warns, a tree count
+over it refuses.** A fraction is already documented as a ceiling the core caps per cell; a
+count is a quantity somebody would procure, and 900,000 trees with nowhere to go is not a
+ceiling, it is a mistake.
+
+### 5,000 trees is a much smaller plan than it sounds
+
+The most useful thing the conversion does is deflate an intuition. 5,000 trees at 25 m² of
+crown covers 0.125 km². Spread over a 6.38 km² polygon that is **2 % canopy**, which buys
+−0.03 °C — against −0.27 °C for the 15 % street-trees preset costing eight times more.
+Before this phase the same request went in as a slider position and came out as a number
+with nothing to compare it against. Halving the crown area doubles the trees a polygon
+holds, so `TREE_CANOPY_M2` is stated in every response (`basis`) rather than buried.
+
+### The brief exists because a figure without its caveats is the wrong figure
+
+`dsl/explain.py` is templates, not a model, and that is the point: a template cannot
+restate a number it did not receive, and it cannot smooth a caveat into a hedge. Every
+brief carries the hindcast correction (the headline quotes −0.11 °C where the model says
+−0.27 °C), the window, and the surface-versus-air distinction. `confidence` has two values,
+`low` and `moderate` — there is no `high`, because nothing here has earned it.
+
+Two failures the first real run exposed, both fixed:
+
+- **A caveat belongs to a figure, not to a plan.** A traffic-only plan was being shipped
+  with the hindcast correction and the land-surface-temperature note attached to a
+  temperature it never quoted, plus an equity block reporting its shares as "unreliable"
+  because they divide by a delta of exactly zero. Noise is how a real caveat stops being
+  read, so the thermal caveats now appear only when something was planted.
+- **`air is None` means two opposite things.** "This plan does not touch traffic" and
+  "it does, and this cube has no emission inventory" arrived identically. The brief now
+  distinguishes them: *"That is a missing layer, not a modelled finding of no effect."*
+  This was not hypothetical — it is exactly what the cube on the machine this was built on
+  does, and the first version of the brief reported it as "changes nothing measurable".
+
+### No LangGraph, and no key either
+
+Two things budgeted for and not spent (D17, D18). The planner is two steps with no
+branching and nothing to checkpoint, so a graph runtime would have added a dependency to
+express a function call. And the LLM is optional in the strong sense: with no key, `/plan`
+parses text with a regex parser that handles "5,000 trees", "30 % canopy", "ban combustion
+vehicles", "remove 40 % of traffic" and "in winter", and **nothing else in the layer calls
+out at all**. `GET /plan/presets` reports which parser is live rather than implying a model
+read the sentence when a regex did.
+
+The safety argument for letting a free-tier model near a simulator is the same shape: the
+model's output is parsed as a `Plan` or it is nothing. Invalid JSON, an unknown action, a
+planting with both units or with neither — all fall back to the rule parser with a warning
+saying so, and none of them reach a core. That fallback is tested on four kinds of bad
+model output; the model itself is stubbed, because no test may touch the network.
+
+### What did not run
+
+**The air path was verified against the synthetic cube, not the real one.** `serve_zarr_store`
+points at `cube_phase9.zarr`, which is not on this machine, and Overpass returned 504 on
+both attempts to rebuild the emission layers onto `cube_phase4.zarr`. So the end-to-end
+numbers above are the thermal path on real Lahore data with no inventory present, and the
+`/plan` → `/simulate` → air block round trip is covered by the route tests only. The
+season-resolution path — "in winter" landing on `2024-winter` rather than the summer
+default — did run on the real cube, which is the part of that story that mattered most.
+
+**The LLM path has never run against Gemini.** No key is set, so every parse in every
+measurement above is the rule parser's. The adapter is tested against a stubbed transport
+and nothing else.
 
 ## Phase 11 — Voice, VLM, council brief ⬜
 
 Citizen-photo VLM writing observations back into the cube — **reuse the Phase 10 Gemini
-key**, its free tier is multimodal, so this costs nothing extra.
+key**, its free tier is multimodal, so this costs nothing extra. Note that Phase 10 shipped
+without ever obtaining one: `TERRARIUM_GEMINI_API_KEY` is wired through `dsl/llm.py` and
+unset, so getting a key is this phase's first step rather than a step it inherits.
+
+The council brief is **half built**: `dsl/explain.py` already writes the findings and the
+uncertainties, and `/simulate` returns them. What is left is rendering, not authorship.
 
 Voice in English and Urdu. LiveKit Cloud meters minutes, so prefer the free path:
 **browser Web Speech API** for capture, or self-hosted **Whisper** for transcription.
@@ -1310,8 +1417,8 @@ decision (D12) — never blocks physics work.
 
 | | Track A — data & physics | Track B — product & interface |
 |---|---|---|
-| done | **Phase 7** hindcast, **Phase 9** air core | **Phase 8** equity panel |
-| now | run the OpenAQ calibration once a key exists | Phase 10 DSL |
+| done | **Phase 7** hindcast, **Phase 9** air core | **Phase 8** equity panel, **Phase 10** DSL + brief |
+| now | rebuild `cube_phase9.zarr` when Overpass answers, then run the OpenAQ calibration once a key exists | Phase 11, or Phase 12 if voice is cut |
 
 Phases 2–6 are done, so the **cut-order minimum is met**: one tile, a thermal core, and a
 map showing the delta. Everything from here is upside on a submission that already stands
@@ -1327,13 +1434,13 @@ likely to drift**; generating it from `/openapi.json` is the fix if it starts to
 1. One tile ✅
 2. Thermal core + tree-planting delta ✅
 3. Map showing the delta ✅
-4. The hindcast number ⬜ — Phase 7, and it needs a wider `window_years` build first
-5. The equity panel ⬜ — Phase 8, and the cube already carries the population it needs
+4. The hindcast number ✅ — Phase 7
+5. The equity panel ✅ — Phase 8
 
-**Items 1–3 are done, so a defensible submission exists today.** Everything from here
-raises the ceiling rather than filling a hole, which is the position worth being in: 4
-and 5 are the two that make the strongest claims, and both can be cut without leaving a
-gap on screen.
+**Every item on the worst-case list is done.** Phases 9 and 10 are both above the cut
+line: the air core and the DSL raise the ceiling rather than filling a hole, and either
+could be dropped from a demo without leaving a gap on screen. The one thing that would
+leave a gap is the cube — see the standing risks.
 
 ## Standing risks
 

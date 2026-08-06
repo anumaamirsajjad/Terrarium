@@ -38,6 +38,8 @@ from terrarium.cores.thermal.simulate import (
     simulate,
     tree_built_contrast,
 )
+from terrarium.dsl.explain import AirInputs, Brief, BriefInputs, EquityInputs, brief_for
+from terrarium.dsl.library import estimate_cost, trees_for_canopy
 from terrarium.state.cube import select_window
 
 logger = logging.getLogger(__name__)
@@ -144,6 +146,86 @@ def _air(
     )
 
 
+def _plan_name(request: SimulateRequest) -> str:
+    """Name the plan from what it actually does. `/simulate` takes no plan object."""
+    planting = request.canopy_fraction_added > 0
+    restricting = request.emission_fraction_removed > 0
+    if planting and restricting:
+        return "Planting and low-emission zone"
+    if restricting:
+        return "Low-emission zone"
+    return "Planting"
+
+
+def _brief(
+    *,
+    request: SimulateRequest,
+    label: str,
+    season: str,
+    area_m2: float,
+    stats: DeltaStatsResponse,
+    context: PlausibilityContext,
+    equity: EquityResponse | None,
+    air: AirResponse | None,
+) -> Brief:
+    """Write the narrative block from the numbers already computed. No new physics.
+
+    Costed from the canopy that was *actually* added rather than what was asked for: the
+    core caps each cell at its own headroom, so the requested fraction is a ceiling and
+    billing for it would price trees the plan cannot plant.
+    """
+    area_km2 = area_m2 / 1_000_000.0
+    tree_count = trees_for_canopy(context.mean_canopy_added, area_m2)
+    cost = estimate_cost(
+        tree_count=tree_count,
+        restricted_area_km2=area_km2 if request.emission_fraction_removed > 0 else 0.0,
+    )
+
+    return brief_for(
+        BriefInputs(
+            plan_name=_plan_name(request),
+            window=label,
+            season=season,
+            area_km2=area_km2,
+            tree_count=tree_count,
+            cost_total_usd=cost.total_usd,
+            mean_delta_inside=stats.mean_delta_inside,
+            mean_delta_spillover=stats.mean_delta_spillover,
+            spillover_cells=stats.spillover_cells,
+            min_delta=stats.min_delta,
+            tree_built_contrast_c=context.tree_built_contrast_c,
+            mean_canopy_added=context.mean_canopy_added,
+            ratio_to_linear=context.ratio_to_linear,
+            emission_fraction_requested=request.emission_fraction_removed,
+            equity=(
+                EquityInputs(
+                    top_three_share=equity.top_three_share,
+                    # Decile 10 is the most densely populated - the group the whole equity
+                    # question is about, and the one Phase 8's demo plan reached with 0 %.
+                    densest_decile_share=equity.deciles[-1].share,
+                    concentrated=equity.concentrated,
+                    shares_reliable=equity.shares_reliable,
+                    uninhabited_fraction=equity.uninhabited_fraction,
+                )
+                if equity is not None and equity.deciles
+                else None
+            ),
+            air=(
+                AirInputs(
+                    mean_delta_inside=air.stats.mean_delta_inside,
+                    mean_delta_spillover=air.stats.mean_delta_spillover,
+                    spillover_cells=air.stats.spillover_cells,
+                    units=air.units,
+                    mixing_height_m=air.mixing_height_m,
+                    emission_fraction_removed=air.emission_fraction_removed,
+                )
+                if air is not None
+                else None
+            ),
+        )
+    )
+
+
 @router.post(
     "/simulate",
     response_model=SimulateResponse,
@@ -198,25 +280,45 @@ async def run_simulation(
     )
 
     stats = result.stats
+    # Built before the response so the brief can be written from the same objects the
+    # response ships, rather than from a second reading of the same arrays.
+    season = str(np.asarray(window["season"].values).reshape(-1)[0])
+    stats_response = DeltaStatsResponse(
+        n_cells_changed=stats.n_cells_changed,
+        mean_delta_inside=stats.mean_delta_inside,
+        mean_delta_spillover=stats.mean_delta_spillover,
+        spillover_cells=stats.spillover_cells,
+        min_delta=stats.min_delta,
+        max_delta=stats.max_delta,
+    )
+    context = PlausibilityContext(
+        tree_built_contrast_c=contrast,
+        mean_canopy_added=mean_added,
+        linear_expectation_c=linear,
+        ratio_to_linear=ratio,
+    )
+    equity = _equity(result.delta, runtime)
+    air = _air(window, intervention, runtime, label)
+
     return SimulateResponse(
-        equity=_equity(result.delta, runtime),
+        equity=equity,
         variable=result.variable,
         units=result.units,
         window=label,
-        season=str(np.asarray(window["season"].values).reshape(-1)[0]),
-        stats=DeltaStatsResponse(
-            n_cells_changed=stats.n_cells_changed,
-            mean_delta_inside=stats.mean_delta_inside,
-            mean_delta_spillover=stats.mean_delta_spillover,
-            spillover_cells=stats.spillover_cells,
-            min_delta=stats.min_delta,
-            max_delta=stats.max_delta,
-        ),
-        context=PlausibilityContext(
-            tree_built_contrast_c=contrast,
-            mean_canopy_added=mean_added,
-            linear_expectation_c=linear,
-            ratio_to_linear=ratio,
+        season=season,
+        stats=stats_response,
+        context=context,
+        brief=_brief(
+            request=request,
+            label=label,
+            season=season,
+            # The drawn polygon, not the planted cells: an intervention that only
+            # restricts traffic plants nothing, and `n_cells_changed` is zero for it.
+            area_m2=float(mask.sum()) * float(runtime.grid.resolution_m) ** 2,
+            stats=stats_response,
+            context=context,
+            equity=equity,
+            air=air,
         ),
         delta=build_layer(
             result.delta,
@@ -226,5 +328,5 @@ async def run_simulation(
             window=label,
             grid=runtime.grid,
         ),
-        air=_air(window, intervention, runtime, label),
+        air=air,
     )

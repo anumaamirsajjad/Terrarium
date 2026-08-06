@@ -138,6 +138,38 @@ export interface Equity {
   uninhabited_fraction: number;
 }
 
+/**
+ * The modelled change in **locally-generated** PM2.5 — this tile's own roads, not what a
+ * monitor reads. The regional background that dominates Lahore's absolute PM2.5 is absent
+ * by construction, which is why this block carries a delta and never a level.
+ */
+export interface Air {
+  variable: string;
+  units: string;
+  stats: DeltaStats;
+  /** ~250 m under the winter inversion against ~800 m in summer. */
+  mixing_height_m: number;
+  wind_speed_ms: number;
+  /** Meteorological convention: the direction the wind comes *from*. */
+  wind_direction_deg: number;
+  emission_fraction_removed: number;
+  delta: LayerResponse;
+}
+
+/**
+ * The result as sentences, written deterministically on the server — no language model,
+ * so it cannot restate a figure it did not receive. `uncertainties` is never empty.
+ */
+export interface Brief {
+  headline: string;
+  findings: string[];
+  uncertainties: string[];
+  /** Never "high". Nothing in this project has earned that word. */
+  confidence: "low" | "moderate";
+  /** Modelled cooling after the 2.5x hindcast correction — the number to quote. */
+  expected_cooling_c: number;
+}
+
 export interface SimulateResponse {
   variable: string;
   units: string;
@@ -149,6 +181,87 @@ export interface SimulateResponse {
   /** Null when the served cube carries no population layer — never render 0 for this. */
   equity: Equity | null;
   delta: LayerResponse;
+  /** Null unless the plan removed emissions *and* the cube carries an OSM inventory. */
+  air: Air | null;
+  brief: Brief;
+}
+
+// ------------------------------------------------------------------- the DSL ---
+
+export interface PlantTreesAction {
+  kind: "plant_trees";
+  tree_count?: number | null;
+  canopy_fraction_added?: number | null;
+}
+
+export interface RestrictVehiclesAction {
+  kind: "restrict_vehicles";
+  emission_fraction_removed: number;
+}
+
+export type PlanAction = PlantTreesAction | RestrictVehiclesAction;
+
+/** One named intervention, in the terms a person uses. Carries no geometry by design. */
+export interface Plan {
+  name: string;
+  actions: PlanAction[];
+  window?: string | null;
+  season?: "summer" | "winter" | null;
+}
+
+export interface CostEstimate {
+  planting_usd: number;
+  restriction_usd: number;
+  total_usd: number;
+  basis: string;
+  /** False everywhere. Literature unit costs, good for ranking plans, not a budget. */
+  calibrated: boolean;
+}
+
+export interface Preset {
+  slug: string;
+  label: string;
+  summary: string;
+  /** What it does *not* do. Show it — every preset has one for a reason. */
+  caveat: string;
+  plan: Plan;
+}
+
+export interface PresetsResponse {
+  presets: Preset[];
+  /** A provider and model, or "rules (no model configured)". */
+  planner: string;
+}
+
+export interface PlanResponse {
+  plan: Plan;
+  source: "llm" | "rules" | "preset" | "explicit";
+  window: string;
+  season: string;
+  cells: number;
+  area_km2: number;
+  canopy_fraction_added: number;
+  emission_fraction_removed: number;
+  tree_count: number;
+  /** What the polygon could hold at all, measured from the cube's canopy headroom. */
+  max_trees: number;
+  /** Requested canopy over available canopy. Above 1.0 the core caps and delivers less. */
+  canopy_utilisation: number;
+  cost: CostEstimate;
+  notes: string[];
+  warnings: string[];
+  basis: string;
+  /** Post this to /simulate unchanged. */
+  simulate_request: SimulateRequest;
+}
+
+export interface PlanRequest {
+  geometry: GeoJsonPolygon;
+  /** Exactly one of these three. */
+  text?: string;
+  preset?: string;
+  plan?: Plan;
+  window?: string | null;
 }
 
 export interface GeoJsonPolygon {
@@ -160,6 +273,8 @@ export interface GeoJsonPolygon {
 export interface SimulateRequest {
   geometry: GeoJsonPolygon;
   canopy_fraction_added: number;
+  /** 0 means the plan says nothing about traffic, and no air block comes back. */
+  emission_fraction_removed?: number;
   window?: string | null;
 }
 
@@ -217,6 +332,21 @@ export const api = {
 
   simulate: (body: SimulateRequest) =>
     request<SimulateResponse>("/simulate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  /** The costed intervention library. Answers even when the cube failed to load. */
+  presets: () => request<PresetsResponse>("/plan/presets"),
+
+  /**
+   * Validate and cost a plan *before* running it. A refusal here — 422 with the
+   * arithmetic — is the point: a plan that cannot fit must not come back as a small
+   * delta that reads like a plan which merely worked badly.
+   */
+  plan: (body: PlanRequest) =>
+    request<PlanResponse>("/plan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

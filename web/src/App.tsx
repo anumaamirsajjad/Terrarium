@@ -11,6 +11,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   type CubeSummaryResponse,
   type HealthResponse,
+  type PlanResponse,
+  type Preset,
   type SimulateResponse,
   api,
 } from "./api/client";
@@ -18,8 +20,10 @@ import { type LoadedLayer, loadLayer, useCubeLayer } from "./hooks/useCubeLayer"
 import MapView, { type RasterOverlay } from "./map/MapView";
 import { type Position, useDrawnPolygon } from "./map/useDrawnPolygon";
 import Legend from "./panels/Legend";
+import BriefPanel from "./panels/BriefPanel";
 import EquityPanel from "./panels/EquityPanel";
 import ResultPanel from "./panels/ResultPanel";
+import ScenarioPanel from "./panels/ScenarioPanel";
 import { decodeLayer } from "./raster/decode";
 import { toCanvas } from "./raster/canvas";
 import {
@@ -58,6 +62,11 @@ export default function App() {
   const [simulateError, setSimulateError] = useState<string | null>(null);
   const [splitFraction, setSplitFraction] = useState(0.5);
   const [scenarioBase, setScenarioBase] = useState<LoadedLayer | null>(null);
+  const [presets, setPresets] = useState<Preset[]>([]);
+  const [planner, setPlanner] = useState("rules");
+  const [plan, setPlan] = useState<PlanResponse | null>(null);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [planning, setPlanning] = useState(false);
 
   const draw = useDrawnPolygon();
 
@@ -77,6 +86,26 @@ export default function App() {
         if (!cancelled) setBoot({ kind: "error", message: error.message });
       });
 
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // The costed intervention library. Fetched separately from the cube because the API
+  // serves it without one: a deployment whose Zarr store is missing still has presets, and
+  // failing this alongside /health would hide a working half of the product.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .presets()
+      .then((response) => {
+        if (cancelled) return;
+        setPresets(response.presets);
+        setPlanner(response.planner);
+      })
+      .catch(() => {
+        if (!cancelled) setPresets([]);
+      });
     return () => {
       cancelled = true;
     };
@@ -114,17 +143,55 @@ export default function App() {
 
   // ------------------------------------------------------------- simulate ---
 
+  /**
+   * Check a plan against the polygon before running it.
+   *
+   * The window comes back resolved: "in winter" has to land on a winter window, because
+   * the same restriction buys several times more under the inversion. So the plan's window
+   * is adopted rather than the picker's — and the picker moves to show it.
+   */
+  const buildPlan = useCallback(
+    async (body: { preset?: string; text?: string }) => {
+      if (!draw.geometry) return;
+
+      setPlanning(true);
+      setPlanError(null);
+      try {
+        const response = await api.plan({ geometry: draw.geometry, ...body });
+        setPlan(response);
+        setCanopy(response.canopy_fraction_added);
+        setSelectedWindow(response.window);
+      } catch (error) {
+        // A 422 here carries the validator's arithmetic. Showing it verbatim is the whole
+        // point of refusing before simulating.
+        setPlanError((error as Error).message);
+        setPlan(null);
+      } finally {
+        setPlanning(false);
+      }
+    },
+    [draw.geometry],
+  );
+
   const runSimulation = useCallback(async () => {
     if (!draw.geometry || !selectedWindow) return;
 
     setRunning(true);
     setSimulateError(null);
     try {
-      const response = await api.simulate({
-        geometry: draw.geometry,
-        canopy_fraction_added: canopy,
-        window: selectedWindow,
-      });
+      // A resolved plan is posted exactly as the API handed it back, except for the
+      // window, which the picker may have moved since. Rebuilding the body by hand would
+      // drop `emission_fraction_removed` and silently turn a low-emission zone into a
+      // planting of nothing.
+      const response = await api.simulate(
+        plan
+          ? { ...plan.simulate_request, window: selectedWindow }
+          : {
+              geometry: draw.geometry,
+              canopy_fraction_added: canopy,
+              window: selectedWindow,
+            },
+      );
       setResult(response);
       setView("delta");
     } catch (error) {
@@ -133,7 +200,7 @@ export default function App() {
     } finally {
       setRunning(false);
     }
-  }, [draw.geometry, selectedWindow, canopy]);
+  }, [draw.geometry, selectedWindow, canopy, plan]);
 
   const handleMapClick = useCallback(
     (position: Position) => {
@@ -146,8 +213,17 @@ export default function App() {
     draw.clear();
     setResult(null);
     setSimulateError(null);
+    setPlan(null);
+    setPlanError(null);
     setView("baseline");
   }, [draw]);
+
+  const clearPlan = useCallback(() => {
+    // Drops back to the raw canopy slider without discarding the polygon: the plan is one
+    // way to fill in the sliders, not a mode the user is stuck in.
+    setPlan(null);
+    setPlanError(null);
+  }, []);
 
   // -------------------------------------------------------------- overlay ---
 
@@ -354,6 +430,9 @@ export default function App() {
               <label className="field">
                 <span>
                   Canopy added: <strong>{(canopy * 100).toFixed(0)}%</strong>
+                  {plan && plan.canopy_fraction_added !== canopy && (
+                    <span className="muted"> · edited since the plan was checked</span>
+                  )}
                 </span>
                 <input
                   type="range"
@@ -386,6 +465,20 @@ export default function App() {
 
           {simulateError && <p className="error-text">{simulateError}</p>}
         </section>
+
+        {presets.length > 0 && (
+          <ScenarioPanel
+            presets={presets}
+            planner={planner}
+            hasPolygon={draw.complete}
+            plan={plan}
+            error={planError}
+            busy={planning}
+            onPreset={(slug) => void buildPlan({ preset: slug })}
+            onText={(text) => void buildPlan({ text })}
+            onClear={clearPlan}
+          />
+        )}
 
         {result && (
           <section className="control">
@@ -460,6 +553,7 @@ export default function App() {
 
         {result && <ResultPanel result={result} />}
         {result && <EquityPanel equity={result.equity} />}
+        {result && <BriefPanel brief={result.brief} />}
 
         <footer className="sidebar__footer muted">
           {/* D9: this label must appear wherever the temperature does. Worded as a

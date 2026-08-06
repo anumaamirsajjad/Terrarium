@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from terrarium import __version__
 from terrarium.api.deps import RUNTIME_ATTR, STARTUP_ERROR_ATTR
-from terrarium.api.routes import cube, health, simulate
+from terrarium.api.routes import cube, health, plan, simulate
 from terrarium.api.runtime import Runtime, StartupError, load_runtime
 from terrarium.config import Settings, get_settings
 
@@ -76,6 +76,9 @@ def create_app(
     # absence answering 404 - which would claim the endpoint itself does not exist.
     app.include_router(cube.router)
     app.include_router(simulate.router)
+    # /plan/presets needs no cube, so the router is mounted regardless: a deployment
+    # without artefacts can still show the costed intervention library.
+    app.include_router(plan.router)
 
     if loaded is not None:
         setattr(app.state, RUNTIME_ATTR, loaded)

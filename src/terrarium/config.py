@@ -226,6 +226,14 @@ class Settings(BaseSettings):
     openaq_url: str = "https://api.openaq.org/v3"
     openaq_key: str | None = None
 
+    # The Phase 10 agent layer's one external service. Free tier, no card (D13): Google AI
+    # Studio, ~1,500 requests/day. **Optional by design** - with no key `/plan` parses text
+    # with the deterministic rule parser instead, so a deployment with no LLM at all is a
+    # working deployment rather than a degraded one. The model name is a plain string here
+    # rather than an import from `dsl.llm`, because `dsl` imports this module.
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.5-flash"
+
     # Where `scripts/build_tile.py` writes by default.
     zarr_store: Path = DATA_DIR / "processed" / "cube.zarr"
     duckdb_path: Path = DATA_DIR / "processed" / "terrarium.duckdb"

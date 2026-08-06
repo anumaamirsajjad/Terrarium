@@ -1,0 +1,249 @@
+"""The brief: what it must always say, whatever the numbers were.
+
+Most of these assert on the *presence* of a caveat rather than on prose. That is the point
+of a deterministic explainer — the caveats are structural, so they can be tested, and a
+generative one could drop any of them on any given call without failing anything.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from terrarium.dsl.explain import (
+    HINDCAST_OVERPREDICTION,
+    AirInputs,
+    BriefInputs,
+    EquityInputs,
+    brief_for,
+)
+
+PLANTING = BriefInputs(
+    plan_name="Street trees",
+    window="2024-summer",
+    season="summer",
+    area_km2=4.2,
+    tree_count=25_000,
+    cost_total_usd=375_000.0,
+    mean_delta_inside=-0.51,
+    mean_delta_spillover=-0.12,
+    spillover_cells=980,
+    min_delta=-1.44,
+    tree_built_contrast_c=2.60,
+    mean_canopy_added=0.18,
+    ratio_to_linear=0.72,
+)
+
+
+def test_the_headline_carries_the_corrected_figure_not_the_raw_one() -> None:
+    brief = brief_for(PLANTING)
+    assert brief.expected_cooling_c == pytest.approx(-0.51 / HINDCAST_OVERPREDICTION)
+    assert "0.20 degC" in brief.headline  # 0.51 / 2.5
+    assert "2024-summer" in brief.headline
+
+
+def test_the_raw_modelled_figure_is_still_shown_in_the_uncertainties() -> None:
+    # A correction that hides the number it corrected is not a correction, it is a second
+    # unexplained figure.
+    assert any("-0.51" in line for line in brief_for(PLANTING).uncertainties)
+
+
+def test_every_brief_names_its_window_and_the_hindcast_correction() -> None:
+    brief = brief_for(PLANTING)
+    joined = " ".join(brief.uncertainties)
+    assert "2024-summer" in joined
+    assert "2.5x" in joined
+    assert "land surface" in joined
+
+
+def test_uncertainties_are_never_empty() -> None:
+    barren = PLANTING.model_copy(update={"mean_canopy_added": 0.0, "mean_delta_inside": 0.0})
+    assert brief_for(barren).uncertainties
+
+
+def test_confidence_is_never_high() -> None:
+    # Nothing in this project has earned the word: the thermal core is hindcast-corrected
+    # and the air core has never been calibrated.
+    assert brief_for(PLANTING).confidence == "moderate"
+
+
+def test_the_ceiling_is_quoted_beside_the_cooling() -> None:
+    assert any("2.60 degC" in finding for finding in brief_for(PLANTING).findings)
+
+
+def test_a_winter_planting_explains_why_the_ratio_is_missing() -> None:
+    winter = PLANTING.model_copy(
+        update={
+            "window": "2024-winter",
+            "season": "winter",
+            "tree_built_contrast_c": 0.42,
+            "ratio_to_linear": None,
+            "mean_delta_inside": -0.13,
+        }
+    )
+    joined = " ".join(brief_for(winter).uncertainties)
+    assert "0.42 degC" in joined
+    assert "withheld" in joined
+
+
+def test_an_air_result_forces_the_local_increment_caveat_and_low_confidence() -> None:
+    with_air = PLANTING.model_copy(
+        update={
+            "air": AirInputs(
+                mean_delta_inside=-0.91,
+                mean_delta_spillover=-0.36,
+                spillover_cells=980,
+                units="ug/m3",
+                mixing_height_m=250.0,
+                emission_fraction_removed=1.0,
+            )
+        }
+    )
+    brief = brief_for(with_air)
+    joined = " ".join(brief.uncertainties)
+
+    assert "local increment" in joined
+    assert "not been calibrated" in joined
+    # The air core has never been scored against a station, so nothing carrying its number
+    # is allowed to read as well-supported.
+    assert brief.confidence == "low"
+
+
+def test_a_restriction_only_plan_leads_with_the_air_number() -> None:
+    lez = BriefInputs(
+        plan_name="Low-emission zone",
+        window="2024-winter",
+        season="winter",
+        area_km2=4.0,
+        mean_delta_inside=0.0,
+        mean_delta_spillover=0.0,
+        spillover_cells=0,
+        min_delta=0.0,
+        tree_built_contrast_c=0.42,
+        mean_canopy_added=0.0,
+        air=AirInputs(
+            mean_delta_inside=-0.91,
+            mean_delta_spillover=-0.36,
+            spillover_cells=980,
+            units="ug/m3",
+            mixing_height_m=250.0,
+            emission_fraction_removed=1.0,
+        ),
+    )
+    brief = brief_for(lez)
+    assert "PM2.5" in brief.headline
+    assert "changes no temperature" in brief.headline
+
+
+def test_a_plan_that_quotes_no_temperature_carries_no_temperature_caveats() -> None:
+    # A caveat attaches to a figure, not to a plan. Shipping the hindcast correction with a
+    # traffic-only plan describes a number nobody was given, and noise is how a real caveat
+    # stops being read.
+    lez = BriefInputs(
+        plan_name="Low-emission zone",
+        window="2024-winter",
+        season="winter",
+        area_km2=4.0,
+        mean_delta_inside=0.0,
+        mean_delta_spillover=0.0,
+        spillover_cells=0,
+        min_delta=0.0,
+        tree_built_contrast_c=0.42,
+        mean_canopy_added=0.0,
+        emission_fraction_requested=1.0,
+        equity=EquityInputs(
+            top_three_share=20.1,
+            densest_decile_share=-4.0,
+            concentrated=False,
+            shares_reliable=False,
+            uninhabited_fraction=0.1,
+        ),
+        air=AirInputs(
+            mean_delta_inside=-0.91,
+            mean_delta_spillover=-0.36,
+            spillover_cells=980,
+            units="ug/m3",
+            mixing_height_m=250.0,
+            emission_fraction_removed=1.0,
+        ),
+    )
+    brief = brief_for(lez)
+    joined = " ".join(brief.uncertainties)
+
+    assert "2.5x" not in joined
+    assert "land surface" not in joined
+    # The window still matters - more here than anywhere, because of the inversion.
+    assert "2024-winter" in joined
+    assert "6-7x" in joined
+    # And the equity shares, which divide by a zero temperature delta, are not mentioned
+    # at all rather than reported as unreliable.
+    assert not any("equity split" in finding for finding in brief.findings)
+
+
+def test_a_cube_that_cannot_answer_the_air_question_says_so() -> None:
+    # `air is None` means two opposite things - "the plan does not touch traffic" and "it
+    # does, and this cube has no inventory". Only the second is a missing layer, and
+    # reporting it as "no effect" would be reporting an absent measurement as a result.
+    unanswerable = BriefInputs(
+        plan_name="Low-emission zone",
+        window="2024-summer",
+        season="summer",
+        area_km2=6.4,
+        mean_delta_inside=0.0,
+        mean_delta_spillover=0.0,
+        spillover_cells=0,
+        min_delta=0.0,
+        tree_built_contrast_c=2.6,
+        mean_canopy_added=0.0,
+        emission_fraction_requested=1.0,
+    )
+    brief = brief_for(unanswerable)
+
+    assert "could not be modelled" in brief.headline
+    assert any("missing layer, not a modelled finding" in f for f in brief.findings)
+    assert brief.confidence == "low"
+
+
+def test_equity_is_reported_with_the_even_share_beside_it() -> None:
+    fair = PLANTING.model_copy(
+        update={
+            "equity": EquityInputs(
+                top_three_share=0.62,
+                densest_decile_share=0.02,
+                concentrated=True,
+                shares_reliable=True,
+                uninhabited_fraction=0.4,
+            )
+        }
+    )
+    findings = " ".join(brief_for(fair).findings)
+    assert "62%" in findings
+    assert "even split is 30 %" in findings
+    assert "nobody lives" in findings
+    # And the stratifier is named, because density is not deprivation.
+    assert any("not deprivation" in line for line in brief_for(fair).uncertainties)
+
+
+def test_unreliable_equity_shares_are_described_rather_than_drawn() -> None:
+    unreliable = PLANTING.model_copy(
+        update={
+            "equity": EquityInputs(
+                top_three_share=20.1,
+                densest_decile_share=-4.0,
+                concentrated=False,
+                shares_reliable=False,
+                uninhabited_fraction=0.1,
+            )
+        }
+    )
+    findings = " ".join(brief_for(unreliable).findings)
+    assert "withheld" in findings
+    assert "20.1" not in findings
+
+
+def test_plan_notes_survive_into_the_findings() -> None:
+    noted = PLANTING.model_copy(update={"plan_notes": ("the polygon can only take 9 %",)})
+    assert "the polygon can only take 9 %" in brief_for(noted).findings
+
+
+def test_the_brief_is_deterministic() -> None:
+    assert brief_for(PLANTING) == brief_for(PLANTING)

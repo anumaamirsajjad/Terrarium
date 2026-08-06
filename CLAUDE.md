@@ -24,7 +24,7 @@ Data flows strictly downward. Nothing in a lower layer imports from a higher one
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  3. INTELLIGENCE      api/          FastAPI, scenario diffs, │
-│                       dsl/          later: DSL + agents      │
+│                       dsl/          plan language + brief    │
 ├──────────────────────────────────────────────────────────────┤
 │  2. PHYSICS CORE      cores/        pure simulators:         │
 │                                     thermal, air, equity     │
@@ -132,12 +132,47 @@ Two things about it are as load-bearing as the LST naming rule:
   season is read from the cube rather than defaulted, because getting it wrong is worth
   that factor.
 
-### Layer 3 — Intelligence (`api/`)
+### Layer 3 — Intelligence (`api/`, `dsl/`)
 
 The composition root. Loads the cube and the model **once at startup**, validates
 requests, converts GeoJSON to masks, calls cores, and serialises deltas for the map.
-Routes stay thin. Later this layer grows a DSL and agents that *choose* interventions;
-for now it executes what the user asked for.
+Routes stay thin.
+
+`dsl/` is the intervention language that sits in front of all of it. A `Plan` is what a
+person says — "5,000 trees", "ban combustion vehicles" — and it deliberately carries **no
+geometry**, for the same reason a core does not (D6): a plan says *what*, the polygon says
+*where*, and keeping them apart is what makes a preset apply to whatever the user drew.
+`dsl.validate.resolve` turns a plan into the two fractions `/simulate` takes, or refuses it.
+
+Four rules govern this package:
+
+- **The refusal is the product, not the error path.** "5,000 trees need 0.125 km² of crown
+  at 25 m² each, but this polygon has only 0.031 km² still plantable" arrives from `/plan`
+  *before* a core runs. Silently trimming an impossible plan returns a small delta, which
+  is indistinguishable from a plan that merely worked badly.
+- **What fits is measured, never assumed.** The headroom is the thermal core's own
+  `effective_fraction` asked for a canopy of 1.0, via `api/measure.py`. A parallel rule of
+  thumb would let the DSL and the physics disagree about how green a cell already is.
+- **A tree count refuses where a canopy fraction warns.** Not an inconsistency — the two
+  units already have different contracts. A fraction is documented as a ceiling the core
+  caps per cell; a count is a quantity somebody would procure.
+- **The LLM lives in exactly one file** (`dsl/llm.py`, D18) and is optional. With no key,
+  `/plan` parses text with a deterministic regex parser and nothing else in the layer calls
+  out at all. Whatever produces a plan — a model, a button, a regex — it is re-validated as
+  a `Plan` and then against the tile before a core sees a number. That is the entire safety
+  argument for putting a free-tier model in front of a simulator.
+
+`dsl/explain.py` writes the brief, and writes it from templates. A generative explainer
+would occasionally restate a figure it did not receive and would smooth a caveat into a
+hedge; a template can do neither, and its caveats are structural, so they can be tested.
+Every brief carries the hindcast correction, the window, and the surface-versus-air
+distinction, `uncertainties` is never empty, and `confidence` has no `high`. **A caveat
+attaches to a figure, not to a plan** — a traffic-only plan carries no thermal caveats,
+because a caveat about a number nobody was given is noise, and noise is how a real caveat
+stops being read.
+
+Costs are `calibrated=False` everywhere: literature unit figures, in the same category as
+the air core's emission factors. Good for ranking two plans, not a budget.
 
 Three rules this layer earned the hard way:
 
@@ -258,10 +293,18 @@ terrarium/
 │   │       ├── features.py #   cube → feature matrix, incl. neighbourhood means
 │   │       ├── model.py    #   LightGBM train / predict / spatially blocked CV
 │   │       └── simulate.py #   apply intervention, return whole-tile delta
+│   ├── dsl/                # the intervention language. Pure arithmetic + one adapter
+│   │   ├── schema.py       #   Plan, PlantTrees, RestrictVehicles. No geometry, by design
+│   │   ├── validate.py     #   plan + measured polygon -> what /simulate takes, or refusal
+│   │   ├── library.py      #   costed presets. calibrated=False everywhere
+│   │   ├── planner.py      #   text -> Plan: model first, deterministic regex always
+│   │   ├── explain.py      #   numbers -> brief. Templates, never a model
+│   │   └── llm.py          #   ← the ONLY file that talks to an LLM (D18). Optional
 │   └── api/
 │       ├── main.py         #   app factory, CORS, router wiring, loads the runtime
 │       ├── runtime.py      #   cube + model loaded ONCE; per-window validation
 │       ├── geometry.py     #   GeoJSON -> boolean grid mask (D6). Only place doing this
+│       ├── measure.py      #   what the tile says a polygon can hold, for dsl/validate
 │       ├── deps.py         #   the runtime as a FastAPI dependency
 │       ├── routes/         #   HTTP endpoints (thin)
 │       └── schemas/        #   Pydantic request/response contracts
@@ -361,6 +404,11 @@ and Stadia are metered services — use OpenFreeMap) and **the LLM** (route thro
 tier, behind one adapter, so the provider never leaks into the agent logic). If a phase
 cannot be done free, the plan changes, not the budget.
 
+The LLM went one better than free: it is **optional**. `TERRARIUM_GEMINI_API_KEY` is unset
+and everything still works, because the DSL, the validators, the costs and the brief are
+all deterministic and the planner falls back to a regex parser. Keep it that way — the
+demo must never require a key that a rate limit can revoke mid-pitch.
+
 ---
 
 ## Commands
@@ -371,10 +419,16 @@ uv run terrarium-api             # API on :8000, docs at /docs
                                  #   GET  /health          tile + liveness
                                  #   GET  /cube/summary    variables, windows, validity
                                  #   GET  /cube/layer/lst_c?window=2024-summer
+                                 #   GET  /plan/presets    costed intervention library.
+                                 #                         Answers without a cube
+                                 #   POST /plan            text | preset | Plan -> a checked,
+                                 #                         costed /simulate body, or 422 with
+                                 #                         the arithmetic that refused it
                                  #   POST /simulate        GeoJSON polygon -> ΔLST
                                  #                         + equity deciles
                                  #                         + ΔPM2.5 when the request
                                  #                           removes emissions
+                                 #                         + brief (findings + uncertainties)
                                  #   serves TERRARIUM_SERVE_ZARR_STORE, not the build path
 uv run pytest                    # tests
 uv run ruff check src/ scripts/  # lint
@@ -401,7 +455,8 @@ cd web && npm install && npm run dev      # frontend on :5173 (the API's CORS al
                                           #   is 5173 only — do not accept Vite's
                                           #   fallback port, free 5173 instead)
 cd web && npm run test                    # vitest: raster decode, ramps, compare split,
-                                          #   equity verdicts + panel render
+                                          #   equity verdicts + panel render, scenario
+                                          #   presets + brief render
 cd web && npm run build                   # tsc -b + production bundle
 ```
 

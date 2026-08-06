@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from terrarium.api.schemas.cube import LayerResponse
+from terrarium.dsl.explain import Brief
 
 
 class SimulateRequest(BaseModel):
@@ -234,4 +235,13 @@ class SimulateResponse(BaseModel):
             "OSM emission inventory. Absent rather than zeroed: a client cannot tell a "
             "plan that does nothing for air from a cube that cannot answer the question."
         ),
+    )
+    brief: Brief = Field(
+        description=(
+            "The same numbers as sentences, written deterministically from the blocks "
+            "above — no language model, so it cannot restate a figure it did not receive. "
+            "Always present and its `uncertainties` list is never empty: the hindcast "
+            "correction, the window, and the surface-vs-air distinction travel with every "
+            "figure this API emits."
+        )
     )
