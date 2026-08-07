@@ -31,7 +31,7 @@ from terrarium.api.schemas.plan import (
 from terrarium.api.schemas.simulate import SimulateRequest
 from terrarium.config import Settings, get_settings
 from terrarium.dsl.library import PRESETS, preset
-from terrarium.dsl.llm import adapter_from_key
+from terrarium.dsl.llm import resolve_adapter
 from terrarium.dsl.planner import PlanParseError, plan_from_text
 from terrarium.dsl.schema import Plan
 from terrarium.dsl.validate import PlanError, resolve
@@ -43,7 +43,7 @@ router = APIRouter(prefix="/plan", tags=["plan"])
 
 
 def _planner_name(settings: Settings) -> str:
-    adapter = adapter_from_key(settings.gemini_api_key, model=settings.gemini_model)
+    adapter = resolve_adapter(settings)
     return adapter.name if adapter is not None else "rules (no model configured)"
 
 
@@ -79,7 +79,7 @@ def _plan_and_source(
         return chosen.plan, "preset", ()
 
     assert request.text is not None  # the request validator guarantees one of the three
-    adapter = adapter_from_key(settings.gemini_api_key, model=settings.gemini_model)
+    adapter = resolve_adapter(settings)
     try:
         parsed = plan_from_text(request.text, adapter=adapter)
     except PlanParseError as exc:

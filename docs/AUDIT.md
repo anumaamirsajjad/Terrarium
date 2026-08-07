@@ -2,8 +2,10 @@
 
 **Produced 2026-08-06, immediately after Phase 11 was marked done** (`d2f46f2`).
 **Re-checked and extended 2026-08-07**, when re-running the open findings showed that two
-of them (A11, A18) did not say what was actually true, and reading the code added four more
-(A23–A26). Phases 0–11 complete, Phase 12 untouched.
+of them (A11, A18) did not say what was actually true, reading the code added four more
+(A23–A26), and then **keys arrived for A9 and A10** — which closed both and turned up five
+further defects (A27–A31) that only running the real services could reveal. Phases 0–11
+complete, Phase 12 untouched.
 
 This is a **snapshot, not a register.** [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)
 remains the roadmap and the decisions register; `CLAUDE.md` remains the operating rules.
@@ -29,8 +31,8 @@ commands are included so each one can be re-checked rather than believed.
 | ~~A6~~ | ~~The photo location has no marker on the map~~ | **CLOSED** | web | fixed 2026-08-06 |
 | ~~A7~~ | ~~Static cube variables are never checked at startup~~ | **CLOSED** | api | fixed 2026-08-06 |
 | ~~A8~~ | ~~A cube refused for a missing variable is told to do a full rebuild~~ | **CLOSED** | state | fixed 2026-08-06 |
-| **A9** | OpenAQ calibration has never run — air magnitudes uncalibrated | **P3** | validation | needs a free key |
-| **A10** | Gemini has never run — planner LLM path and the whole photo path unproven | **P3** | validation | needs a free key |
+| ~~A9~~ | ~~OpenAQ calibration has never run~~ — **ran; found no spatial skill** | **CLOSED** | validation | ran 2026-08-07 |
+| ~~A10~~ | ~~The LLM has never run~~ — both paths verified against two providers | **CLOSED** | validation | ran 2026-08-07 |
 | ~~A11~~ | ~~The hindcast result cannot be reproduced: its cube is gone~~ | **CLOSED** | validation | never true — fixed 2026-08-07 |
 | **A12** | Voice has no automated test | **P3** | web | accepted, see below |
 | ~~A13~~ | ~~No CI~~ | **CLOSED** | repo | fixed 2026-08-06 |
@@ -42,25 +44,35 @@ commands are included so each one can be re-checked rather than believed.
 | ~~A19~~ | ~~`_plan_name` calls a do-nothing request a planting~~ | **CLOSED** | api | fixed 2026-08-06 |
 | ~~A20~~ | ~~`ponytail:` marker in `cores/air.py`~~ | **CLOSED** | cores | fixed 2026-08-06 |
 | ~~A21~~ | ~~No rate limiting on `POST /observations`~~ | **CLOSED** | api | fixed 2026-08-07 |
-| **A22** | `scripts/` has no tests | **P5** | tests | accepted, see below |
+| ~~A22~~ | ~~`scripts/` has no tests~~ — all seven now covered | **CLOSED** | tests | fixed 2026-08-07 |
 | ~~A23~~ | ~~`cell_from_lonlat` accepted a coordinate it then mapped out of the grid~~ | **CLOSED** | api | fixed 2026-08-07 |
 | ~~A24~~ | ~~CI claimed `tsc -b` guarded A18; it cannot~~ | **CLOSED** | repo | fixed 2026-08-07 |
 | ~~A25~~ | ~~`leave_one_station_out` fits a degenerate fold and reports it as skill~~ | **CLOSED** | cores | fixed 2026-08-07 |
 | ~~A26~~ | ~~The "< 3 s warm" claim was unverified~~ | **CLOSED** | api | measured 2026-08-07 |
+| ~~A27~~ | ~~`build_air_layers.py` overwrote good wind direction with NaN, in place~~ | **CLOSED** | scripts | fixed 2026-08-07 |
+| ~~A28~~ | ~~Groq is Cloudflare-blocked for urllib's default User-Agent~~ | **CLOSED** | dsl | fixed 2026-08-07 |
+| ~~A29~~ | ~~The pinned Gemini model was withdrawn and 404s for new keys~~ | **CLOSED** | config | fixed 2026-08-07 |
+| ~~A30~~ | ~~An unreadable photo was stored and drawn at severity 1~~ | **CLOSED** | api | fixed 2026-08-07 |
+| ~~A31~~ | ~~A developer's `.env` key made four tests reach the network~~ | **CLOSED** | tests | fixed 2026-08-07 |
+| ~~A32~~ | ~~A dead primary key shadowed a working second provider~~ | **CLOSED** | dsl | fixed 2026-08-07 |
 
 Severities: **P0** the demo does not run · **P1** shipped work the user cannot see ·
 **P2** a correctness hole with no symptom yet · **P3** claims resting on unrun validation ·
 **P4** repo and documentation hygiene · **P5** small, real, cheap.
 
-**Twenty-two of the twenty-six are now closed** — A1–A8, A13–A17, A19, A20 on 2026-08-06,
-and A11, A18, A21, A23–A26 on 2026-08-07. What is left is four findings, none of which is
-code:
+**Thirty-one of the thirty-two are now closed** — A1–A8, A13–A17, A19, A20 on 2026-08-06, and
+everything else on 2026-08-07. **A12 alone remains open**, and is accepted rather than
+fixed: driving `SpeechRecognition` needs a real browser in CI, which is a large dependency
+for one button, and the panel already renders no microphone where the API is absent.
 
-- **A9, A10** — blocked on a free, no-card registration rather than on code. Until they
-  run, the air magnitudes are uncalibrated and the whole photo path is built but unproven.
-  Both are disclosed everywhere they matter; closing them means running what already
-  exists. **These are the only two open findings that change what the product may claim.**
-- **A12, A22** — accepted rather than fixed, with the reasoning below.
+**The single most important line in this document is now A9's result, and it is not a
+good one.** The air core was scored against 53 Lahore monitors and **does not beat a null
+model** in either season. That does not invalidate the ΔPM2.5 the product ships — a delta
+cancels the background, which is the whole argument for shipping one — but it does mean
+the *spatial pattern* of the modelled increment has been tested and found unevidenced.
+Costs and magnitudes stay `calibrated=False`, and the honest phrasing is no longer
+"validation has not run" but **"validation ran and found no skill"**, which is a stronger
+claim and a worse one.
 
 ### What the 2026-08-07 pass changed
 
@@ -93,12 +105,37 @@ silently, in the direction of looking better.
 **A26** is the 2026-08-06 audit's own closing caveat, discharged: `POST /simulate` is
 **0.84 s warm**, against a claimed budget of 3 s.
 
+**A27–A31 are what the keys bought beyond A9 and A10 themselves.** Every one of them was
+invisible until real credentials met real services, and four of the five fail *quietly*:
+
+- **A27** — `build_air_layers.py` resolved windows against `settings.window_years` instead
+  of against the cube, so on a 2025 cube it matched nothing and then **overwrote a
+  populated `wind_direction_deg` with NaN**, in place, on a script whose docstring argues
+  that writing in place is safe. It destroyed real data during this audit.
+- **A28** — Groq sits behind Cloudflare, which rejects urllib's default `User-Agent` with
+  `403 error code: 1010`. `/plan` catches that and falls back to the rule parser, so a
+  blocked deployment answers **200 with `source: "rules"`** and reads as "the model was no
+  better than the regex".
+- **A29** — `gemini-2.5-flash` still lists in `/v1beta/models` and still advertises
+  `generateContent`, while answering **404 "no longer available to new users"**. The remedy
+  was a second provider, not a newer pin.
+- **A30** — an unreadable photo does not raise; it returns a valid `Observation` at
+  confidence 0.0 and severity 1, which then drew on the map as a genuine mild report.
+- **A31** — adding a real key to `.env` made four tests fail and one of them **reach
+  Google**, breaching "no test may touch the network". CI could never have caught it,
+  because CI has no key and never takes that branch.
+- **A32** — the two-provider arrangement added for A29 did not actually fail over, and
+  only running it long enough revealed that.
+
 **Nothing in this document now stops the product working.** Verified end to end on
 2026-08-07 against `cube_phase9.zarr`: all six GETs 200, `POST /simulate` 200 with `stats`,
 `equity`, `delta`, `air` and `brief` populated (−0.086 °C, −0.578 µg/m³ at 2024-winter),
-`POST /observations` 503 with its reason. 391 Python tests and 96 browser tests pass,
-`ruff` and `mypy --strict` clean over 74 files, `oxlint` clean, `npm run build` succeeds,
-and the full Python suite passes with **sockets blocked**.
+`POST /observations` 200 with a typed observation once a key was configured, and 503 with
+its reason without one. **453 Python tests** and 96 browser tests pass, `ruff` and `mypy
+--strict` clean over 74 files, `oxlint` clean, `npm run build` succeeds, and the full
+Python suite passes with **sockets blocked and both real keys present** — which is now a
+meaningfully stronger check than it was, because A31 proved a key can change what the
+suite does.
 
 **What this audit did not look at.** Artefacts on disk, startup paths, route wiring, the
 API-to-frontend surface, docs against reality, and lint/type/test state — those were
@@ -412,36 +449,118 @@ case the collapsed message could never express.
 
 ---
 
-# P3 — claims resting on validation that has not run
+# P3 — validation that has now run
 
-## A9 — OpenAQ calibration has never run
+## A9 — OpenAQ calibration — **CLOSED 2026-08-07, and the result is negative**
 
-`scripts/validate_air.py` implements leave-one-station-out with an affine fit, scored
-against a null model, and refuses to run without `TERRARIUM_OPENAQ_KEY` (D16). No key is
-set. The arithmetic is tested on synthetic data; it has never seen a station.
+A key arrived, the script ran, and **the air core does not beat a null model.** That is the
+finding. It is recorded here in full because it is the least flattering number in the
+project and the easiest one to quietly not repeat.
 
-**Until it runs, the air core's emission factors are literature values for a South Asian
-fleet and every modelled magnitude is uncalibrated.** Deltas between two plans survive that;
-absolute numbers do not. The API, the brief and `CLAUDE.md` all say so — this finding is
-about closing it, not about disclosing it.
+### Getting it to run at all cost three fixes
 
-Cost to close: a free, no-card registration at explore.openaq.org, then one command.
+The fetch had never touched the live API, and its own docstring predicted it would need
+work. It needed more than expected:
 
-## A10 — Gemini has never run
+- **7 of Lahore's 66 PM2.5 sensors answer HTTP 500** from OpenAQ's side. The script had no
+  handler, so the first one ended the run. One unusable monitor now costs one monitor.
+- **OpenAQ encodes "no reading" as `-999`**, not as a missing field. Ingested as a
+  concentration it drags a station's median below zero and hands the affine fit a negative
+  observation to explain.
+- **It compared each station's *latest* reading.** This is the one that would have produced
+  a confident, entirely false calibration. Lahore's monitors go quiet at different times,
+  so on 2026-08-07 *every* value above 100 µg/m³ in the tile was a stale reading from
+  Nov 2025–Mar 2026, while every station reporting that morning read 17–69. A fit across
+  those measures **when a station last reported**, not where it sits. The fetch now pins
+  the modelled window's own dates and takes a **median**, matching how the cube's
+  composites are reduced.
 
-`TERRARIUM_GEMINI_API_KEY` is unset. Two consequences of different weight:
+### It also needed a cube, because coverage is recent
 
-- **The planner degrades cleanly.** No key means the rule parser, which is deterministic,
-  offline, tested, and handles the phrasings a demo uses in English and Urdu. Nothing is
-  blocked.
-- **The photo path does not degrade at all.** No rule parser can read a photograph, so
-  `POST /observations` answers 503. Everything about it is verified except the only thing
-  that matters — whether the model's categories, severities and confidences are any good.
-  That is completely unmeasured.
+Lahore's low-cost network came online in 2025, and `hindcast.py`-style archives do not help
+here — the monitors simply did not exist:
 
-Treat the VLM feature as **built and unproven**, in the same words Phase 9 uses about the
-air core. Cost to close: a free, no-card key from AI Studio, then submit half a dozen real
-Lahore street photos and see whether the categories survive contact.
+```
+2023-winter:   2 stations with >= 14 days
+2024-winter:   2
+2025-winter:  53
+2026-summer:  45
+```
+
+Leave-one-out needs 4. So `cube_2025.zarr` was built (`--years 2025`) to give the modelled
+side something the observed side could be compared against.
+
+### The result
+
+```
+window        n   scale   background     MAE   null MAE    corr   beats null
+2025-winter  53   x3.49   173.3 ug/m3   50.995   50.953   +0.157    False
+2025-summer  15   -0.75    50.1 ug/m3    3.251    3.180   -0.084    False
+```
+
+The core models **0.3–13 µg/m³** against monitors reading **114–322**. The tile's own
+contribution is roughly **3–7 % of the signal**, swamped by a regional background the
+inventory does not model by construction — so there is nothing left to resolve a spatial
+pattern with. Summer's slope is *negative*, which at corr −0.08 is noise rather than
+anti-physics.
+
+**What this does and does not overturn.** The product ships a **delta**, and the background
+is identical on both sides of a difference, so the ΔPM2.5 figure is not invalidated by
+this. What is now tested-and-unevidenced is the **spatial pattern** of the modelled
+increment: whether the inventory puts high concentrations in the right places. The ×3.49
+slope hints the emission factors may be ~3.5× low, but at corr +0.157 that slope is not
+trustworthy enough to calibrate anything with, and it has **not** been applied.
+
+`calibrated=False` stays. The phrasing everywhere should move from "validation has not run"
+to **"validation ran against 53 monitors and found no spatial skill"** — a stronger
+statement, and a worse one.
+
+**Verification:**
+`uv run python scripts/validate_air.py --zarr data/processed/cube_2025.zarr --window 2025-winter`
+
+## A10 — The LLM has never run — **CLOSED 2026-08-07**
+
+Both paths ran, against **two** providers. The headline is that a single provider was the
+actual defect: `gemini-2.5-flash`, the pinned model, answers **404 "no longer available to
+new users"** while still appearing in `/v1beta/models` and still advertising
+`generateContent` (recorded separately as **A29**). So the fix was not a newer pin but a
+second provider — `GroqAdapter` beside `GeminiAdapter` in `dsl/llm.py`, still one file
+(D18), still plain urllib, **no LangChain** (D17 stands).
+
+**The planner** now resolves through whichever key exists, Groq first:
+
+```
+planner: groq:qwen/qwen3.6-27b
+"plant 5000 trees along these streets"      -> source=llm  trees=5,000
+"ban combustion vehicles inside this ring"  -> source=llm  emission_fraction_removed=1.0
+```
+
+**The photo path** answers 200 with a typed observation on the grid.
+
+### The VLM's categories, measured rather than asserted
+
+The original finding asked for "half a dozen real Lahore street photos". Twenty images went
+through the real reader — 12 real South Asian street photographs against 8 synthetic
+unreadables — and the categories track the content rather than defaulting:
+
+```
+tree-lined median strip        -> canopy          severity 1
+mature trees behind a building -> canopy          severity 1
+dense traffic, heavy congestion-> air_source      severity 4
+wide street, heavy traffic     -> air_source      severity 4
+large open paved area          -> shade_deficit   severity 4
+open plaza in front of a hall  -> shade_deficit   severity 4
+```
+
+That is not proof the severities are *right* — nobody ground-truthed them — but it is
+evidence the model is reading the scene rather than emitting a constant, which is what the
+finding was actually worried about. The confidences separated cleanly enough to calibrate a
+rejection threshold from, which became **A30**.
+
+**One honest limit carried forward:** the photographs are Karachi, Delhi and generic South
+Asian street scenes, not Lahore, because `commons.wikimedia.org` does not resolve from this
+environment. For *readability* that does not matter. For "do these categories mean the right
+thing on this tile", it is still untested.
 
 ## A11 — The hindcast result cannot be reproduced — **CLOSED 2026-08-07, never true**
 
@@ -836,16 +955,140 @@ GET /cube/layer     0.04 s
 the brief all included. The interactivity argument in `CLAUDE.md` — one kernel, one FFT,
 the whole tile at once — holds at the measured budget rather than only in principle.
 
-## A22 — `scripts/` has no tests
+## A22 — `scripts/` has no tests — **CLOSED 2026-08-07**
 
-Seven scripts — the entire operational surface, including the two that build the artefacts
-everything else depends on. `pytest.ini_options.testpaths` is `src/terrarium`, so they are
-not even collected.
+The 2026-08-06 entry accepted this with a caveat: *"the argument for leaving them untested
+gets weaker every time that happens."* It got weaker three times in one session. Every bug
+in A9's fetch and the whole of A27 lived in `scripts/`, and all four were found by running
+code against live services rather than by any check.
 
-**Accepted rather than fixed**, with a caveat: they are thin I/O wrappers over tested
-library code, and testing them properly means fixtures for the network they exist to talk
-to. But `build_air_layers.py` and `build_tile.py` are the two things whose failure produces
-A1, and the argument for leaving them untested gets weaker every time that happens.
+**Closed.** `testpaths` now includes `scripts`, a `conftest.py` puts the directory on
+`sys.path` (no `__init__.py`, so they stay out of the wheel), and all seven have tests:
+
+| script | what is pinned |
+|---|---|
+| `validate_air.py` | the 500 skip, the `-999` sentinel, the day-count floor, median reduction, and that the request pins the **window's** dates rather than `latest` |
+| `build_air_layers.py` | label-derived window resolution, and that a failed or NaN fetch **keeps** the existing value |
+| `build_tile.py` | gap detection — that one empty window is caught when the pooled summary calls the variable populated |
+| `hindcast.py` | summers-only selection, the validity floor, and the two-half split refusing under 4 windows |
+| `train_thermal.py` | `circular_mask` area, containment, and that north is a *lower* row index |
+| `preview_cube.py` | extent order, and that western/northern water really comes out west/north |
+| `inspect_cube.py` | the tree-vs-built contrast sign, per-window separation, and refusing rather than printing NaN |
+
+The pattern throughout: the pure logic is tested directly and the HTTP boundary is stubbed.
+**No test here opens a socket** — verified by the network-isolation job, which now covers
+these too.
+
+**Verification:** `uv run pytest scripts/` — 49 tests. Full suite is **453**, up from 391.
+
+---
+
+# Found by running the real services — **ALL CLOSED 2026-08-07**
+
+These five only became visible once real credentials met real endpoints. Four of the five
+fail *quietly*, which is why none of them had been noticed.
+
+## A27 — `build_air_layers.py` destroyed data in place
+
+Windows were resolved against `settings.windows`, which is derived from `window_years`
+(default `[2023, 2024]`). On `cube_2025.zarr` every lookup returned `None` — and the caller
+then wrote the resulting all-NaN column straight over a `wind_direction_deg` that
+`build_tile.py` had already populated with 123° and 289°.
+
+The script writes **in place by default**, and its docstring argues that is safe because
+the cube is small enough to load fully before the store is touched. That argument covers a
+*crash*. It does not cover writing a valid-looking empty column, which is what happened —
+the good values were simply gone, and `validate_windows` then refused the cube.
+
+**Closed** on both halves: the window is derived from the label itself, and a fetch that
+fails, cannot be resolved, or returns NaN now **keeps whatever the cube already held**.
+Nine tests, including the exact scenario above.
+
+## A28 — Groq is Cloudflare-blocked for urllib's default User-Agent
+
+`403 error code: 1010` — a browser-signature ban, not auth and not quota. Any non-default
+`User-Agent` passes.
+
+Worth its own finding because of the failure shape: `/plan` catches `LLMUnavailable` and
+falls back to the rule parser, so a blocked deployment answers **200 with `source:
+"rules"`** indefinitely and reads as *"the model was no better than the regex"* rather than
+*"the model was never reached"*. Only `/observations`, which has no fallback, surfaces it —
+as a 502.
+
+**Closed** with an explicit `User-Agent` on the adapter and a test asserting the header is
+not urllib's default.
+
+## A29 — The pinned Gemini model was withdrawn and 404s for new keys
+
+`gemini-2.5-flash` appears in `/v1beta/models`, lists `generateContent` among its supported
+methods, and answers **404 "no longer available to new users"** to any key issued after its
+withdrawal. So it looks configured, it lists as available, and the first real photo is what
+finds out — on the one route with no offline fallback.
+
+**Closed** by pinning a current model *and* adding a second provider, because a newer pin
+only resets the same clock. `config.py` carries the reason and names `gemini-flash-latest`
+as the escape hatch if it recurs.
+
+## A30 — An unreadable photo was stored and drawn at severity 1
+
+A reader handed junk does not raise. It returns a perfectly valid `Observation` saying the
+image is unreadable — at **confidence 0.0 and severity 1** — which was then placed on the
+grid and coloured like any other citizen report.
+
+**The threshold is measured, not chosen.** 20 images through the real reader:
+
+```
+synthetic unreadable (n=8)   confidence exactly 0.00, every one
+real street photograph (n=12) confidence 0.90 - 0.95
+```
+
+A gap that wide admits any threshold between the two. `min_observation_confidence = 0.25`
+sits deliberately near the **bottom** of it, because the errors are asymmetric: storing a
+weak report costs one faint cell on a layer already labelled *not measured*, while
+rejecting a real one loses a citizen's observation and tells them their photo was unusable.
+All 12 positives were clear daylight scenes, so a genuinely harder photo has room to land
+well under 0.90 and still be kept.
+
+Below the floor, `POST /observations` answers **422 with the reader's own words**, so the
+person who took the photo learns why.
+
+## A32 — A dead primary key shadowed a working second provider
+
+The second provider was added (A29) so that one withdrawal is a config change rather than
+an outage. It did not deliver that, and the reason is one line: `resolve_adapter` chose on
+which key was **set**, which says nothing about whether the key **works**.
+
+Found by the service failing under its own steam. Partway through this audit the Groq key
+began answering `401 Invalid API Key` — it had worked minutes earlier — and `/plan`
+immediately went back to `source: "rules"` while a configured Gemini key sat behind it,
+never tried. That is precisely the A28 failure shape again: a 200 that reads as "the model
+was no better than the regex".
+
+**Closed** with `FallbackAdapter`, which tries each configured provider in order and moves
+on only for `LLMUnavailable` — the recoverable failure by construction. Its `name` reports
+the whole chain (`groq:... -> gemini:...`) rather than the primary, because that string is
+what the response attributes the answer to and naming a provider that did not answer is
+worse than naming two.
+
+**Not verified against live providers**, and this is worth stating plainly: both keys were
+revoked before the fix was written, so the failover is proven by four tests against stubbed
+adapters and has never run against two real endpoints.
+
+## A31 — A developer's `.env` key made four tests reach the network
+
+Adding a working key broke four tests immediately — and one of them stopped being an
+offline test at all: `test_submitting_without_a_model_is_a_503_that_says_why` asserted 503,
+got **502**, because a route that is supposed to refuse without a model went and asked one.
+
+That is a direct breach of "no test may touch the network" (`CLAUDE.md`), and **CI could
+never have caught it**: CI has no key, so it never takes that branch. The suite behaved one
+way on a developer's machine and another in the pipeline, which is the specific failure the
+network-isolation job exists to prevent.
+
+**Closed** with an autouse session fixture in `api/conftest.py` that hides every ambient key
+variable from the whole suite, and an explicit dependency from the session-scoped `client`
+fixture so it cannot be built first. The full suite now passes **with sockets blocked and
+both real keys present**.
 
 ---
 
@@ -892,17 +1135,48 @@ Items 7–10 were **done on 2026-08-07**:
     reading, and the rate limit, pulled forward from Phase 12 because it is fifteen lines.
     ~~**A26**~~ — the performance claim, measured at last.
 
+Items 11–13 were **done on 2026-08-07 once keys arrived**:
+
+11. ~~**A9**~~ — ran against 53 monitors. **The result is negative**: the air core does not
+    beat a null model in either season. Closing it required three fixes to the fetch and a
+    2025 cube, because Lahore's monitor network only came online that year.
+12. ~~**A10**~~ — both LLM paths verified, against **two** providers after the pinned model
+    turned out to be withdrawn. Groq added beside Gemini in the one adapter file; no
+    LangChain.
+13. ~~**A27–A31**~~ — everything the real services exposed on the way, and ~~**A22**~~,
+    which those bugs finally made indefensible.
+
 What is left:
 
-11. **A9, A10** — two free, no-card registrations, then run what is already built. A9 is
-    what lets the air panel drop the word **uncalibrated**; A10 is the only way to find out
-    whether the VLM's categories survive contact with real Lahore street photos. **These
-    are the only open findings that change what the product may claim**, and neither is
-    blocked on code.
-12. **Phase 12.**
+14. **Phase 12**, and nothing else in this document.
 
-**A12 and A22 stay accepted**, unchanged: voice needs a real browser in CI for one button,
-and `scripts/` are thin I/O wrappers whose honest tests are fixtures for the network they
-exist to talk to. A22's caveat still stands, and A11 has now made it slightly weaker rather
-than stronger — the artefact that finding declared missing was produced by one of those
-untested scripts and was fine.
+**A12 stays accepted**, unchanged: driving `SpeechRecognition` needs a real browser in CI,
+which is a large dependency for one button, and the mitigation already shipped — the panel
+renders no microphone where the API is absent, so the failure mode is a missing control
+rather than a dead one.
+
+**A22 is no longer accepted, and the reason is worth keeping.** Its 2026-08-06 entry said
+the argument for leaving `scripts/` untested *"gets weaker every time"* a build failure
+produces an A1. It got weaker three times in one session: the three `validate_air.py` bugs
+and the whole of A27 lived in `scripts/`, and every one was found by running code against a
+live service. All seven now have tests.
+
+---
+
+## What this audit still has not done
+
+Honest closing, in the same spirit as the last one:
+
+- **No physics review.** The plan's measured results remain the only evidence that the
+  cores' numbers are right. A9 is a partial exception and not a reassuring one — it is the
+  first time a core has been scored against independent observations, and it did not beat a
+  null model.
+- **The hindcast's 2.5× correction is reproducible but was not re-derived per-configuration.**
+  A single default run lands within one standard deviation of the recorded spread, which is
+  consistent, not confirmatory.
+- **The VLM's severities are unvalidated.** A10 shows the categories track scene content;
+  nobody has ground-truthed whether severity 4 means the same thing to the model twice, and
+  the photographs were not of Lahore.
+- **No security review** beyond the quota-spend hole A21 closed.
+- **A9's ×3.49 slope has not been applied.** It is the one number here that could be turned
+  into a calibration, and at corr +0.157 it should not be.

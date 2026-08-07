@@ -43,8 +43,10 @@ Around them:
   after the overpass. Never "temperature" unqualified, never "afternoon".
 - **Locally-generated PM2.5.** The inventory covers this tile's own roads, so the regional
   background that dominates Lahore's absolute PM2.5 is absent by construction. Quote deltas,
-  not levels — and until `scripts/validate_air.py` has run against OpenAQ, say the
-  magnitudes are **uncalibrated**.
+  not levels, and say the magnitudes are **uncalibrated**. `scripts/validate_air.py` has now
+  run against 53 OpenAQ monitors and the core **does not beat a null model** — the delta
+  still stands, because the background cancels in a difference, but the *spatial* pattern
+  is tested and unevidenced. See [docs/AUDIT.md](docs/AUDIT.md) A9.
 
 ### Cost
 

@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
-from terrarium.config import get_settings
+from terrarium.config import SeasonWindow, get_settings, season_windows
 from terrarium.ingest.osm import emission_grid, fetch_overpass
 from terrarium.ingest.pipeline import _ingest_meteorology
 from terrarium.state.cube import VARIABLES_BY_NAME, window_labels
@@ -41,27 +41,55 @@ EMISSIONS = "pm25_emission_g_s"
 DIRECTION = "wind_direction_deg"
 
 
-def _wind_direction(settings, grid, windows: list[str]) -> np.ndarray:
+def _window_for(label: str) -> SeasonWindow | None:
+    """The dated window a cube label refers to, derived from the label itself.
+
+    **Not** looked up in `settings.windows`, which only covers `window_years` and so
+    describes the *next* build rather than the cube in front of us. A cube built with
+    `--years 2025` carries windows the default settings have never heard of, and resolving
+    them against that map returned `None` for every one of them.
+    """
+    try:
+        year = int(label.split("-")[0])
+    except ValueError:
+        return None
+    return next((w for w in season_windows([year]) if w.label == label), None)
+
+
+def _wind_direction(settings, grid, windows: list[str], existing: np.ndarray | None) -> np.ndarray:
     """The overpass-hour wind direction for each window.
 
     Runs the *real* meteorology ingestor and keeps one of its outputs, rather than
     re-deriving the overpass-hour selection and the vector-mean reduction here. A second
     copy of that arithmetic is a second chance to average an angle wrongly.
+
+    `existing` is whatever the cube already holds, and a window this function cannot
+    resolve or fetch **keeps that value rather than being overwritten with NaN**. This
+    script writes in place by default, so a failed fetch that clobbers a good column is
+    data loss, not a no-op - and it happened: run against a 2025 cube whose wind direction
+    `build_tile.py` had already populated, the old lookup resolved nothing and wrote NaN
+    over both windows, leaving a cube the air core could no longer run on.
     """
-    by_label = {w.label: w for w in settings.windows}
     values = np.full(len(windows), np.nan, dtype="float32")
+    if existing is not None and existing.shape == values.shape:
+        values[:] = existing
 
     for i, label in enumerate(windows):
-        window = by_label.get(label)
+        window = _window_for(label)
         if window is None:
-            logger.warning(
-                "%s is in the cube but not in settings.window_years - leaving it NaN. "
-                "Set TERRARIUM_WINDOW_YEARS to cover it and rerun.",
-                label,
-            )
+            logger.warning("%s is not a window label this build understands; keeping %s",
+                           label, values[i])
             continue
-        arrays, _ = _ingest_meteorology(None, settings, grid, window)
-        values[i] = float(np.asarray(arrays[DIRECTION].values))
+        try:
+            arrays, _ = _ingest_meteorology(None, settings, grid, window)
+            fetched = float(np.asarray(arrays[DIRECTION].values))
+        except Exception as exc:
+            logger.warning("%s: meteorology fetch failed (%s); keeping %s", label, exc, values[i])
+            continue
+        if not np.isfinite(fetched):
+            logger.warning("%s: fetch returned NaN; keeping %s", label, values[i])
+            continue
+        values[i] = fetched
         logger.info("%s: wind from %.0f deg", label, values[i])
 
     return values
@@ -91,7 +119,10 @@ def main() -> int:
     payload = fetch_overpass(settings.overpass_url, settings.tile.bbox, settings.http_timeout_s)
     emissions = emission_grid(payload, grid)
     cube[EMISSIONS] = xr.DataArray(emissions, dims=("y", "x"), coords=grid.coords())
-    cube[DIRECTION] = xr.DataArray(_wind_direction(settings, grid, labels), dims=("time",))
+    previous = np.asarray(cube[DIRECTION].values, dtype="float32") if DIRECTION in cube else None
+    cube[DIRECTION] = xr.DataArray(
+        _wind_direction(settings, grid, labels, previous), dims=("time",)
+    )
 
     for name in (EMISSIONS, DIRECTION):
         spec = VARIABLES_BY_NAME[name]

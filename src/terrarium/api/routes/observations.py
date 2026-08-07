@@ -30,7 +30,7 @@ from terrarium.api.schemas.observations import (
     ObservationResponse,
 )
 from terrarium.config import Settings, get_settings
-from terrarium.dsl.llm import adapter_from_key
+from terrarium.dsl.llm import resolve_adapter
 from terrarium.dsl.observe import ObservationError, observation_from_photo
 from terrarium.state.grid import grid_for_tile
 
@@ -61,7 +61,7 @@ def get_store(request: Request) -> ObservationStore:
 
 
 def _reader_name(settings: Settings) -> str:
-    adapter = adapter_from_key(settings.gemini_api_key, model=settings.gemini_model)
+    adapter = resolve_adapter(settings)
     return adapter.name if adapter is not None else NO_READER
 
 
@@ -110,7 +110,7 @@ async def submit_observation(
     except GeometryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
-    adapter = adapter_from_key(settings.gemini_api_key, model=settings.gemini_model)
+    adapter = resolve_adapter(settings)
     if adapter is None:
         raise HTTPException(status_code=503, detail=NO_READER)
 
@@ -139,6 +139,22 @@ async def submit_observation(
         # Distinguishable from the 503 above, which says the dependency was never wired up.
         logger.warning("photo could not be read: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from None
+
+    # The model's own verdict on whether it could read the photograph, enforced rather than
+    # recorded. A reader handed something unreadable does not error - it returns a valid
+    # `Observation` saying so, at confidence 0.0 and severity 1, which then draws on the
+    # map as a genuine mild report. Refusing here is what keeps "somebody photographed
+    # this" true of every coloured cell.
+    if observation.confidence < settings.min_observation_confidence:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"the photo was read at confidence {observation.confidence:.2f}, below the "
+                f"{settings.min_observation_confidence:.2f} needed to place a report on the "
+                f"grid. The reader said: {observation.description!r}. Retake it closer, in "
+                "better light, or pointed at the thing you are reporting."
+            ),
+        )
 
     return _stored_response(store.add(observation, lon=body.lon, lat=body.lat, row=row, col=col))
 

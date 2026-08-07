@@ -12,6 +12,8 @@ on, which is exactly the kind of break that would reach production silently.
 
 from __future__ import annotations
 
+import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -117,6 +119,43 @@ def synthetic_cube() -> xr.Dataset:
     )
 
 
+# Secrets a developer legitimately has in `.env`, and which no test may inherit.
+AMBIENT_KEY_VARS = (
+    "TERRARIUM_GEMINI_API_KEY",
+    "TERRARIUM_GROQ_API_KEY",
+    "TERRARIUM_OPENAQ_KEY",
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def no_ambient_keys() -> Iterator[None]:
+    """Hide the developer's real keys from the whole suite.
+
+    `Settings()` reads `.env`, so the moment somebody adds a working key the suite starts
+    behaving differently on their machine than in CI — and not harmlessly. The tests that
+    assert the *no-model* fallback (`/plan` parsing by rules, `/observations` answering
+    503) began failing the moment a key existed, and one of them stopped being an offline
+    test at all: it reached Google and came back **502**, because a route that is supposed
+    to refuse without a model instead went and asked one.
+
+    That is a direct breach of "no test may touch the network" (CLAUDE.md), and the CI
+    network-isolation job would not have caught it, because CI has no key and so never
+    takes that branch.
+
+    Empty string rather than deleting the variable: an env var set to `""` still takes
+    precedence over `.env`, whereas an unset one lets the file win. `resolve_adapter`
+    treats it as absent, which is exactly the state these tests are written against.
+    """
+    saved = {name: os.environ.get(name) for name in AMBIENT_KEY_VARS}
+    os.environ.update(dict.fromkeys(AMBIENT_KEY_VARS, ""))
+    yield
+    for name, value in saved.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+
+
 @pytest.fixture(scope="session")
 def synthetic_runtime() -> Runtime:
     """A loaded runtime over the synthetic cube, with a genuinely trained booster."""
@@ -140,9 +179,15 @@ def synthetic_runtime() -> Runtime:
 
 
 @pytest.fixture(scope="session")
-def client(synthetic_runtime: Runtime) -> TestClient:
-    """A TestClient over an app wired to the synthetic runtime."""
+def client(synthetic_runtime: Runtime, no_ambient_keys: None) -> TestClient:
+    """A TestClient over an app wired to the synthetic runtime, and to **no LLM**.
+
+    `no_ambient_keys` is depended on explicitly rather than left to autouse ordering: this
+    fixture is session-scoped and would otherwise be free to build before it, reading a
+    real key straight out of `.env`. The tests that use this client are the ones asserting
+    the offline fallbacks, so a key here does not weaken them — it inverts them.
+    """
+    settings = Settings(env="test", gemini_api_key=None, groq_api_key=None, openaq_key=None)
     from terrarium.api.main import create_app
 
-    settings = Settings(env="test")
     return TestClient(create_app(settings, runtime=synthetic_runtime))

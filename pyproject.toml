@@ -67,7 +67,7 @@ exclude = ["**/test_*.py", "**/conftest.py"]
 # ---------------------------------------------------------------- tooling ---
 
 [tool.pytest.ini_options]
-testpaths = ["src/terrarium"]
+testpaths = ["src/terrarium", "scripts"]
 python_files = ["test_*.py"]
 addopts = "-q --strict-markers"
 

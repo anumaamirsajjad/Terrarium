@@ -377,9 +377,23 @@ a module dies. They are excluded from the built wheel. **No test may touch the n
 **Name the concentration precisely too.** The air core produces this tile's *own*
 contribution to PM2.5 from its roads, in a single pass, at the same ~10:30 hour. It is not
 what a monitor reads and it is not "air quality" unqualified — call it **locally-generated
-PM2.5**, and quote deltas rather than levels. Until `validate_air.py` has actually run
-against OpenAQ, also say the magnitudes are **uncalibrated**: the emission factors are
-literature figures for a South Asian fleet, not measurements of Lahore's.
+PM2.5**, and quote deltas rather than levels. Also say the magnitudes are **uncalibrated**:
+the emission factors are literature figures for a South Asian fleet, not measurements of
+Lahore's.
+
+**`validate_air.py` has now run, and the result is negative — say that, not "unvalidated".**
+Scored against 53 OpenAQ monitors over 2025-winter, the core **does not beat a null model**
+(MAE 50.995 against a null 50.953; corr +0.157; summer is worse still at n=15). The tile's
+own contribution is 0.3–13 µg/m³ against monitors reading 114–322, so it is ~3–7 % of the
+signal and the regional background swamps any spatial pattern. Two consequences, and the
+second is the one people get wrong:
+
+- **The delta survives.** The background is identical either side of an intervention and
+  cancels, which is the whole reason the API ships a difference and never a level.
+- **The spatial pattern does not.** "This street is worse than that one" is precisely what
+  was tested and precisely what found no skill. Do not claim it. The fitted ×3.49 slope is
+  *not* applied and should not be — at that correlation it is not a calibration, it is a
+  line through noise.
 
 **Name the temperature precisely.** Landsat crosses Lahore at ~10:30 local and ST_B10
 measures the *surface*, not the air. Surface temperature runs several degrees above air

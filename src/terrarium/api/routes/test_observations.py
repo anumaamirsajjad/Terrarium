@@ -60,11 +60,11 @@ def keyed_client(
 ) -> Iterator[TestClient]:
     """A client whose settings carry a key, with the provider stubbed at the adapter seam.
 
-    The stub replaces `adapter_from_key` in the route module — the one function that
+    The stub replaces `resolve_adapter` in the route module — the one function that
     decides whether a model exists — so the test exercises the real route, the real store
     and the real validation, and still never opens a socket.
     """
-    monkeypatch.setattr(observations, "adapter_from_key", lambda *_, **__: _StubVision())
+    monkeypatch.setattr(observations, "resolve_adapter", lambda *_, **__: _StubVision())
     app = main.create_app(
         Settings(env="test", gemini_api_key="test-key"), runtime=synthetic_runtime
     )
@@ -190,7 +190,7 @@ def limited(
 
     def build(limit: int) -> tuple[TestClient, _StubVision]:
         stub = _StubVision()
-        monkeypatch.setattr(observations, "adapter_from_key", lambda *_, **__: stub)
+        monkeypatch.setattr(observations, "resolve_adapter", lambda *_, **__: stub)
         app = main.create_app(
             Settings(env="test", gemini_api_key="test-key"), runtime=synthetic_runtime
         )
@@ -254,3 +254,102 @@ def test_reads_are_not_rationed(
     for _ in range(10):
         assert client.get("/observations").status_code == 200
         assert client.get("/observations/layer").status_code == 200
+
+
+# --------------------------------------------------------------------------------
+# The confidence floor
+# --------------------------------------------------------------------------------
+
+
+class _StubConfidence:
+    """A reader that succeeds and reports how well it could see."""
+
+    def __init__(self, confidence: float) -> None:
+        self._confidence = confidence
+
+    @property
+    def name(self) -> str:
+        return "stub:vision"
+
+    def complete_json_with_image(self, **_: object) -> str:
+        return json.dumps(
+            {
+                "category": "other",
+                "description": "unreadable, abstract colour blocks",
+                "severity": 1,
+                "confidence": self._confidence,
+            }
+        )
+
+
+def _client_reading_at(
+    monkeypatch: pytest.MonkeyPatch, synthetic_runtime: Runtime, confidence: float
+) -> TestClient:
+    monkeypatch.setattr(
+        observations, "resolve_adapter", lambda *_, **__: _StubConfidence(confidence)
+    )
+    return TestClient(
+        main.create_app(
+            Settings(env="test", gemini_api_key="test-key"), runtime=synthetic_runtime
+        )
+    )
+
+
+def test_a_photo_the_reader_could_not_see_is_refused(
+    monkeypatch: pytest.MonkeyPatch, synthetic_runtime: Runtime
+) -> None:
+    """Confidence 0.0 is what an unreadable image actually returns, measured.
+
+    The reader does not raise on junk - it answers with a valid `Observation` saying the
+    image is unreadable, at confidence 0.0 and severity 1. Stored, that draws on the map as
+    a genuine mild report from a photograph nobody could read.
+    """
+    client = _client_reading_at(monkeypatch, synthetic_runtime, 0.0)
+    response = client.post("/observations", json=_body())
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "confidence 0.00" in detail
+    # The reader's own words come back, so the reason is legible to whoever took the photo.
+    assert "unreadable" in detail
+    assert client.get("/observations").json()["observations"] == []
+
+
+def test_a_confident_reading_is_stored(
+    monkeypatch: pytest.MonkeyPatch, synthetic_runtime: Runtime
+) -> None:
+    """The floor must not reject the case it exists to admit.
+
+    0.90 is the *lowest* confidence any of the twelve real street photographs scored, so
+    this is the measured bottom of the accept side rather than a comfortable number.
+    """
+    client = _client_reading_at(monkeypatch, synthetic_runtime, 0.90)
+    response = client.post("/observations", json=_body())
+
+    assert response.status_code == 200
+    assert response.json()["observation"]["confidence"] == 0.90
+    assert len(client.get("/observations").json()["observations"]) == 1
+
+
+def test_the_floor_is_configurable_and_enforced_at_its_edge(
+    monkeypatch: pytest.MonkeyPatch, synthetic_runtime: Runtime
+) -> None:
+    """Exactly at the floor is accepted; a hair under is not."""
+    monkeypatch.setattr(
+        observations, "resolve_adapter", lambda *_, **__: _StubConfidence(0.5)
+    )
+    at_floor = TestClient(
+        main.create_app(
+            Settings(env="test", gemini_api_key="k", min_observation_confidence=0.5),
+            runtime=synthetic_runtime,
+        )
+    )
+    assert at_floor.post("/observations", json=_body()).status_code == 200
+
+    above_floor = TestClient(
+        main.create_app(
+            Settings(env="test", gemini_api_key="k", min_observation_confidence=0.51),
+            runtime=synthetic_runtime,
+        )
+    )
+    assert above_floor.post("/observations", json=_body()).status_code == 422
