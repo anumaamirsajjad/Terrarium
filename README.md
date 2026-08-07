@@ -57,6 +57,10 @@ works — the single exception is `POST /observations`, which answers **503 with
 because no rule parser can read a photograph. `TERRARIUM_OPENAQ_KEY` (also free) is needed
 only by `scripts/validate_air.py`.
 
+**New here, or just want to use it?** [docs/USER_GUIDE.md](docs/USER_GUIDE.md) is the
+plain-language walkthrough: what every control does, a three-minute test run, and an honest
+list of what works and what does not.
+
 See [CLAUDE.md](CLAUDE.md) for architecture, conventions, and scope boundaries;
 [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for what was built and what was
 decided; and [docs/AUDIT.md](docs/AUDIT.md) for what is currently broken. The plan says
