@@ -76,7 +76,12 @@ def cell_from_lonlat(lon: float, lat: float, grid: Grid) -> tuple[int, int]:
     x, y = to_grid.transform(lon, lat)
 
     left, bottom, right, top = grid.bounds
-    if not (left <= x < right and bottom <= y < top):
+    # Half-open the way the row/col arithmetic below is: a north-up grid counts rows down
+    # from `top`, so `top` itself is row 0 and `bottom` is one row past the last. Accepting
+    # `y == bottom` (and rejecting `y == top`) had both edges the wrong way round and
+    # returned row `shape[0]` - an index error on a coordinate the check had just called
+    # valid. x is already correct, because col counts up from `left`.
+    if not (left <= x < right and bottom < y <= top):
         raise GeometryError(
             f"({lon:.4f}, {lat:.4f}) is outside the tile. Terrarium models one tile "
             "(Lahore) and has nothing to say about anywhere else."

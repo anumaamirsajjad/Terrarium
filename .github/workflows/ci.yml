@@ -79,8 +79,11 @@ jobs:
       - name: Tests
         run: npm run test
 
-      # `tsc -b` runs inside this, which is what catches the client/schema drift that
-      # shipped a SimulateResponse with no `air` field for the whole of Phase 9 (A18).
+      # `tsc -b` runs inside this. It checks TypeScript against TypeScript and **cannot**
+      # see a Pydantic model, so it does not catch the client/schema drift that shipped a
+      # SimulateResponse with no `air` field for the whole of Phase 9 (A18) - that is
+      # `api/test_client_types.py`, in the python job, which diffs client.ts against
+      # /openapi.json. This step catches the other half: TS that no longer compiles.
       - name: Build
         run: npm run build
 

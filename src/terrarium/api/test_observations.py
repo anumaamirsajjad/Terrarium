@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from terrarium.api.observations import ObservationStore
+from terrarium.api.observations import ObservationStore, RateLimiter
 from terrarium.config import ACTIVE_TILE
 from terrarium.dsl.observe import Observation, ObservationCategory
 from terrarium.state.grid import grid_for_tile
@@ -67,3 +67,50 @@ def test_an_empty_store_renders_an_all_nan_raster() -> None:
     raster = ObservationStore().severity_raster(GRID)
     assert raster.shape == GRID.shape
     assert not np.isfinite(raster).any()
+
+
+# ------------------------------------------------------------------------------------
+# RateLimiter — the ceiling on free-tier spend (A21)
+# ------------------------------------------------------------------------------------
+
+
+def test_calls_are_allowed_up_to_the_limit_then_refused() -> None:
+    limiter = RateLimiter(limit=3, window_s=60.0)
+    assert [limiter.allow("1.2.3.4", now=0.0) for _ in range(3)] == [True, True, True]
+    assert limiter.allow("1.2.3.4", now=0.0) is False
+
+
+def test_callers_are_counted_separately() -> None:
+    """One caller exhausting the tier must not lock out everybody else."""
+    limiter = RateLimiter(limit=2, window_s=60.0)
+    assert limiter.allow("1.1.1.1", now=0.0) and limiter.allow("1.1.1.1", now=0.0)
+    assert limiter.allow("1.1.1.1", now=0.0) is False
+    assert limiter.allow("2.2.2.2", now=0.0) is True
+
+
+def test_the_window_rolls_rather_than_resetting_on_a_boundary() -> None:
+    limiter = RateLimiter(limit=2, window_s=60.0)
+    assert limiter.allow("a", now=0.0) and limiter.allow("a", now=30.0)
+    assert limiter.allow("a", now=59.0) is False
+    # The 0.0 hit has aged out by t=61; the 30.0 one has not, so exactly one slot frees up.
+    assert limiter.allow("a", now=61.0) is True
+    assert limiter.allow("a", now=61.0) is False
+
+
+def test_refused_calls_do_not_extend_the_window() -> None:
+    """A refusal must not count as a hit, or hammering the endpoint would never recover."""
+    limiter = RateLimiter(limit=1, window_s=60.0)
+    assert limiter.allow("a", now=0.0) is True
+    for t in (10.0, 20.0, 30.0, 50.0):
+        assert limiter.allow("a", now=t) is False
+    assert limiter.allow("a", now=61.0) is True
+
+
+def test_the_caller_table_stays_bounded() -> None:
+    """A dict keyed on a stranger-supplied value is a memory leak with a public door."""
+    limiter = RateLimiter(limit=5, window_s=60.0, max_keys=50)
+    for i in range(500):
+        # Each caller is one-shot and its window has long expired by the time the next
+        # batch arrives, so nothing here should be retained.
+        limiter.allow(f"caller-{i}", now=float(i) * 100.0)
+    assert len(limiter._hits) <= 51

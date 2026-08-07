@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from terrarium.api.geometry import GeometryError, mask_from_geojson
+from terrarium.api.geometry import GeometryError, cell_from_lonlat, mask_from_geojson
 from terrarium.config import ACTIVE_TILE
 from terrarium.state.grid import Grid, grid_for_tile
 
@@ -161,3 +161,59 @@ def test_a_multipolygon_selects_both_lobes(grid: Grid) -> None:
 
     assert np.array_equal(mask, expected)
     assert mask.sum() == expected.sum() > 0
+
+
+# ------------------------------------------------------------------------------------
+# cell_from_lonlat: the point-shaped path, used by POST /observations
+# ------------------------------------------------------------------------------------
+
+
+def test_a_point_in_the_middle_lands_in_a_real_cell(grid: Grid) -> None:
+    row, col = cell_from_lonlat(CENTRE_LON, CENTRE_LAT, grid)
+    assert 0 <= row < grid.shape[0]
+    assert 0 <= col < grid.shape[1]
+
+
+def test_a_point_outside_the_tile_is_refused(grid: Grid) -> None:
+    # Karachi. Clamping to the nearest edge cell would be a wrong answer wearing a
+    # plausible one's clothes.
+    with pytest.raises(GeometryError, match="outside the tile"):
+        cell_from_lonlat(67.0, 24.86, grid)
+
+
+@pytest.mark.parametrize("corner", ["nw", "ne", "sw", "se"])
+def test_every_accepted_edge_coordinate_maps_to_a_real_cell(grid: Grid, corner: str) -> None:
+    """The tile's own bounds, half-open the way the row/col arithmetic is.
+
+    A north-up grid counts rows down from `top`, so `top` is row 0 and `bottom` is one row
+    past the last. The check used to accept `y == bottom` and reject `y == top`, which had
+    both edges the wrong way round: a photo on the northern boundary was refused, and one
+    on the southern boundary was accepted and then returned row `shape[0]` — an index error
+    on a coordinate the check had just called valid.
+    """
+    from pyproj import Transformer
+
+    from terrarium.api.geometry import WGS84
+
+    left, bottom, right, top = grid.bounds
+    x = left if corner in ("nw", "sw") else right
+    y = top if corner in ("nw", "ne") else bottom
+    lon, lat = Transformer.from_crs(grid.crs, WGS84, always_xy=True).transform(x, y)
+
+    try:
+        row, col = cell_from_lonlat(lon, lat, grid)
+    except GeometryError:
+        return  # refusing a boundary is fine; returning a bad index is not
+    assert 0 <= row < grid.shape[0], f"{corner}: row {row} outside {grid.shape}"
+    assert 0 <= col < grid.shape[1], f"{corner}: col {col} outside {grid.shape}"
+
+
+def test_the_north_west_corner_is_the_first_cell(grid: Grid) -> None:
+    """`top`/`left` are inclusive, and they are cell (0, 0) — not a refusal, not row 201."""
+    from pyproj import Transformer
+
+    from terrarium.api.geometry import WGS84
+
+    left, _bottom, _right, top = grid.bounds
+    lon, lat = Transformer.from_crs(grid.crs, WGS84, always_xy=True).transform(left, top)
+    assert cell_from_lonlat(lon, lat, grid) == (0, 0)

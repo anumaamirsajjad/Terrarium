@@ -400,6 +400,13 @@ def leave_one_station_out(
     # only a RankWarning. That report would carry a confident scale factor invented from
     # nothing - which is how this core's emission inventory would get "calibrated" against
     # a set of monitors that all sit away from the modelled sources.
+    #
+    # Checked **per fold**, not once on the whole set. Each iteration below fits on n-1
+    # stations, and a set with spread can hold a fold without any: three monitors reading
+    # the same modelled concentration plus one reading a different one passes a whole-set
+    # check and then fits a degenerate slope the moment the odd one is held out. With a
+    # handful of monitors in one city that is an ordinary arrangement, not a pathological
+    # one, so the guard has to run where the fit runs.
     if np.ptp(x) == 0:
         raise ValueError(
             "every station has the same modelled concentration, so there is no slope to "
@@ -407,10 +414,18 @@ def leave_one_station_out(
             "empty where they stand."
         )
 
+    folds = [np.arange(x.size) != i for i in range(x.size)]
+    if degenerate := [stations[i] for i, keep in enumerate(folds) if np.ptp(x[keep]) == 0]:
+        raise ValueError(
+            f"holding out {', '.join(degenerate)} leaves every remaining station on the "
+            "same modelled concentration, so that fold has no slope to fit and would "
+            "predict from an arbitrary one. Only one station sits in a modelled plume; "
+            "the rest cannot distinguish this inventory from any other."
+        )
+
     scores: list[StationScore] = []
     null_errors: list[float] = []
-    for i in range(x.size):
-        others = np.arange(x.size) != i
+    for i, others in enumerate(folds):
         slope, intercept = np.polyfit(x[others], y[others], 1)
         scores.append(
             StationScore(

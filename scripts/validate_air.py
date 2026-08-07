@@ -51,7 +51,7 @@ from pathlib import Path
 import numpy as np
 from pyproj import Transformer
 
-from terrarium.config import get_settings
+from terrarium.config import SeasonWindow, get_settings, season_windows
 from terrarium.cores.air import (
     AirParameters,
     concentration,
@@ -70,19 +70,42 @@ PM25_PARAMETER_ID = 2  # OpenAQ's parameter id for pm25
 WGS84 = "EPSG:4326"
 
 
+# OpenAQ encodes "no reading" as a large negative number rather than omitting the field.
+# One Lahore station returns it today. Averaged in, a single -999 drags a station's window
+# median below zero and the affine fit then has a negative "observation" to explain.
+MIN_PLAUSIBLE_UGM3 = 0.0
+
+# A station needs this many days inside the window before its median means anything. Some
+# monitors report for a week and stop; a median of three days is not a seasonal value, and
+# an affine fit cannot tell a thin station from a clean one.
+MIN_DAYS_IN_WINDOW = 14
+
+
 def _get(url: str, key: str, timeout_s: float) -> dict:
     request = urllib.request.Request(url, headers={"X-API-Key": key})
     with urllib.request.urlopen(request, timeout=timeout_s) as response:
         return dict(json.load(response))
 
 
-def fetch_stations(settings) -> list[dict]:
-    """PM2.5 monitors inside the tile, with their latest measured value.
+def fetch_stations(settings, window: SeasonWindow) -> tuple[list[dict], list[str]]:
+    """PM2.5 monitors inside the tile, each reduced to a median over `window`.
 
-    Latest, not a window mean: OpenAQ's aggregate endpoints are inconsistently populated
-    for Pakistani stations, and a validation that silently compares one station's 2024
-    winter to another's last Tuesday is worse than one that admits it compared the most
-    recent readings. This is a *snapshot* comparison and the report says so.
+    **The window's own measurements, not each station's latest reading.** The first version
+    of this script took `latest`, on the reasoning that OpenAQ's aggregates are thinly
+    populated for Pakistani stations. Run against the live API that turns out to be the one
+    thing it must not do: Lahore's monitors go quiet at wildly different times, so `latest`
+    returns a reading from last night for some stations and from a winter smog episode
+    eighteen months ago for others. Measured on 2026-08-07 — every value above 100 ug/m3 in
+    the tile was a stale reading from Nov 2025-Mar 2026, and every station reporting that
+    morning read 17-69. A fit across those does not measure where a station sits; it
+    measures **when it last reported**, and it would have produced a confident scale factor
+    from an artefact of the reporting calendar.
+
+    So the range is pinned to the modelled window and the reduction is a **median**, which
+    is what the cube's own composites use — the comparison is then like for like.
+
+    Returns the usable stations and the reasons the rest were dropped, because "12 of 66"
+    is not a result anybody should have to take on trust.
     """
     west, south, east, north = settings.tile.bbox
     query = urllib.parse.urlencode(
@@ -94,32 +117,63 @@ def fetch_stations(settings) -> list[dict]:
     )
     payload = _get(f"{settings.openaq_url}/locations?{query}", settings.openaq_key,
                    settings.http_timeout_s)
+    locations = payload.get("results", [])
+    logger.info("OpenAQ lists %d location(s) in the tile", len(locations))
 
     stations: list[dict] = []
-    for location in payload.get("results", []):
+    dropped: list[str] = []
+
+    for location in locations:
         coords = location.get("coordinates") or {}
+        name = str(location.get("name", location.get("id")))
         for sensor in location.get("sensors", []):
             if (sensor.get("parameter") or {}).get("id") != PM25_PARAMETER_ID:
                 continue
-            latest = _get(
-                f"{settings.openaq_url}/sensors/{sensor['id']}",
-                settings.openaq_key,
-                settings.http_timeout_s,
+
+            days = urllib.parse.urlencode(
+                {
+                    "datetime_from": window.start.isoformat(),
+                    "datetime_to": window.end.isoformat(),
+                    "limit": 1000,
+                }
             )
-            for result in latest.get("results", []):
-                value = (result.get("latest") or {}).get("value")
-                if value is None:
-                    continue
-                stations.append(
-                    {
-                        "name": str(location.get("name", location.get("id"))),
-                        "lon": float(coords["longitude"]),
-                        "lat": float(coords["latitude"]),
-                        "observed": float(value),
-                    }
+            try:
+                measured = _get(
+                    f"{settings.openaq_url}/sensors/{sensor['id']}/measurements/daily?{days}",
+                    settings.openaq_key,
+                    settings.http_timeout_s,
+                )
+            except urllib.error.HTTPError as exc:
+                # 7 of 66 Lahore sensors answer 500 from OpenAQ's own side. Skipping one
+                # station is a thinner validation; letting it raise is no validation at
+                # all, which is what the first live run actually did.
+                dropped.append(f"{name}: OpenAQ returned HTTP {exc.code}")
+                break
+
+            values = [
+                float(result["value"])
+                for result in measured.get("results", [])
+                if result.get("value") is not None
+                and float(result["value"]) >= MIN_PLAUSIBLE_UGM3
+            ]
+            if len(values) < MIN_DAYS_IN_WINDOW:
+                dropped.append(
+                    f"{name}: {len(values)} day(s) in window, needs {MIN_DAYS_IN_WINDOW}"
                 )
                 break
-    return stations
+
+            stations.append(
+                {
+                    "name": name,
+                    "lon": float(coords["longitude"]),
+                    "lat": float(coords["latitude"]),
+                    "observed": float(np.median(values)),
+                    "days": len(values),
+                }
+            )
+            break
+
+    return stations, dropped
 
 
 def main() -> int:
@@ -151,8 +205,28 @@ def main() -> int:
     )
     window = select_window(cube, label)
 
-    stations = fetch_stations(settings)
-    print(f"\nOpenAQ: {len(stations)} PM2.5 station(s) inside the tile\n")
+    # Derived from the label rather than from `settings.windows`, which only covers
+    # `window_years`. A cube built with --years carries windows the default settings have
+    # never heard of, and this script should validate whatever the cube actually holds.
+    season_window = next(
+        (w for w in season_windows([int(label.split("-")[0])]) if w.label == label), None
+    )
+    if season_window is None:
+        print(f"no date range defined for window {label!r}", file=sys.stderr)
+        return 1
+
+    stations, dropped = fetch_stations(settings, season_window)
+    print(
+        f"\nOpenAQ: {len(stations)} usable PM2.5 station(s) inside the tile for {label} "
+        f"({season_window.start} to {season_window.end})"
+    )
+    if dropped:
+        print(f"  {len(dropped)} dropped:")
+        for reason in dropped[:10]:
+            print(f"    {reason}")
+        if len(dropped) > 10:
+            print(f"    ... and {len(dropped) - 10} more")
+    print()
     if not stations:
         print("Nothing to validate against. Lahore's public monitor coverage is thin.")
         return 1
@@ -184,9 +258,10 @@ def main() -> int:
         names.append(station["name"])
 
     print(f"  window {label} ({season_of(window)}), mixing height {params.mixing_height_m:.0f} m")
-    print(f"  {'station':<34} {'modelled':>10} {'observed':>10}")
+    print(f"  {'station':<34} {'modelled':>10} {'observed':>10} {'days':>6}")
+    by_name = {s["name"]: s for s in stations}
     for name, m, o in zip(names, modelled, observed, strict=True):
-        print(f"  {name:<34} {m:>10.2f} {o:>10.1f}")
+        print(f"  {name:<34} {m:>10.2f} {o:>10.1f} {by_name[name]['days']:>6}")
 
     try:
         report = leave_one_station_out(np.array(modelled), np.array(observed), names)
@@ -199,8 +274,12 @@ def main() -> int:
           f"{report.null_mae:.1f} ug/m3")
     print(f"  beats the null model: {report.beats_null}")
     print(
-        "\n  Read this honestly: the observations are each station's latest reading, not "
-        f"a {label} mean, and the local increment is a small part of what a monitor sees."
+        f"\n  Read this honestly. The observations are each station's median over {label} "
+        "itself, so the comparison is like for like in time - but they are **daily** "
+        "medians, while the core models the ~10:30 overpass hour. A diurnal offset that is "
+        "common to every station lands in `background`, not in `scale`, which is why the "
+        "fit keeps an intercept. What is being tested is the *spatial* pattern: whether "
+        "the inventory puts high concentrations where the monitors read high."
     )
     return 0
 

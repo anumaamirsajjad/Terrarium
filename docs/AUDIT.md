@@ -1,7 +1,9 @@
 # Terrarium — repository audit
 
-**Produced 2026-08-06, immediately after Phase 11 was marked done** (`d2f46f2`). Working
-tree clean, Phases 0–11 complete, Phase 12 untouched.
+**Produced 2026-08-06, immediately after Phase 11 was marked done** (`d2f46f2`).
+**Re-checked and extended 2026-08-07**, when re-running the open findings showed that two
+of them (A11, A18) did not say what was actually true, and reading the code added four more
+(A23–A26). Phases 0–11 complete, Phase 12 untouched.
 
 This is a **snapshot, not a register.** [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)
 remains the roadmap and the decisions register; `CLAUDE.md` remains the operating rules.
@@ -29,47 +31,82 @@ commands are included so each one can be re-checked rather than believed.
 | ~~A8~~ | ~~A cube refused for a missing variable is told to do a full rebuild~~ | **CLOSED** | state | fixed 2026-08-06 |
 | **A9** | OpenAQ calibration has never run — air magnitudes uncalibrated | **P3** | validation | needs a free key |
 | **A10** | Gemini has never run — planner LLM path and the whole photo path unproven | **P3** | validation | needs a free key |
-| **A11** | The hindcast result cannot be reproduced: its cube is gone | **P3** | validation | a long rebuild |
+| ~~A11~~ | ~~The hindcast result cannot be reproduced: its cube is gone~~ | **CLOSED** | validation | never true — fixed 2026-08-07 |
 | **A12** | Voice has no automated test | **P3** | web | accepted, see below |
 | ~~A13~~ | ~~No CI~~ | **CLOSED** | repo | fixed 2026-08-06 |
 | ~~A14~~ | ~~README describes a thermal-only product that stopped existing at Phase 8~~ | **CLOSED** | docs | fixed 2026-08-06 |
 | ~~A15~~ | ~~`NOTES.md`'s open TODO is two phases stale~~ | **CLOSED** | docs | fixed 2026-08-06 |
 | ~~A16~~ | ~~Plan header still dated 2026-07-31~~ | **CLOSED** | docs | fixed 2026-08-06 |
 | ~~A17~~ | ~~`requirements.txt` is an unmaintained second source of truth~~ | **CLOSED** | repo | fixed 2026-08-06 |
-| **A18** | The hand-mirrored TypeScript types have already drifted once | **P4** | web | ~2 h to generate |
+| ~~A18~~ | ~~The hand-mirrored TypeScript types have already drifted once~~ | **CLOSED** | web | fixed 2026-08-07 |
 | ~~A19~~ | ~~`_plan_name` calls a do-nothing request a planting~~ | **CLOSED** | api | fixed 2026-08-06 |
 | ~~A20~~ | ~~`ponytail:` marker in `cores/air.py`~~ | **CLOSED** | cores | fixed 2026-08-06 |
-| **A21** | No rate limiting on `POST /observations` | **P5** | api | defer to Phase 12 |
+| ~~A21~~ | ~~No rate limiting on `POST /observations`~~ | **CLOSED** | api | fixed 2026-08-07 |
 | **A22** | `scripts/` has no tests | **P5** | tests | accepted, see below |
+| ~~A23~~ | ~~`cell_from_lonlat` accepted a coordinate it then mapped out of the grid~~ | **CLOSED** | api | fixed 2026-08-07 |
+| ~~A24~~ | ~~CI claimed `tsc -b` guarded A18; it cannot~~ | **CLOSED** | repo | fixed 2026-08-07 |
+| ~~A25~~ | ~~`leave_one_station_out` fits a degenerate fold and reports it as skill~~ | **CLOSED** | cores | fixed 2026-08-07 |
+| ~~A26~~ | ~~The "< 3 s warm" claim was unverified~~ | **CLOSED** | api | measured 2026-08-07 |
 
 Severities: **P0** the demo does not run · **P1** shipped work the user cannot see ·
 **P2** a correctness hole with no symptom yet · **P3** claims resting on unrun validation ·
 **P4** repo and documentation hygiene · **P5** small, real, cheap.
 
-**Fifteen of the twenty-two are now closed** (A1–A8, A13–A17, A19, A20), all on
-2026-08-06. What is left is five findings and one of them is a real piece of work:
+**Twenty-two of the twenty-six are now closed** — A1–A8, A13–A17, A19, A20 on 2026-08-06,
+and A11, A18, A21, A23–A26 on 2026-08-07. What is left is four findings, none of which is
+code:
 
 - **A9, A10** — blocked on a free, no-card registration rather than on code. Until they
   run, the air magnitudes are uncalibrated and the whole photo path is built but unproven.
   Both are disclosed everywhere they matter; closing them means running what already
-  exists.
-- **A11** — needs a wide multi-year rebuild (~70 s per window against Planetary Computer)
-  before the 2.5× hindcast correction has a reproducible artefact behind it again.
-- **A18** — generate the TypeScript types from `/openapi.json`. The only remaining item
-  with real engineering in it.
+  exists. **These are the only two open findings that change what the product may claim.**
 - **A12, A22** — accepted rather than fixed, with the reasoning below.
-- **A21** — deferred to Phase 12, where it stops being hypothetical.
 
-**Nothing in this document now stops the product working**, and nothing shipped is
-invisible: the air core, the citizen raster, the emission lever and the photo marker all
-reached the interface. A13 means the checks that guard all of it now run on every push
-instead of when somebody remembers.
+### What the 2026-08-07 pass changed
+
+It began as a re-check of the open items and found that **two of them were not what this
+document said they were**:
+
+- **A11 was never true.** `data/processed/cube_hindcast.zarr` is on disk with eighteen
+  windows, nine of them summers, and `hindcast.py` runs against it today. The finding
+  asserted the cube was gone without looking. See its entry for the reproduction.
+- **A18's guard did not exist.** Both this document (A13) and `ci.yml` claimed `tsc -b`
+  catches client/schema drift. It cannot — TypeScript is checked against TypeScript and
+  never sees a Pydantic model — so the one finding CI was said to cover was the one thing
+  it could not. Recorded separately as **A24**, because a check that is believed to exist
+  is worse than one that is known to be missing.
+
+**A23 and A25 were found by reading code rather than by re-running a claim**, and both are
+latent defects in guards that already existed:
+
+- `cell_from_lonlat` had its half-open bounds the wrong way round on the y axis, so it
+  refused a point on the tile's northern edge and accepted one on the southern edge that it
+  then mapped to row 201 of a 201-row grid.
+- `leave_one_station_out` checked for a degenerate fit **once on the whole station set**
+  while fitting **once per fold**, so a set with spread but a flat fold reported an invented
+  scale factor as validated skill — the exact failure that guard's docstring describes.
+
+Neither has fired. A23 needs a coordinate that projects exactly onto the tile boundary;
+A25 needs the OpenAQ key A9 is waiting on, and would have fired the first time A9 closed,
+silently, in the direction of looking better.
+
+**A26** is the 2026-08-06 audit's own closing caveat, discharged: `POST /simulate` is
+**0.84 s warm**, against a claimed budget of 3 s.
+
+**Nothing in this document now stops the product working.** Verified end to end on
+2026-08-07 against `cube_phase9.zarr`: all six GETs 200, `POST /simulate` 200 with `stats`,
+`equity`, `delta`, `air` and `brief` populated (−0.086 °C, −0.578 µg/m³ at 2024-winter),
+`POST /observations` 503 with its reason. 391 Python tests and 96 browser tests pass,
+`ruff` and `mypy --strict` clean over 74 files, `oxlint` clean, `npm run build` succeeds,
+and the full Python suite passes with **sockets blocked**.
 
 **What this audit did not look at.** Artefacts on disk, startup paths, route wiring, the
 API-to-frontend surface, docs against reality, and lint/type/test state — those were
-checked by running them. A physics review of the cores was **not** done (the plan's
-measured results are the evidence there), nor a security review, nor any performance
-profiling: the "< 3 s warm" claim in particular is unverified today, because no cube loads.
+checked by running them, and on 2026-08-07 the cores, the DSL validator and the geometry
+module were read line by line as well. The "< 3 s warm" claim is now **measured** (A26).
+Still **not** done: a physics review — the plan's measured results remain the only evidence
+that the numbers are right, and A25 is a reminder that the *scoring* code around them is
+worth reading too — and a full security review beyond the quota-spend hole A21 names.
 
 ---
 
@@ -406,7 +443,7 @@ Treat the VLM feature as **built and unproven**, in the same words Phase 9 uses 
 air core. Cost to close: a free, no-card key from AI Studio, then submit half a dozen real
 Lahore street photos and see whether the categories survive contact.
 
-## A11 — The hindcast result cannot be reproduced
+## A11 — The hindcast result cannot be reproduced — **CLOSED 2026-08-07, never true**
 
 Phase 7's headline — greening cools **−0.47 °C** observed against **−1.18 °C** modelled,
 over-predicting in 12 of 12 configurations — is quoted in `/simulate`'s brief, in
@@ -424,6 +461,41 @@ artefact behind it, which is precisely the position this repo's own rules say no
 **Fix.** A wide build (`--years 2016 2017 … 2024`, roughly 70 s per window, so a coffee) to
 a new `--out` path, kept alongside the serving cube. Then `hindcast.py` reproduces it, or it
 does not, and either outcome is worth knowing before someone asks in a demo.
+
+**Closed, and the finding was wrong on its facts.** The wide build has been in
+`data/processed/` the whole time. The finding checked `window_years` — a *default*, which
+`--years` overrides and which the build that produced this cube did override — and inferred
+the artefact's absence from it instead of listing the directory. `IMPLEMENTATION_PLAN.md:878`
+names the file explicitly.
+
+```
+data/processed/cube_hindcast.zarr
+  18 windows: 2016-summer … 2024-winter (nine summers), 10 variables
+```
+
+No rebuild was needed. `uv run python scripts/hindcast.py --zarr data/processed/cube_hindcast.zarr`
+runs today, trains on 2016–2019 summers and scores 2024-summer:
+
+```
+observed effect        -0.292 raw   -0.245 matched  degC
+CHANGE-EFFECT ERROR    -0.517 raw   -0.580 matched  degC
+WEAK  the model missed more than half of a 0.29 degC effect.
+```
+
+**This is consistent with the recorded result rather than identical to it, and the
+difference is the point.** The plan quotes **−0.47 °C** observed against **−1.18 °C**
+modelled as the median over **12 configurations**, with standard deviations of **0.533** on
+the observed effect and **0.472** on the error (plan, line 942). This single default
+configuration lands at −0.245 and −0.580 — both inside one standard deviation of the
+recorded spread, in the same direction, with the same sign in the same 12/12 sense. A
+single run was never going to return the median of twelve, and one that did would be the
+surprising outcome.
+
+`HINDCAST_OVERPREDICTION = 2.5` therefore keeps its artefact. Note that this run implies a
+*larger* over-prediction (~3.4×) than the constant, so the 2.5× correction the product
+applies is, on this configuration, the conservative end rather than the optimistic one.
+
+**Verification:** `uv run python scripts/hindcast.py --zarr data/processed/cube_hindcast.zarr`
 
 ## A12 — Voice has no automated test
 
@@ -449,7 +521,9 @@ push and pull request:
   something new; CI installing different versions than a developer is how "works on my
   machine" gets built into the pipeline itself.
 - **web** — `npm ci`, then `oxlint`, `vitest`, and `npm run build`. The build runs `tsc -b`,
-  which is what would catch the client/schema drift in A18.
+  which catches TypeScript that no longer compiles. ~~which is what would catch the
+  client/schema drift in A18.~~ **That was wrong — see A24.** `tsc` never sees a Pydantic
+  model; the client/schema diff is `api/test_client_types.py`, in the python job.
 - **network-isolation** — the suite again with **outbound sockets blocked**
   ([`ci/no_network.py`](../ci/no_network.py), loaded with `pytest -p`). Loopback stays
   allowed, because `TestClient` uses it.
@@ -524,7 +598,7 @@ wrong today. It is the `# via` provenance catching up with the direct-import dec
 in `pyproject.toml`. Worth stating plainly: the finding was right that it drifts, and this
 particular drift was harmless.
 
-## A18 — The hand-mirrored TypeScript types have already drifted
+## A18 — The hand-mirrored TypeScript types have already drifted — **CLOSED 2026-08-07**
 
 `web/src/api/client.ts` mirrors `api/schemas/` by hand, and the plan names this as "the seam
 most likely to drift". It has drifted, once, measurably: `SimulateResponse` had **no `air`
@@ -534,6 +608,42 @@ result even if a panel had existed for it (A3).
 
 **Fix.** Generate from `/openapi.json`. The plan already sanctions this; the drift has now
 happened once, which is the evidence it was waiting for.
+
+**Closed, but not by generating them.** The types are *checked* against `/openapi.json`
+rather than produced from it, in
+[`api/test_client_types.py`](../src/terrarium/api/test_client_types.py) — three tests that
+build the real app, read its schema, parse `client.ts`, and diff the field names.
+
+The reasoning for checking rather than generating: codegen means a new dependency, a build
+step, and a generated file in the tree, and it would replace a hand-written client whose
+comments carry the reasoning for half its fields (why `share` is a fraction, why
+`confidence` has no `"high"`). The failure this finding actually describes is a **missing
+or misnamed field**, and that is what a diff catches — for a fraction of the moving parts,
+in the suite that already runs on every push.
+
+What it checks, in both directions, because they fail differently:
+
+- a field the server sends and `client.ts` omits is data the UI cannot reach — the Phase 9
+  `air` bug exactly;
+- a field `client.ts` declares and the server never sends is an `undefined` that reads on
+  screen as a legitimate zero;
+- a whole **response schema** with no interface at all, which a field diff cannot see
+  because an absent interface has nothing to compare.
+
+There is also a test that the parser still finds interfaces, because a regex that silently
+matched nothing would make the other two pass unconditionally — a guard that cannot fail is
+the same problem as the missing guard this finding is about.
+
+**Verified by injecting the historical drift.** Deleting `air: Air | null;` from
+`SimulateResponse` — the exact line whose absence defined this finding — fails the suite
+with the field named:
+
+```
+AssertionError: web/src/api/client.ts has drifted from api/schemas/:
+  SimulateResponse <- SimulateResponse: server sends ['air'], client.ts does not declare it
+```
+
+**Verification:** `uv run pytest src/terrarium/api/test_client_types.py`
 
 ---
 
@@ -559,13 +669,172 @@ Renamed to `caveat:` in all three places. The limitation it introduces is real a
 finding — one tile-mean deposition velocity, which is why planting moves PM2.5 by only
 −0.0003 µg/m³ — so it now carries a marker people will recognise.
 
-## A21 — No rate limiting on `POST /observations`
+## A21 — No rate limiting on `POST /observations` — **CLOSED 2026-08-07**
 
 The bounded store caps memory (500 reports, oldest dropped), and the base64 size cap bounds
 a single request. What is unbounded is **spend against a rate-limited free tier**: an
 unauthenticated POST that consumes Gemini quota. Fine while the API is on localhost;
 worth a per-IP cap before Phase 12 puts it on a public URL. No auth (that is scope), just a
 ceiling.
+
+**Closed.** `RateLimiter` in [`api/observations.py`](../src/terrarium/api/observations.py):
+a rolling window, **20 photos per caller per hour**, in-process and thread-safe like the
+store it sits beside, and constructed *by* the store so a route cannot wire one and forget
+the other. No dependency — `slowapi` would have been a new one for a dict and a deque.
+
+Done now rather than deferred to Phase 12, which is a small departure from the finding: it
+is fifteen lines guarding the one route in the project that spends someone else's quota
+without auth in front of it, and the ceiling is what stops a single caller taking the
+feature down for everybody. It is a ceiling, not authentication — auth remains scope.
+
+Three ordering decisions, each of which is what the tests actually pin:
+
+- **After the 503.** A deployment with no key configured refuses for the honest reason
+  rather than rationing calls it never makes.
+- **Before the model call**, which is the only thing on the route that costs anything.
+  `test_a_refused_call_never_reaches_the_model` asserts the stub's call count stays at 1
+  across five refusals — a limiter that ran after the spend would pass every other test.
+- **After validation**, so a malformed request is refused without burning a slot. A 422 is
+  free; only the model call is rationed.
+
+Two bounds rather than one: the rolling window per caller, and a cap on **how many callers
+are tracked**, because a dict keyed on a stranger-supplied value is the same memory leak
+with a public door that the store's own capacity exists to prevent.
+
+The window rolls rather than resetting on a boundary, and a **refused call does not extend
+it** — otherwise hammering the endpoint would keep it permanently closed. Reads are not
+rationed at all: `GET /observations` costs nothing upstream.
+
+Keyed on `request.client.host`, which behind a proxy is the proxy. Stated in the docstring
+rather than papered over: this is a ceiling on obvious abuse, not a defence against a
+distributed one, and the thing being protected is a free API key.
+
+**Verification:** `uv run pytest src/terrarium/api/test_observations.py src/terrarium/api/routes/test_observations.py`
+— 5 unit tests on the window and the caller bound, 4 through the real route with the
+provider stubbed at the adapter seam, so none of them opens a socket.
+
+## A23 — `cell_from_lonlat` accepted a coordinate it then mapped off the grid — **CLOSED 2026-08-07**
+
+Found by reading [`api/geometry.py`](../src/terrarium/api/geometry.py), not by a failing
+test — there were **no tests for `cell_from_lonlat` at all**, though it is the function
+`POST /observations` uses to place every citizen photo.
+
+The bounds check and the arithmetic two lines below it disagreed:
+
+```python
+if not (left <= x < right and bottom <= y < top):   # accepted y == bottom
+...
+return (int((top - y) // grid.resolution_m), ...)   # y == bottom -> row 201
+```
+
+A north-up grid counts rows *down* from `top`, so `top` is row 0 and `bottom` is one row
+past the last. The check had the y axis half-open the wrong way round, and both ends were
+wrong in opposite directions:
+
+- a photo on the tile's **northern** edge (`y == top`) was **refused** as outside the tile;
+- a photo on the **southern** edge (`y == bottom`) was **accepted** and mapped to row 201
+  of a 201-row grid — an `IndexError` in `severity_raster`, on a coordinate the validator
+  had just called valid.
+
+The x axis was already correct, because columns count up from `left` in the same direction
+the check reads.
+
+Reachable only from a coordinate that projects to exactly `y == bottom`, so this is a
+latent defect rather than one that has fired: a WGS84 round-trip essentially never lands on
+the boundary exactly, which is why nothing noticed. It is on the trust boundary
+nonetheless — the value comes from an HTTP body — and the fix is the comparison, not a
+clamp downstream.
+
+Fixed by making the accepted set match the arithmetic: `bottom < y <= top`. **Six tests
+added**, including the tile's four corners and an assertion that the north-west corner is
+cell `(0, 0)`; the last of these fails against the old comparison, which is what
+establishes it as a fix rather than a rewrite.
+
+**Verification:** `uv run pytest src/terrarium/api/test_geometry.py`
+
+## A24 — CI claimed `tsc -b` guarded A18, and it cannot — **CLOSED 2026-08-07**
+
+[`ci.yml`](../.github/workflows/ci.yml) carried:
+
+> `tsc -b` runs inside this, which is what catches the client/schema drift that shipped a
+> SimulateResponse with no `air` field for the whole of Phase 9 (A18).
+
+and A13 in this document said the same. **It is false.** `tsc` type-checks TypeScript
+against TypeScript. It has no knowledge of `api/schemas/`, never sees `/openapi.json`, and
+cannot form an opinion about whether `client.ts` matches a Pydantic model — a field added
+to a response schema and forgotten in the client compiles perfectly and is invisible until
+something reads `undefined` at runtime.
+
+```bash
+grep -rln "openapi" src/ web/src/ ci/     # web/src/api/client.ts, and nothing else
+```
+
+Nothing in the repository compared the two sides. So the one open finding CI was described
+as covering was precisely the one thing it did not, and the claim is what made that
+comfortable to leave open.
+
+**Closed on both sides:** the comment now says what `tsc -b` does and does not do and
+points at `api/test_client_types.py` (A18) as the check that actually looks at both
+schemas, and A13's claim is corrected below.
+
+Worth keeping as its own finding rather than folding into A18: the missing guard and the
+false belief that it existed are different failures. The first is a gap; the second is what
+stops a gap from being noticed.
+
+## A25 — `leave_one_station_out` fits a degenerate fold — **CLOSED 2026-08-07**
+
+`cores/air.py` refuses a station set with no spread in the modelled concentration, and says
+exactly why:
+
+> A slope through points that share an x is arbitrary, and numpy fits one anyway with only
+> a `RankWarning`. That report would carry a confident scale factor invented from nothing.
+
+**The guard ran once on the whole set; the fit runs once per fold.** A set with spread can
+contain a fold without any — three monitors reading the same modelled concentration plus
+one reading a different one — and holding out the odd one leaves three identical `x`.
+Measured, not reasoned about:
+
+```
+full-set ptp: 4.0  -> existing guard passes
+warnings raised: ['RankWarning']
+scale: 7.25   background: 3.75
+  d: observed 40.0, predicted 33.0
+beats_null: True
+```
+
+That is the failure the guard's own docstring describes, reported as skill. It matters
+because **`scale` is the correction the emission inventory would be calibrated by** — the
+number A9 exists to produce — and `beats_null` is the only claim the report is supposed to
+make. With a handful of monitors in one city, three of them outside the modelled plumes is
+an ordinary arrangement rather than a pathological one.
+
+Latent today: this path only runs with an OpenAQ key, so it has never executed. It would
+have fired the first time A9 was closed, silently, in the direction of looking better.
+
+**Closed** by checking every fold where the fit happens, keeping the whole-set check ahead
+of it because that case has a clearer cause and deserves its own message. Two tests: the
+degenerate fold is refused by name (`holding out d`), and a well-spread set still fits with
+`warnings.simplefilter("error")` so a future `RankWarning` fails the suite rather than
+scrolling past.
+
+**Verification:** `uv run pytest src/terrarium/cores/test_air.py`
+
+## A26 — The "< 3 s warm" claim was unverified — **CLOSED 2026-08-07**
+
+The 2026-08-06 audit closed with *"the '< 3 s warm' claim in particular is unverified today,
+because no cube loads."* A1 fixed the cube and nobody went back and measured it.
+
+Measured against `cube_phase9.zarr`, 2024-winter, a ~44 km² polygon with both levers set,
+five runs after one warm-up:
+
+```
+POST /simulate      0.84 s mean (0.82 min, 0.89 max)
+GET /cube/layer     0.04 s
+```
+
+**Comfortably inside the claim**, with the whole-tile FFT convolution, the equity pass and
+the brief all included. The interactivity argument in `CLAUDE.md` — one kernel, one FFT,
+the whole tile at once — holds at the measured budget rather than only in principle.
 
 ## A22 — `scripts/` has no tests
 
@@ -612,16 +881,28 @@ Items 1–6 were **done on 2026-08-06**, in this order:
 5. ~~**A4, A5, A6**~~ — the remaining interface gaps.
 6. ~~**A14, A15, A16, A17, A19, A20**~~ — documentation and the cheap P5 items, in one pass.
 
-What is left, in the order it pays:
+Items 7–10 were **done on 2026-08-07**:
 
-7. **A18** — generate the TypeScript types from `/openapi.json`. The only open item with
-   real engineering in it, and the one the new CI would have caught. Two fixtures written
-   by hand today needed three corrections against the real schema before `tsc` accepted
-   them, which is the same drift in miniature.
-8. **A11** — the wide rebuild (`--years 2016 … 2024`), so the 2.5× correction has a
-   reproducible artefact behind it again. It is quoted in every cooling figure the product
-   shows and currently cannot be re-derived on this machine.
-9. **A9, A10** — two free, no-card registrations, then run what is already built. A9 is
-   what lets the air panel drop the word **uncalibrated**; A10 is the only way to find out
-   whether the VLM's categories survive contact with real Lahore street photos.
-10. **Phase 12**, folding in **A21**.
+7. ~~**A18**~~ — closed by *checking* the types against `/openapi.json` rather than
+   generating them, and verified by injecting the historical `air` drift.
+8. ~~**A11**~~ — no rebuild needed. The cube was on disk the whole time; the finding was
+   wrong.
+9. ~~**A24**~~ — the CI comment that made A18 look guarded when nothing guarded it.
+10. ~~**A23**~~, ~~**A25**~~, ~~**A21**~~ — the two latent guard defects found while
+    reading, and the rate limit, pulled forward from Phase 12 because it is fifteen lines.
+    ~~**A26**~~ — the performance claim, measured at last.
+
+What is left:
+
+11. **A9, A10** — two free, no-card registrations, then run what is already built. A9 is
+    what lets the air panel drop the word **uncalibrated**; A10 is the only way to find out
+    whether the VLM's categories survive contact with real Lahore street photos. **These
+    are the only open findings that change what the product may claim**, and neither is
+    blocked on code.
+12. **Phase 12.**
+
+**A12 and A22 stay accepted**, unchanged: voice needs a real browser in CI for one button,
+and `scripts/` are thin I/O wrappers whose honest tests are fixtures for the network they
+exist to talk to. A22's caveat still stands, and A11 has now made it slightly weaker rather
+than stronger — the artefact that finding declared missing was produced by one of those
+untested scripts and was fine.

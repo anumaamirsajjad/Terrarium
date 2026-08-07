@@ -83,6 +83,7 @@ def _stored_response(stored: StoredObservation) -> ObservationResponse:
     summary="Read a citizen photo into a typed observation on the grid",
 )
 async def submit_observation(
+    request: Request,
     body: ObservationRequest,
     settings: Annotated[Settings, Depends(get_settings)],
     store: Annotated[ObservationStore, Depends(get_store)],
@@ -112,6 +113,22 @@ async def submit_observation(
     adapter = adapter_from_key(settings.gemini_api_key, model=settings.gemini_model)
     if adapter is None:
         raise HTTPException(status_code=503, detail=NO_READER)
+
+    # Last, so a malformed request is refused without spending a slot: the thing being
+    # rationed is the model call below, and everything above this line is free. Anonymous
+    # callers share the "unknown" bucket, which is the conservative way round - it rations
+    # them together rather than exempting them.
+    caller = request.client.host if request.client else "unknown"
+    if not store.rate_limiter.allow(caller):
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"rate limit reached: {store.rate_limiter.limit} photos per hour per "
+                "client. Reading a photo costs a call against a free-tier vision model, "
+                "and this endpoint takes no auth, so the ceiling is what stops one caller "
+                "exhausting it for everybody."
+            ),
+        )
 
     try:
         observation = observation_from_photo(

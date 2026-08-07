@@ -232,7 +232,16 @@ class Settings(BaseSettings):
     # working deployment rather than a degraded one. The model name is a plain string here
     # rather than an import from `dsl.llm`, because `dsl` imports this module.
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.5-flash"
+    # Pinned, not an alias, so the VLM's categories cannot change under a validation run.
+    #
+    # This default has already gone stale once and the failure was silent in the worst way:
+    # `gemini-2.5-flash` still appears in `/v1beta/models` and still supports
+    # `generateContent`, but answers **404 "no longer available to new users"** to a key
+    # issued after its retirement. So it looks configured, lists as available, and only the
+    # first real photo finds out - on the one route in the project with no offline fallback.
+    # If this recurs, `gemini-flash-latest` is the moving alias that always resolves; prefer
+    # naming the successor here so a run stays reproducible.
+    gemini_model: str = "gemini-3.6-flash"
 
     # Where `scripts/build_tile.py` writes by default.
     zarr_store: Path = DATA_DIR / "processed" / "cube.zarr"

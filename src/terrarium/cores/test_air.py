@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 import xarray as xr
@@ -350,6 +352,38 @@ def test_stations_that_all_model_the_same_are_refused() -> None:
 def test_too_few_stations_is_refused_rather_than_fitted() -> None:
     with pytest.raises(ValueError, match="at least 4"):
         leave_one_station_out(np.array([1.0, 2.0, 3.0]), np.array([4.0, 5.0, 6.0]), list("abc"))
+
+
+def test_a_fold_with_no_spread_is_refused_even_when_the_whole_set_has_some() -> None:
+    """The degenerate case the whole-set check cannot see.
+
+    Three monitors on the same modelled concentration plus one in a plume: `ptp` over all
+    four is 4.0, so a single up-front check passes — and then holding out the only station
+    with a different x leaves three identical ones, which numpy fits with nothing but a
+    `RankWarning` and reports as a confident scale factor.
+
+    With a handful of monitors in one city this is an ordinary arrangement, and it is
+    exactly what the guard exists to refuse, so it has to run per fold.
+    """
+    modelled = np.array([1.0, 1.0, 1.0, 5.0])
+    observed = np.array([10.0, 12.0, 11.0, 40.0])
+
+    assert np.ptp(modelled) > 0, "the whole-set check must pass, or this tests nothing"
+    with pytest.raises(ValueError, match="holding out d"):
+        leave_one_station_out(modelled, observed, list("abcd"))
+
+
+def test_a_well_spread_set_still_fits_without_warnings() -> None:
+    """The per-fold guard must not refuse the case it is meant to allow."""
+    modelled = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    observed = 3.0 * modelled + 12.0
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # a RankWarning here is a failure, not a note
+        report = leave_one_station_out(modelled, observed, [f"s{i}" for i in range(5)])
+
+    assert report.scale == pytest.approx(3.0)
+    assert report.background_ugm3 == pytest.approx(12.0)
 
 
 def test_a_window_with_no_wind_is_refused_not_answered_with_zero() -> None:
