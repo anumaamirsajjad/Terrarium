@@ -1,12 +1,17 @@
 # Terrarium — Implementation Plan
 
-Phases and decisions current to **2026-08-06**, after Phase 11. Originally written
-2026-07-31 following a full repository audit and a decision pass with the team.
+Phases and decisions current to **2026-08-07**. Originally written 2026-07-31 following a
+full repository audit and a decision pass with the team.
 
 **Phase status is not the same as working software.** [AUDIT.md](AUDIT.md) is the snapshot
-of what is currently broken, missing or invisible — including the fact that no cube on this
-machine is servable today, so a repository of eleven done phases currently answers 503 on
-every data route. Read it before trusting a ✅ below to mean "runs".
+of what is currently broken — read it before trusting a ✅ below to mean "runs". As of
+2026-08-07 all thirty-four of its findings are closed and the product answers on every
+route, which has not been true for most of this file's life.
+
+**Two entries below have been superseded and say so in place** (D19, D20, and the Phase 9
+method). A decisions register that quietly deletes a reversed decision is worse than one
+that records the reversal, because the reasoning is what stops it being re-taken by
+accident.
 
 | | Phase | Status |
 |---|---|---|
@@ -19,9 +24,9 @@ every data route. Read it before trusting a ✅ below to mean "runs".
 | 6 | Frontend — map, draw, compare | ✅ **DONE** |
 | 7 | Hindcast validation | ✅ **DONE** — model over-states cooling ~2.5x |
 | 8 | Equity | ✅ **DONE** — panel shipped; demo plan gives the densest decile 0 % |
-| 9 | Air dispersion core | ✅ **DONE** — inventory + core shipped; OpenAQ scoring built but unrun |
+| 9 | Air dispersion core | ✅ **DONE** — scored against 53 OpenAQ monitors 2026-08-07: **beats the null model in winter** after the plume was replaced with a seasonal kernel (D21). Summer unvalidated |
 | 10 | DSL + agent layer | ✅ **DONE** — DSL, presets and brief ship; no LLM key, and it does not need one |
-| 11 | Voice, VLM, council brief | ✅ **DONE** — voice + brief ship keyless; the photo reader is built and has never seen a photo |
+| 11 | Voice, VLM, council brief | ⚠️ **PARTLY WITHDRAWN 2026-08-07** — the council brief ships; **voice and the photo reader were removed** (D22). Both worked; both were the only key-gated / only untestable parts of the product |
 | 12 | Deployment | ⬜ |
 
 ---
@@ -50,8 +55,10 @@ Settled 2026-07-31. These are closed — reopen deliberately, not by drift.
 | D16 | Air validation source | OpenAQ **v3**, which unlike every other source in this project needs a key. Free and no card, so it stays inside D13, but it is the one thing that will not run out of the box — `scripts/validate_air.py` says so and stops rather than half-validating |
 | D17 | Agent framework | **No LangGraph.** Budgeted for in Phase 10 and not taken, for the reason D15 dropped `osmnx`: it is a graph runtime, and the planner is two nodes — parse, then validate — with no branching, no cycles and no shared state to checkpoint. `dsl/planner.py` is one function that tries a model and falls back to a regex parser. If agents later need to *choose* between interventions and iterate, that is a real graph and this reopens |
 | D18 | Where the LLM may live | **One module, `dsl/llm.py`, and nowhere else.** `ingest/` remains the only layer that fetches *data for the cube*; a planner call is a different thing — Layer 3, made on the user's behalf, with nothing downstream treating its output as a measurement. It is confined to one adapter for the same reason, and everything it returns is re-validated as a `Plan` before a core can see it. The key is optional: with none, `/plan` uses the rule parser and the rest of the layer never calls out at all |
-| D19 | Citizen observations vs the cube | **They get the grid, not the cube.** Phase 11's brief said "writing observations back into the cube"; what shipped keeps them in their own in-memory store, their own endpoint and their own layer, with `measured: false` on every response. Every cube variable is an instrument reading with a known error; a language model's reading of a phone photo is not, and merging them would make "what does the cube say" unanswerable. They render on the same 201×202 grid so the two *can* be compared — which is the whole value — and unpersisted, because storing user-submitted content means owning moderation and retention, which is out of scope in the same way user accounts are |
-| D20 | Voice capture | **Browser Web Speech API**, not LiveKit (meters minutes) and not self-hosted Whisper (needs somewhere to run). Free, keyless, no dependency. Uneven support is handled by detecting the constructor and rendering no microphone where there is none. Consequence that was not obvious: capturing Urdu is worthless unless the *parser* reads Urdu, because with no LLM key the rule parser is what receives the transcript — so Phase 11 put Urdu into `dsl/planner.py`, digits included |
+| D19 | Citizen observations vs the cube | ~~**They get the grid, not the cube.**~~ **SUPERSEDED by D22 — the feature was removed 2026-08-07.** The reasoning stands and is why it must not be reintroduced casually: Phase 11's brief said "writing observations back into the cube"; what shipped keeps them in their own in-memory store, their own endpoint and their own layer, with `measured: false` on every response. Every cube variable is an instrument reading with a known error; a language model's reading of a phone photo is not, and merging them would make "what does the cube say" unanswerable. They render on the same 201×202 grid so the two *can* be compared — which is the whole value — and unpersisted, because storing user-submitted content means owning moderation and retention, which is out of scope in the same way user accounts are |
+| D20 | Voice capture | ~~**Browser Web Speech API**~~ **SUPERSEDED by D22 — removed 2026-08-07.** The Urdu parser it forced into `dsl/planner.py` is **kept**, for the plainer reason that a tool about Lahore should not 422 a Lahore resident typing in Urdu. Original reasoning: not LiveKit (meters minutes) and not self-hosted Whisper (needs somewhere to run). Free, keyless, no dependency. Uneven support is handled by detecting the constructor and rendering no microphone where there is none. Consequence that was not obvious: capturing Urdu is worthless unless the *parser* reads Urdu, because with no LLM key the rule parser is what receives the transcript — so Phase 11 put Urdu into `dsl/planner.py`, digits included |
+| D21 | Air dispersion timescale | **An isotropic seasonal kernel, not a single-direction plume.** `plume_kernel` is correct physics for one *hour*; every window in this cube is a *season*, and over 2025-winter the overpass-hour wind spans 68°–331°. Scored against 53 OpenAQ monitors the plume reached corr +0.157 and **lost** to a null model; averaging it over a 12-bin wind rose is **worse** (+0.018), which localises the error to the kernel's *radial profile* rather than its direction; an isotropic kernel at σ = 1 km reaches **+0.531, MAE 40.6 against a null of 51.0**. Normalised to the plume's own total so magnitudes and the winter/summer ratio are unchanged and only the pattern moves. `seasonal_sigma_m` is the **only fitted number in any core** — tuned on the same stations the MAE is quoted from, so that MAE is optimistic, but the optimum is broad (400 m–2 km all beat the null). `plume_kernel` is kept and tested for the hourly case. **Summer beats the null at no σ and is documented unvalidated** |
+| D22 | Citizen photos and voice, withdrawn | **Removed 2026-08-07**, reversing D19 and D20. Not because either failed — both worked — but because each was a standing exception. `POST /observations` was the **only route that required a key**: every other path degrades to a deterministic offline answer, and a photograph has no rule-parser fallback, so a revoked key or a rate limit could take that one route out (which happened twice during the 2026-08-07 audit). Voice was the **only feature no automated test could drive**, accepted as untestable rather than fixed — and an accepted exception is a permanent one. Removing both makes the zero-budget claim unconditional: every route now works with no key of any kind, and nothing in the product is verified by hand only |
 
 ### Assumptions I am defaulting (overturn any of these freely)
 
@@ -1147,9 +1154,22 @@ this document.
 
 ## Phase 9 — Air dispersion core ✅ DONE
 
-Steady-state Gaussian plume on the 100 m grid, winter inversion parameterisation, emission
-inventory from OSM, canopy-weighted deposition. The second core (D8), and the one that
-answers *"ban combustion vehicles inside this ring"*.
+Dispersion on the 100 m grid, winter inversion parameterisation, emission inventory from
+OSM, canopy-weighted deposition. The second core (D8), and the one that answers *"ban
+combustion vehicles inside this ring"*.
+
+> **Superseded in part, 2026-08-07 (D21).** As built and described below, this core used a
+> **steady-state Gaussian plume with a single wind direction**. Scored against 53 OpenAQ
+> monitors it **lost to a null model** (corr +0.157, MAE 51.0 vs 51.0), because a plume is
+> the right model for one *hour* and every window here is a *season* — over 2025-winter the
+> overpass-hour wind spans 68°–331°. It now uses `seasonal_kernel`, an isotropic kernel at
+> σ = 1 km, which reaches **corr +0.531 and MAE 40.6 against a null of 51.0** and is the
+> first core in this project to beat a null model on independent observations.
+>
+> Everything below about the inventory, the FFT, the deposition treatment and the winter
+> inversion still holds — the kernel's *shape* changed and its total did not. What does not
+> hold: the per-cell ΔPM2.5 magnitudes quoted in this section, which were computed with the
+> plume and are superseded. **Summer beats the null at no σ and is unvalidated.**
 
 **Delivered:**
 
