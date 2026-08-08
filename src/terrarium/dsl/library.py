@@ -148,7 +148,7 @@ PRESETS: tuple[Preset, ...] = (
         label="Winter low-emission zone",
         summary="The same restriction, scored against the winter inversion.",
         caveat=(
-            "Exists to make the season visible: identical emissions produce 6-7x the "
+            "Exists to make the season visible: identical emissions produce 6-9x the "
             "concentration under the November-January inversion, so the same plan buys "
             "several times more in winter than in summer."
         ),

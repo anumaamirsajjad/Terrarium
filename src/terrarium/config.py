@@ -181,7 +181,7 @@ class Settings(BaseSettings):
     # window (D10), so this is 2 x len(window_years) time slices. Two years is the
     # minimum that makes the time dimension mean anything; more is a build-time cost,
     # not a code change.
-    window_years: list[int] = Field(default=[2023, 2024])
+    window_years: list[int] = Field(default=[2023, 2024, 2025])
     # Scene-level cloud cover ceiling, percent. Applied as a STAC query filter.
     max_cloud_cover: float = 20.0
     # Cap on scenes composited per collection *per window*, least-cloudy first.
@@ -265,7 +265,7 @@ class Settings(BaseSettings):
     # cube_phase4.zarr is still on disk and still good, but it predates
     # `pm25_emission_g_s` and `wind_direction_deg`, so the API refuses it - which is the
     # per-variable-window check doing exactly its job.
-    serve_zarr_store: Path = DATA_DIR / "processed" / "cube_phase9.zarr"
+    serve_zarr_store: Path = DATA_DIR / "processed" / "cube_v2.zarr"
     # LightGBM native text format, written by scripts/train_thermal.py.
     thermal_model_path: Path = DATA_DIR / "processed" / "thermal.txt"
 

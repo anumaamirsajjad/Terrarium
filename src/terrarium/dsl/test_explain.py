@@ -102,10 +102,45 @@ def test_an_air_result_forces_the_local_increment_caveat_and_low_confidence() ->
     joined = " ".join(brief.uncertainties)
 
     assert "local increment" in joined
-    assert "not been calibrated" in joined
-    # The air core has never been scored against a station, so nothing carrying its number
-    # is allowed to read as well-supported.
+    assert "scale error" in joined
+    # PLANTING is a *summer* plan, and the summer spatial pattern beats no null model, so
+    # nothing carrying its air number may read as well-supported.
+    assert "unvalidated" in joined
+    assert "beats no null model" in joined
     assert brief.confidence == "low"
+    # The missing source category is structural and belongs on every air figure.
+    assert "no brick kilns" in joined
+
+
+def test_a_winter_air_result_cites_the_validation_rather_than_disclaiming_it() -> None:
+    """Winter was scored against 53 monitors and beats a null model (D21).
+
+    The caveat has to be season-specific: calling a winter figure unvalidated understates
+    it, and calling a summer figure validated is false. Neither sentence can be general.
+    """
+    winter_air = PLANTING.model_copy(
+        update={
+            "window": "2025-winter",
+            "season": "winter",
+            "air": AirInputs(
+                mean_delta_inside=-3.18,
+                mean_delta_spillover=-1.20,
+                spillover_cells=980,
+                units="ug/m3",
+                mixing_height_m=250.0,
+                emission_fraction_removed=1.0,
+            ),
+        }
+    )
+    brief = brief_for(winter_air)
+    joined = " ".join(brief.uncertainties)
+
+    assert "53 OpenAQ monitors" in joined
+    assert "beats a null model" in joined
+    assert "unvalidated" not in joined, "winter is validated; do not disclaim it"
+    # Evidence for the *pattern*, never for the level.
+    assert "not evidence about the absolute level" in joined
+    assert brief.confidence == "moderate"
 
 
 def test_a_restriction_only_plan_leads_with_the_air_number() -> None:
@@ -173,7 +208,7 @@ def test_a_plan_that_quotes_no_temperature_carries_no_temperature_caveats() -> N
     assert "land surface" not in joined
     # The window still matters - more here than anywhere, because of the inversion.
     assert "2024-winter" in joined
-    assert "6-7x" in joined
+    assert "6-9x" in joined
     # And the equity shares, which divide by a zero temperature delta, are not mentioned
     # at all rather than reported as unreliable.
     assert not any("equity split" in finding for finding in brief.findings)
@@ -247,3 +282,40 @@ def test_plan_notes_survive_into_the_findings() -> None:
 
 def test_the_brief_is_deterministic() -> None:
     assert brief_for(PLANTING) == brief_for(PLANTING)
+
+
+def test_the_headline_says_who_receives_the_cooling() -> None:
+    """Equity is the only figure here carrying no correction and no seasonal caveat.
+
+    The thermal number is divided by a hindcast factor and the air number is validated in
+    one season and not the other. Distribution is plain arithmetic over a population
+    raster, and it is the question a council actually has to answer — so it belongs in the
+    first sentence rather than three paragraphs down.
+    """
+    reliable = EquityInputs(
+        top_three_share=41.0,
+        densest_decile_share=0.18,
+        concentrated=False,
+        shares_reliable=True,
+        uninhabited_fraction=0.05,
+    )
+    brief = brief_for(PLANTING.model_copy(update={"equity": reliable}))
+
+    assert "densest tenth" in brief.headline
+    assert "18%" in brief.headline
+
+
+def test_an_unreliable_equity_share_stays_out_of_the_headline() -> None:
+    """A share over a mostly-uninhabited polygon is arithmetic, not a finding."""
+    unreliable = EquityInputs(
+        top_three_share=41.0,
+        densest_decile_share=0.18,
+        concentrated=False,
+        shares_reliable=False,
+        uninhabited_fraction=0.9,
+    )
+
+    headline = brief_for(PLANTING.model_copy(update={"equity": unreliable})).headline
+    assert "densest tenth" not in headline
+    # And a plan with no equity at all must not grow a sentence about it.
+    assert "densest tenth" not in brief_for(PLANTING).headline

@@ -88,7 +88,10 @@ Either works alone. With both, Groq is tried first and Gemini takes over if it f
 The screen is a map with a control panel down the side. Top to bottom:
 
 ### Seasonal window
-Buttons for `2023-summer`, `2023-winter`, `2024-summer`, `2024-winter`.
+Buttons for six windows: `2023-summer` through `2025-winter`.
+
+**Use `2025-winter` for air.** It is the only window with enough working monitors to have
+been validated against — 53 of them. The others model fine but have no independent check.
 
 **This changes the answer a lot.** The same tree planting cools about **0.51 °C in summer**
 but only **0.13 °C in winter**. Every number on screen belongs to the window you picked.
@@ -163,16 +166,16 @@ PDF from there.
 
 ## 5. A 3-minute test run
 
-1. Pick `2024-winter`.
+1. Pick `2025-winter` — the validated window.
 2. Base layer `lst_c` — you should see a warm city and cooler edges.
 3. **Draw a polygon** over central Lahore, 5–6 clicks, **Finish**.
 4. Click **Low-emission zone**.
 5. **Run simulation**.
 6. You should land on the **ΔPM2.5** tab automatically with a blue patch.
 7. Click **Compare** and drag the slider.
-8. Switch the window to `2024-summer` and run again — the air number should be **much
+8. Switch the window to `2025-summer` and run again — the air number should be **much
    smaller**. That is the winter inversion, and it is the single most convincing thing to
-   show someone.
+   show someone. Note the panel also changes what it says about validation.
 
 ---
 
@@ -237,11 +240,11 @@ About −0.0003 µg/m³. Real, but too small to see. Trees are for heat here, no
 
 | Thing | Detail |
 |---|---|
-| `data/processed/cube.zarr` | A known-bad half-built file. Kept on purpose so the safety check has something to reject. The app serves `cube_phase9.zarr` |
+| `data/processed/cube.zarr` | A known-bad half-built file. Kept on purpose so the safety check has something to reject. The app serves `cube_v2.zarr` |
 | Costs | Rough literature prices, marked `calibrated: false`. Fine for ranking two plans, not for a budget |
 | Brick kilns | The pollution map found **0 kilns**, roads only. Unclear if that is real or a data gap |
 | Rebuilding data | The OpenStreetMap service times out often. Never rebuild the night before a demo |
-| Only four windows | The served cube covers 2023 and 2024. A 2025 cube exists for validation but is not what the app serves |
+| Brick kilns, again | Worth repeating: kilns are a major Lahore winter source and OSM has none, so the air model is missing a whole source category. This caps how well it can ever score |
 
 ### ⚪ Removed on purpose
 

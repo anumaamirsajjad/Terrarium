@@ -135,6 +135,14 @@ def brief_for(inputs: BriefInputs) -> Brief:
             f"average inside the polygon in {inputs.window} — closer to "
             f"{abs(expected):.2f} degC once the hindcast correction is applied."
         )
+        # Who receives it belongs in the headline, not three paragraphs down. It is the
+        # only figure in this brief with no correction and no season-specific caveat
+        # attached, and the question a council actually has to answer.
+        if inputs.equity is not None and inputs.equity.shares_reliable:
+            headline += (
+                f" The densest tenth of the population receives "
+                f"{inputs.equity.densest_decile_share:.0%} of it."
+            )
     elif inputs.air is not None:
         headline = (
             f"{inputs.plan_name} over {inputs.area_km2:.2f} km2 removes "
@@ -263,7 +271,7 @@ def brief_for(inputs: BriefInputs) -> Brief:
     else:
         uncertainties.append(
             f"This is {inputs.window} ({inputs.season}). Under the November-January "
-            "inversion the same emissions produce 6-7x the concentration they do in "
+            "inversion the same emissions produce 6-9x the concentration they do in "
             "summer, so the window is part of the answer rather than a detail."
         )
     if planted and inputs.tree_built_contrast_c < MIN_CONTRAST_FOR_RATIO_C:
@@ -280,10 +288,37 @@ def brief_for(inputs: BriefInputs) -> Brief:
             "It cancels in a difference, which is why only the difference is quoted."
         )
         uncertainties.append(
-            "The emission factors are literature values for a South Asian fleet and have "
-            "not been calibrated against OpenAQ stations, so the magnitude carries a scale "
-            "error of unknown size. The comparison between two plans survives it; the "
-            "absolute number does not."
+            "The emission factors are literature values for a South Asian fleet, so the "
+            "magnitude carries a scale error of unknown size. The comparison between two "
+            "plans survives it; the absolute number does not."
+        )
+        # Validation is season-specific, so the caveat has to be. Winter was scored against
+        # 53 OpenAQ monitors and beats a null model; summer beats one at no setting. Saying
+        # "unvalidated" on a winter figure understates it, and saying "validated" on a
+        # summer figure is simply false - so neither sentence can be the general one.
+        if inputs.season == "winter":
+            uncertainties.append(
+                "The winter spatial pattern was scored against 53 OpenAQ monitors over "
+                "2025-winter and beats a null model (mean absolute error 40.6 against "
+                "51.0 for predicting every station from the mean of the others). That is "
+                "evidence the inventory puts high concentrations in roughly the right "
+                "places; it is not evidence about the absolute level."
+            )
+        else:
+            uncertainties.append(
+                "The summer spatial pattern beats no null model at any setting tested, so "
+                "where the summer PM2.5 change falls across the tile is unvalidated. "
+                "Summer's boundary layer is deep and well mixed by mid-morning, so local "
+                "sources disperse before they make a pattern. Read the summer figure as a "
+                "magnitude, not as a map."
+            )
+        # OSM carries no brick kilns for Lahore - 0 in the tile and 0 in the wider region,
+        # checked rather than assumed - so a major winter source is absent from every
+        # modelled field. A ceiling on the core, not a tuning problem.
+        uncertainties.append(
+            "The inventory is roads-only because OpenStreetMap records no brick kilns "
+            "anywhere near Lahore. Kilns are a major winter source here, so a whole "
+            "source category the monitors can see is missing from the model."
         )
     if equity is not None:
         uncertainties.append(
@@ -296,8 +331,13 @@ def brief_for(inputs: BriefInputs) -> Brief:
         headline=headline,
         findings=tuple(findings),
         uncertainties=tuple(uncertainties),
-        # 'moderate' only where the physics has been checked against something real. The
-        # air core has not been, so any plan carrying an air figure drops to 'low'.
-        confidence="low" if air is not None or not planted else "moderate",
+        # 'moderate' only where the physics has been checked against something real, and
+        # never 'high'. A summer air figure drops to 'low' because its spatial pattern
+        # beats no null model; a winter one no longer has to, since it does (D21).
+        confidence=(
+            "low"
+            if not planted or (air is not None and inputs.season != "winter")
+            else "moderate"
+        ),
         expected_cooling_c=expected,
     )

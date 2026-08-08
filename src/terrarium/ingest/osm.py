@@ -72,6 +72,19 @@ SECONDS_PER_DAY = 86_400.0
 # in the peri-urban ring. A single fixed-chimney Bull's Trench kiln runs 1-3 g/s of PM2.5
 # while firing; this is the low end, because OSM's kiln coverage is patchy and a
 # generously-scaled inventory over a sparse point set is confidently wrong twice.
+#
+# **In practice this branch has never fired, and that is a data gap rather than a bug.**
+# Measured against Overpass on 2026-08-07, counting nodes and ways for these tags:
+#
+#     tile bbox (74.2533,31.4305 - 74.4641,31.6103)   0 kilns
+#     wider region (74.0,31.2 - 74.8,31.8)            0 kilns
+#
+# So OSM does not know about Lahore's kilns at all, and the inventory this module builds is
+# **roads-only by availability, not by design**. That is a ceiling on the air core rather
+# than a detail: kilns are a major winter PM2.5 source here, so a source category the
+# monitors can see is missing from every modelled field. It is part of why the validated
+# correlation tops out at +0.53 (D21), and no amount of dispersion tuning will lift it -
+# only a kiln dataset would. Checked before assuming a query bug; the tags below are fine.
 KILN_PM25_G_S = 1.0
 KILN_TAGS: tuple[tuple[str, str], ...] = (
     ("man_made", "kiln"),

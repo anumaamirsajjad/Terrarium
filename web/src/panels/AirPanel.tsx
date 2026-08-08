@@ -109,15 +109,37 @@ export default function AirPanel({ air, window, season }: AirPanelProps) {
             <>
               Winter is not a scale factor on summer. The inversion drops the mixing height
               to roughly a third of its summer value and slows lateral spread, so identical
-              emissions produce <strong>6–7&times;</strong> the concentration. The same
+              emissions produce <strong>6–9&times;</strong> the concentration. The same
               restriction therefore buys far more now than it would in June.
             </>
           ) : (
             <>
               Summer mixes deeply, so the same restriction buys a fraction of what it would
               under the winter inversion — where identical emissions produce{" "}
-              <strong>6–7&times;</strong> the concentration. Run this window in winter
+              <strong>6–9&times;</strong> the concentration. Run this window in winter
               before deciding the effect is small.
+            </>
+          )}
+        </p>
+
+        {/* Season-specific because the validation is. Winter was scored against 53 OpenAQ
+            monitors and beats a null model; summer beats one at no setting tested. Calling
+            a winter figure unvalidated understates it and calling a summer figure
+            validated is false, so there is no general sentence to write here. The brief
+            carries the same split in `dsl/explain.py`, where it is testable. */}
+        <p className={winter ? "result__note" : "result__caveat"}>
+          {winter ? (
+            <>
+              The <strong>winter</strong> pattern was scored against{" "}
+              <strong>53 OpenAQ monitors</strong> and beats a null model (error 40.6 against
+              51.0). That is evidence the inventory puts high concentrations in roughly the
+              right places — not evidence about the absolute level.
+            </>
+          ) : (
+            <>
+              The <strong>summer pattern is unvalidated</strong>: it beats no null model at
+              any setting tested, because summer air mixes too deeply for local sources to
+              leave one. Read the summer figure as a magnitude, not as a map.
             </>
           )}
         </p>

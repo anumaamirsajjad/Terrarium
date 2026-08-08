@@ -57,12 +57,16 @@ commands are included so each one can be re-checked rather than believed.
 | ~~A32~~ | ~~A dead primary key shadowed a working second provider~~ | **CLOSED** | dsl | fixed 2026-08-07 |
 | ~~A33~~ | ~~The air core modelled one *hour* against a *seasonal* observation~~ | **CLOSED** | cores | fixed 2026-08-07 |
 | ~~A34~~ | ~~Photo and voice were the only key-gated and only untestable features~~ | **CLOSED** | scope | removed 2026-08-07 |
+| ~~A35~~ | ~~The validated window was not in the cube the API serves~~ | **CLOSED** | data | fixed 2026-08-07 |
+| ~~A36~~ | ~~Nothing on screen said the summer air pattern is unvalidated~~ | **CLOSED** | dsl/web | fixed 2026-08-07 |
+| ~~A37~~ | ~~Seasonal magnitudes were coupled to the plume's fetch limit~~ | **CLOSED** | cores | fixed 2026-08-07 |
+| ~~A38~~ | ~~The 6-7x seasonal factor was stale; measured range is 6.3-8.9x~~ | **CLOSED** | docs | fixed 2026-08-07 |
 
 Severities: **P0** the demo does not run · **P1** shipped work the user cannot see ·
 **P2** a correctness hole with no symptom yet · **P3** claims resting on unrun validation ·
 **P4** repo and documentation hygiene · **P5** small, real, cheap.
 
-**All thirty-four are now closed** — A1–A8, A13–A17, A19, A20 on 2026-08-06, and
+**All thirty-eight are now closed** — A1–A8, A13–A17, A19, A20 on 2026-08-06, and
 everything else on 2026-08-07. **A12 is closed by deletion** — voice was removed on 2026-08-07, so the one feature no
 automated test could drive is no longer in the product (see **A34**).
 
@@ -1052,6 +1056,73 @@ well under 0.90 and still be kept.
 
 Below the floor, `POST /observations` answers **422 with the reader's own words**, so the
 person who took the photo learns why.
+
+## A35 — The validated window was not in the served cube — **CLOSED 2026-08-07**
+
+A9 validated 2025-winter, because that is the only window with enough working monitors —
+Lahore's low-cost network came online in 2025, so 2023 and 2024 have **2 usable stations**
+against 2025's **53**. The API meanwhile served `cube_phase9.zarr`, which stops at 2024. So
+the strongest evidence in the project was not visible in the product.
+
+**Closed** by building `cube_v2.zarr` (`--years 2023 2024 2025`, 12/12 variables populated,
+six windows, `validate_windows` clean) and moving `serve_zarr_store` to it once checked —
+the `zarr_store` / `serve_zarr_store` split working as intended. `window_years` now defaults
+to `[2023, 2024, 2025]` so a fresh build matches what is served.
+
+## A36 — Nothing on screen said the summer air pattern is unvalidated — **CLOSED 2026-08-07**
+
+After A33 the air core beat a null model **in winter** and at no setting in summer. The
+product said neither. A reader of a summer ΔPM2.5 had no way to know it rested on weaker
+evidence than the winter one.
+
+**Closed in `dsl/explain.py` first, not in the panel** — `CLAUDE.md` says a caveat attaches
+to a figure, `uncertainties` is never empty, and those caveats are *structural, so they can
+be tested*, which a React string cannot be. Winter cites the scoring; summer says plainly
+that its pattern is unvalidated and should be read as a magnitude rather than a map. The
+kiln gap (A1's old caveat) is attached to every air figure as well. `AirPanel` renders the
+same split, and `confidence` now reaches `moderate` on a winter air plan where it was
+pinned to `low`.
+
+## A37 — Seasonal magnitudes were coupled to the plume's fetch limit — **CLOSED 2026-08-07**
+
+`seasonal_kernel` normalised itself to `plume_kernel(...).sum()`. Correct, and quietly
+fragile: a plume's total scales with `kernel_radius_cells`, which is a **fetch limit** and
+means nothing for an isotropic kernel. So retuning a *plume* parameter silently moved every
+seasonal magnitude — measured, **68 %** for a radius change that altered this kernel's own
+shape not at all.
+
+**Closed** by stating the magnitude in closed form: a plume's crosswind integral is
+`1/(u·H)` at every downwind step, so over a fetch `L` its total is `L/(u·H)`. The seasonal
+kernel now normalises to that directly and never calls the plume. Deposition is normalised
+against the *undeposited* sum so it still removes mass rather than being scaled away.
+
+Two consequences, both measured:
+
+- **The field is rescaled by a uniform 1.2533×.** An affine fit absorbs a constant exactly,
+  so the A9 correlation (**+0.53**) and leave-one-out error (**40.6**) are unchanged; only
+  the reported slope moved, ×14.9 → ×11.9 (D23). Worth stating because the validation was
+  *not* re-run — the OpenAQ key had been cleared by then — and this is why it did not need
+  to be.
+- **The kernel gets its own radius**, six sigma rather than the plume's twenty. Identical to
+  0.000000 %, and **31 ms → 6.5 ms**.
+
+## A38 — The 6-7x seasonal factor was stale — **CLOSED 2026-08-07**
+
+A37's deposition change moved it, and re-measuring showed the old figure had been narrow
+anyway. Across every window pair on disk:
+
+```
+2023  6.3x     2024  8.9x     2025  8.7x
+```
+
+So the honest claim is **6-9x**, and it varies by year because it tracks each window's wind
+speed as well as its mixing height — the old text attributed it to mixing height and
+lateral spread alone. Corrected in `explain.py`, `library.py`, `AirPanel`, `air.py`,
+`CLAUDE.md` and the plan, with the tests that assert it.
+
+Worth recording how it was nearly missed: the first check used the *same* wind speed for
+both seasons and returned 3.2x, which looked like the headline finding had broken. It had
+not — the test was badly controlled.
 
 ## A33 — The air core modelled one *hour* against a *seasonal* observation — **CLOSED 2026-08-07**
 

@@ -131,7 +131,8 @@ Two things about it are as load-bearing as the LST naming rule:
   Lahore's PM2.5 is absent by construction. It cancels in a difference, which is why the
   API ships a delta and never a level. Call it **locally-generated PM2.5** everywhere.
 - **Winter is not a scale factor on summer.** The inversion drops the mixing height ~3x
-  and slows lateral spread, so identical emissions produce **6-7x** the concentration. The
+  and the season's winds are lighter, so identical emissions produce **6-9x** the
+  concentration (6.3x-8.9x measured across 2023, 2024 and 2025). The
   season is read from the cube rather than defaulted, because getting it wrong is worth
   that factor.
 

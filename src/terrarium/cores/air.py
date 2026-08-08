@@ -60,6 +60,15 @@ G_PER_M3_TO_UG_PER_M3 = 1e6
 # which is where the modelled delta has decayed to a few percent of its peak.
 AIR_SPILLOVER_CELLS = 10
 
+# How far upwind the tile's own sources still contribute, for the seasonal kernel's total.
+# 20 km is the tile: everything beyond it belongs to the regional background this core does
+# not model, so this is the same limitation as the missing background, stated in distance.
+SEASONAL_FETCH_M = 20_000.0
+
+# Where the seasonal kernel is truncated, in standard deviations. Six is where the field
+# stops changing to the float32 the API ships; the remaining tail is ~1e-8 of the peak.
+SEASONAL_RADIUS_SIGMAS = 6
+
 
 class AirParameters(BaseModel):
     """The dispersion constants. The air core's equivalent of the thermal core's booster.
@@ -183,15 +192,34 @@ def seasonal_kernel(
     only 44-56 ug/m3. The season this core exists to describe is the smog season, and that
     is the one it can now defend.
 
-    Mass is preserved exactly as the plume would have deposited it: the kernel is
-    normalised to the plume's own total, so the tile-wide concentration and the winter /
-    summer mixing-height ratio are unchanged. **Only the spatial distribution moves.** That
-    keeps every magnitude statement this core has ever made true, and fixes the one thing
-    that was measurably wrong.
+    ### Magnitude
+
+    Normalised so that the tile-integrated concentration from a 1 g/s source is
+    `SEASONAL_FETCH_M / (u * H)` - residence time over the tile, divided by ventilation.
+    That is the plume's own total written in closed form: a plume's crosswind integral is
+    `1/(u*H)` at every downwind step, so summing it over a fetch of L gives `L/(u*H)`.
+
+    Stated explicitly rather than obtained by calling `plume_kernel` and copying its sum,
+    which is what this did first. That version was correct and quietly fragile: the plume's
+    total scales with `kernel_radius_cells`, a *fetch limit* that means nothing for an
+    isotropic kernel, so retuning a plume parameter silently moved every seasonal
+    magnitude - by 68 % for a radius change that alters this kernel's own shape not at all.
+
+    Deposition is applied to the shape and normalised against the *undeposited* sum, so it
+    still removes mass rather than being scaled away.
+
+    The winter/summer ratio survives all of this untouched, because it lives in `u * H`:
+    measured across 2023, 2024 and 2025 it is **6.3x-8.9x**, varying with each window's
+    wind speed. That spread is the core's headline finding.
     """
     speed = max(wind_speed_ms, params.min_wind_speed_ms)
-    radius = params.kernel_radius_cells
     sigma_cells = params.seasonal_sigma_m / resolution_m
+    # Its own radius, not the plume's. `kernel_radius_cells` is a *fetch* limit: a plume
+    # accumulates roughly linearly with how far upwind sources still contribute, so 200
+    # cells there is load-bearing. A Gaussian is done at six sigma - measured, the field is
+    # identical to 200 cells at 0.000000 % - and carrying 20 sigma of zeros costs 31 ms
+    # against 6. Capped by the plume's radius so this can never be the larger of the two.
+    radius = min(int(np.ceil(SEASONAL_RADIUS_SIGMAS * sigma_cells)), params.kernel_radius_cells)
 
     offsets = np.arange(-radius, radius + 1, dtype="float64")
     distance_cells = np.hypot(offsets[:, None], offsets[None, :])
@@ -201,23 +229,15 @@ def seasonal_kernel(
     kernel = np.exp(-0.5 * (distance_cells / sigma_cells) ** 2)
     # Deposition along the path, as in the plume: the same loss per second of travel, with
     # radial distance standing in for the trajectory an isotropic average has smeared out.
-    kernel *= np.exp(-deposition_velocity_m_s * distance_m / ventilation)
+    kernel = kernel * np.exp(-deposition_velocity_m_s * distance_m / ventilation)
 
-    total = kernel.sum()
-    if total <= 0.0:
+    undeposited = float(np.exp(-0.5 * (distance_cells / sigma_cells) ** 2).sum())
+    if undeposited <= 0.0:
         raise ValueError("seasonal kernel summed to zero; sigma or resolution is degenerate")
 
-    # Normalised to the plume's total mass so magnitudes are untouched and only the pattern
-    # changes. Computed rather than assumed, because the plume's total depends on its own
-    # fetch limit and sigma_y growth and would drift if either were retuned.
-    reference = plume_kernel(
-        params,
-        wind_speed_ms=wind_speed_ms,
-        wind_direction_deg=0.0,
-        deposition_velocity_m_s=deposition_velocity_m_s,
-        resolution_m=resolution_m,
-    ).sum()
-    return np.asarray(kernel * (reference / total))
+    # Total = fetch / ventilation, expressed per cell rather than per unit area.
+    target = SEASONAL_FETCH_M / (ventilation * resolution_m * resolution_m)
+    return np.asarray(kernel * (target / undeposited))
 
 
 def plume_kernel(

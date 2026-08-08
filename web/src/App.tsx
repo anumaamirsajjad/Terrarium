@@ -679,10 +679,15 @@ export default function App() {
         )}
 
         {result && <ResultPanel result={result} />}
+        {/* Equity above air, deliberately. It is the only output here with no caveat
+            attached to it: the thermal figure carries a 2.5x hindcast correction and the
+            air figure carries a different qualification in each season. It is also the
+            only one of the three nobody else shows. Ordering is the cheapest way to say
+            which number we stand behind. */}
+        {result && <EquityPanel equity={result.equity} />}
         {result?.air && (
           <AirPanel air={result.air} window={result.window} season={result.season} />
         )}
-        {result && <EquityPanel equity={result.equity} />}
         {result && <BriefPanel brief={result.brief} />}
 
         {result && (

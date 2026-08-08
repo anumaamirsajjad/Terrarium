@@ -43,7 +43,7 @@ def test_every_preset_states_what_it_does_not_do() -> None:
 
 
 def test_the_winter_preset_carries_its_season() -> None:
-    # Without it the same restriction would be scored in summer and read 6-7x weaker.
+    # Without it the same restriction would be scored in summer and read 6-9x weaker.
     assert str(preset("winter-inversion").plan.season) == "winter"
 
 

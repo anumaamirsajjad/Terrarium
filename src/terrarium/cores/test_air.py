@@ -10,6 +10,7 @@ import xarray as xr
 
 from terrarium.cores.air import (
     EMISSION_VARIABLE,
+    SEASONAL_FETCH_M,
     AirParameters,
     concentration,
     leave_one_station_out,
@@ -266,25 +267,63 @@ def test_the_plume_mode_still_only_travels_downwind() -> None:
     assert abs(field[40, 5]) < 1e-12, "nothing travels upwind"
 
 
-def test_the_seasonal_kernel_preserves_the_plume_s_total_mass() -> None:
-    """Only the *pattern* changes, which is what keeps every magnitude claim true.
+def test_the_seasonal_kernel_integrates_to_fetch_over_ventilation() -> None:
+    """The magnitude is stated in closed form, not copied from the plume.
 
-    The winter/summer ratio, the tile total and the emission-factor caveat all rest on the
-    kernel's integral, and the seasonal kernel is normalised to the plume's own.
+    A plume's crosswind integral is 1/(u*H) at every downwind step, so over a fetch L its
+    total is L/(u*H). Asserting that directly is what decouples this kernel from
+    `kernel_radius_cells`, which is a *fetch* limit and means nothing here.
     """
-    args = {"wind_speed_ms": 1.5, "deposition_velocity_m_s": 0.002, "resolution_m": RES}
-    seasonal = seasonal_kernel(SUMMER, **args)
-    plume = plume_kernel(SUMMER, wind_direction_deg=WESTERLY, **args)
+    speed, height = 1.5, SUMMER.mixing_height_m
+    kernel = seasonal_kernel(
+        SUMMER, wind_speed_ms=speed, deposition_velocity_m_s=0.0, resolution_m=RES
+    )
+    expected = SEASONAL_FETCH_M / (speed * height * RES * RES)
 
-    assert seasonal.sum() == pytest.approx(plume.sum(), rel=1e-9)
-    # Isotropic: opposite offsets carry the same weight, which the plume never does.
-    centre = SUMMER.kernel_radius_cells
-    assert seasonal[centre, centre + 12] == pytest.approx(seasonal[centre, centre - 12])
-    assert seasonal[centre + 12, centre] == pytest.approx(seasonal[centre, centre + 12])
+    assert kernel.sum() == pytest.approx(expected, rel=1e-6)
+
+
+def test_the_seasonal_kernel_is_isotropic() -> None:
+    """Opposite offsets carry equal weight, which the plume never does."""
+    kernel = seasonal_kernel(
+        SUMMER, wind_speed_ms=1.5, deposition_velocity_m_s=0.002, resolution_m=RES
+    )
+    centre = kernel.shape[0] // 2
+
+    assert kernel[centre, centre + 12] == pytest.approx(kernel[centre, centre - 12])
+    assert kernel[centre + 12, centre] == pytest.approx(kernel[centre, centre + 12])
+
+
+def test_the_plume_s_fetch_limit_does_not_move_seasonal_magnitudes() -> None:
+    """The coupling this normalisation exists to remove.
+
+    The first version normalised to `plume_kernel(...).sum()`, and a plume's total scales
+    with `kernel_radius_cells`. So changing a *plume* parameter moved every seasonal
+    magnitude by 68 %, while altering this kernel's own shape not at all.
+    """
+    args = {"wind_speed_ms": 0.64, "deposition_velocity_m_s": 0.001, "resolution_m": RES}
+    wide = seasonal_kernel(SUMMER.model_copy(update={"kernel_radius_cells": 200}), **args)
+    narrow = seasonal_kernel(SUMMER.model_copy(update={"kernel_radius_cells": 120}), **args)
+
+    assert wide.sum() == pytest.approx(narrow.sum(), rel=1e-9)
+
+
+def test_deposition_removes_mass_from_the_seasonal_total() -> None:
+    """Normalised against the *undeposited* sum, so deposition is a loss, not a rescale."""
+    args = {"wind_speed_ms": 1.0, "resolution_m": RES}
+    clean = seasonal_kernel(SUMMER, deposition_velocity_m_s=0.0, **args)
+    depositing = seasonal_kernel(SUMMER, deposition_velocity_m_s=0.02, **args)
+
+    assert depositing.sum() < clean.sum()
 
 
 def test_the_seasonal_kernel_still_concentrates_under_a_winter_inversion() -> None:
-    """The 6-7x seasonal factor is the core's headline finding and must survive the change."""
+    """The seasonal factor is the core's headline finding and must survive the change.
+
+    Measured on the real cubes it is 6.3x-8.9x, varying by year because it tracks each
+    window's wind speed as well as its mixing height. Asserted loosely here because the
+    kernel alone, at one fixed wind speed, only carries the mixing-height half.
+    """
     args = {"wind_speed_ms": 1.5, "deposition_velocity_m_s": 0.001, "resolution_m": RES}
     winter = seasonal_kernel(AirParameters.for_season("winter"), **args)
     summer = seasonal_kernel(AirParameters.for_season("summer"), **args)
