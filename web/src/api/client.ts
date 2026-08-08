@@ -255,56 +255,6 @@ export interface PlanResponse {
   simulate_request: SimulateRequest;
 }
 
-// ------------------------------------------------------- citizen observations ---
-
-export type ObservationCategory = "shade_deficit" | "canopy" | "air_source" | "other";
-
-/**
- * One citizen photo as a vision model read it. **A report, not a measurement** — it is
- * drawn on the same grid as the modelled layers so the two can be compared, and it never
- * enters the cube.
- */
-export interface Observation {
-  category: ObservationCategory;
-  description: string;
-  /** 1 = worth noting, 5 = severe. The model's judgement. */
-  severity: number;
-  /** The model's own confidence. Shown, never used as a filter. */
-  confidence: number;
-}
-
-export interface StoredObservation {
-  id: number;
-  observation: Observation;
-  lon: number;
-  lat: number;
-  /** The cell the API placed it in, from the submitted coordinates. */
-  row: number;
-  col: number;
-}
-
-export interface ObservationListResponse {
-  observations: StoredObservation[];
-  /** A model name, or a sentence saying none is configured — this path has no fallback. */
-  reader: string;
-  /** Always false. Observations vanish when the process restarts. */
-  persisted: boolean;
-}
-
-export interface ObservationLayerResponse {
-  layer: LayerResponse;
-  count: number;
-  /** Always false, and the reason this is not served from /cube/layer. */
-  measured: boolean;
-}
-
-export interface ObservationRequest {
-  image_base64: string;
-  mime_type: string;
-  lon: number;
-  lat: number;
-}
-
 export interface PlanRequest {
   geometry: GeoJsonPolygon;
   /** Exactly one of these three. */
@@ -401,21 +351,6 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
-
-  /**
-   * Read a citizen photo. **503 when no vision model is configured** — the one endpoint
-   * here with no offline fallback, because no rule parser can read a photograph.
-   */
-  submitObservation: (body: ObservationRequest) =>
-    request<StoredObservation>("/observations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-
-  observations: () => request<ObservationListResponse>("/observations"),
-
-  observationLayer: () => request<ObservationLayerResponse>("/observations/layer"),
 };
 
 export { API_BASE };

@@ -36,7 +36,6 @@ ALIASES = {
     "Equity": "EquityResponse",
     "Air": "AirResponse",
     "DecileShare": "DecileShareResponse",
-    "StoredObservation": "ObservationResponse",
     "PlantTreesAction": "PlantTrees",
     "RestrictVehiclesAction": "RestrictVehicles",
 }

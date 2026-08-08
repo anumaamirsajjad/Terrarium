@@ -17,12 +17,12 @@ Three simulators, all reading one aligned raster cube, all reached through one
 | Core | Answers | Method |
 |---|---|---|
 | **thermal** | Δ **mid-morning land surface temperature** | LightGBM emulator trained on Landsat ST_B10 |
-| **air** | Δ **locally-generated PM2.5** | steady-state Gaussian plume over an OSM emission inventory, one FFT over the tile |
+| **air** | Δ **locally-generated PM2.5** | isotropic seasonal dispersion over an OSM emission inventory, one FFT over the tile |
 | **equity** | who receives the cooling | person-degrees by population decile, over WorldPop |
 
 Around them:
 
-- **A plan language** (`dsl/`). "Plant 5,000 trees", in English or Urdu, typed or spoken.
+- **A plan language** (`dsl/`). "Plant 5,000 trees", typed in English or Urdu.
   `POST /plan` checks it against the polygon *before* any core runs and **refuses** what
   does not fit, with the arithmetic that refused it — a plan that cannot fit must not come
   back as a small delta that reads like a plan which merely worked badly.
@@ -31,9 +31,6 @@ Around them:
 - **A deterministic brief.** Findings, uncertainties and a confidence that is never
   `"high"`, written from templates rather than by a model, so it cannot restate a figure it
   was not given.
-- **Citizen photos.** `POST /observations` reads a street photo into a typed observation and
-  places it on the same 201 × 202 grid — beside the cube, never inside it.
-- **Voice capture** in English and Urdu, using the browser's own `SpeechRecognition`.
 - **A council brief**, printed to PDF by the browser's own print dialog.
 
 ### Two naming rules, and they are not pedantry
@@ -43,19 +40,19 @@ Around them:
   after the overpass. Never "temperature" unqualified, never "afternoon".
 - **Locally-generated PM2.5.** The inventory covers this tile's own roads, so the regional
   background that dominates Lahore's absolute PM2.5 is absent by construction. Quote deltas,
-  not levels, and say the magnitudes are **uncalibrated**. `scripts/validate_air.py` has now
-  run against 53 OpenAQ monitors and the core **does not beat a null model** — the delta
-  still stands, because the background cancels in a difference, but the *spatial* pattern
-  is tested and unevidenced. See [docs/AUDIT.md](docs/AUDIT.md) A9.
+  not levels, and say the magnitudes are **uncalibrated**. `scripts/validate_air.py` has
+  run against 53 OpenAQ monitors: the core **beats the null model in winter** (MAE 40.6 vs
+  51.0, corr +0.53) using the seasonal dispersion kernel, and **does not in summer** at any
+  setting. Quote winter. See [docs/AUDIT.md](docs/AUDIT.md) A9.
 
 ### Cost
 
-**Nothing here requires a credit card.** Every data source, library and basemap tile is
-free and keyless. The one optional key is `TERRARIUM_GEMINI_API_KEY` (free tier, no card):
-without it the planner falls back to a deterministic regex parser and everything still
-works — the single exception is `POST /observations`, which answers **503 with the reason**,
-because no rule parser can read a photograph. `TERRARIUM_OPENAQ_KEY` (also free) is needed
-only by `scripts/validate_air.py`.
+**Nothing here requires a credit card, and nothing requires a key.** Every data source,
+library and basemap tile is free and keyless, and **every route works with no key at all**:
+with none configured the planner falls back to a deterministic rule parser that reads
+English and Urdu. `TERRARIUM_GROQ_API_KEY` or `TERRARIUM_GEMINI_API_KEY` (both free tier,
+no card) only make free-text parsing more flexible; `TERRARIUM_OPENAQ_KEY` (also free) is
+needed only by `scripts/validate_air.py`.
 
 **New here, or just want to use it?** [docs/USER_GUIDE.md](docs/USER_GUIDE.md) is the
 plain-language walkthrough: what every control does, a three-minute test run, and an honest
@@ -136,8 +133,6 @@ The routes, in the order you would meet them:
 | `GET /plan/presets` | the costed intervention library. Answers without a cube |
 | `POST /plan` | text \| preset \| Plan → a checked, costed `/simulate` body, or **422 with the arithmetic that refused it** |
 | `POST /simulate` | GeoJSON polygon → ΔLST + equity + ΔPM2.5 (when the plan removes emissions) + brief |
-| `POST /observations` | citizen photo → typed observation on the grid. The one route that needs a key: **503** without one |
-| `GET /observations`, `GET /observations/layer` | what has been reported this run, as a list and as a raster |
 
 **A raster crosses the wire as base64 float32 plus bounds**, never as GeoJSON features —
 40,602 cells as features is tens of megabytes describing a grid that three numbers already

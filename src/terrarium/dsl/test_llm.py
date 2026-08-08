@@ -151,23 +151,6 @@ def test_groq_sends_a_user_agent_and_a_bearer_token(monkeypatch: pytest.MonkeyPa
     assert captured["body"]["response_format"] == {"type": "json_object"}
 
 
-def test_groq_inlines_the_image_as_a_data_uri(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, Any] = {}
-
-    def fake_urlopen(request: Any, timeout: float | None = None) -> _Response:
-        captured["body"] = json.loads(request.data.decode())
-        return _Response(_choice('{"category": "canopy"}'))
-
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    GroqAdapter(api_key="secret").complete_json_with_image(
-        system="s", user="u", image_base64="QUJD", mime_type="image/jpeg"
-    )
-
-    parts = captured["body"]["messages"][1]["content"]
-    assert parts[0] == {"type": "text", "text": "u"}
-    assert parts[1]["image_url"]["url"] == "data:image/jpeg;base64,QUJD"
-
-
 def test_an_empty_groq_completion_is_unavailable_not_an_empty_plan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -203,8 +186,6 @@ class _Dead:
     def complete_json(self, **_: object) -> str:
         raise LLMUnavailable("401 Invalid API Key")
 
-    def complete_json_with_image(self, **_: object) -> str:
-        raise LLMUnavailable("401 Invalid API Key")
 
 
 class _Live:
@@ -213,8 +194,6 @@ class _Live:
     def complete_json(self, **_: object) -> str:
         return '{"from": "text"}'
 
-    def complete_json_with_image(self, **_: object) -> str:
-        return '{"from": "vision"}'
 
 
 def test_a_dead_primary_does_not_shadow_a_working_secondary() -> None:
@@ -227,12 +206,6 @@ def test_a_dead_primary_does_not_shadow_a_working_secondary() -> None:
     chain = FallbackAdapter(adapters=(_Dead(), _Live()))
 
     assert chain.complete_json(system="s", user="u") == '{"from": "text"}'
-    assert (
-        chain.complete_json_with_image(
-            system="s", user="u", image_base64="QQ==", mime_type="image/jpeg"
-        )
-        == '{"from": "vision"}'
-    )
 
 
 def test_the_chain_stops_at_the_first_provider_that_answers() -> None:

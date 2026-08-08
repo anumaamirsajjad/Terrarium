@@ -1,6 +1,7 @@
 # Terrarium — what it does, how to try it, what works
 
-Plain-language guide. Written 2026-08-07.
+Plain-language guide. Written 2026-08-07, updated the same day after the photo and voice
+features were removed and the air model was fixed.
 
 For the engineering detail see [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (what was
 built and why) and [AUDIT.md](AUDIT.md) (what is broken, with evidence). This file is the
@@ -26,7 +27,7 @@ Everything runs on free, public data. No credit card anywhere.
 | What | Plain meaning | How good is it? |
 |---|---|---|
 | **Heat** | Ground-surface temperature at ~10:30 in the morning | Best-supported. Trained on real satellite readings of this tile |
-| **Air** | Extra PM2.5 that *this tile's own roads* make | Weakest. See §7 — it failed its validation |
+| **Air** | Extra PM2.5 that *this tile's own roads* make | Checked against 53 real monitors. **Works in winter, not in summer** — see §7 |
 | **Fairness** | Which income groups actually get the cooling | Solid arithmetic, but it inherits the heat model's error |
 
 ### Two phrases you must not shorten
@@ -65,18 +66,20 @@ Open <http://localhost:5173>.
 > If Vite says "port in use, trying 5174", stop it, free 5173, and start again — otherwise
 > the page loads but every request fails.
 
-### Optional: turn on the AI features
+### Optional: a smarter text parser
 
-Everything works without this. Two features get better with a key, one needs it:
+**Nothing needs a key.** Every button and every route works without one. The only thing a
+key buys is more flexible free-text understanding on the "type a sentence" box — without
+one, a built-in rule reader handles it, and it covers the phrasings a demo actually uses,
+in English and Urdu.
 
 ```bash
-# .env in the project root (already gitignored — never commit it)
+# .env in the project root (already gitignored — never commit real keys)
 TERRARIUM_GROQ_API_KEY=...     # free, no card: console.groq.com/keys
 TERRARIUM_GEMINI_API_KEY=...   # free, no card: aistudio.google.com/apikey
 ```
 
-Either one works on its own. If both are set, Groq is tried first and Gemini is the
-backup.
+Either works alone. With both, Groq is tried first and Gemini takes over if it fails.
 
 ---
 
@@ -100,10 +103,6 @@ Pick what the map is coloured by:
 - `elevation_m` — height
 - `population` — people per cell
 - `pm25_emission_g_s` — where the road pollution comes from
-- `Citizen reports (not measured)` — photos people sent in
-
-> On the citizen layer, an **uncoloured cell means nobody photographed it** — not that it
-> is fine. That distinction is deliberate.
 
 ### Intervention — the main event
 
@@ -156,14 +155,6 @@ With no API key a plain rule-reader handles it, which covers normal phrasings.
 - **Equity panel** — splits people into ten income groups and shows who gets the cooling.
 - **Brief panel** — plain-English findings and, always, a list of caveats.
 
-### Citizen photos
-
-Click **Add a photo**, click a spot on the map (an amber dot appears), attach a street
-photo. An AI reads it and files it as canopy / air source / shade problem with a severity.
-
-**This is the only feature that needs an API key.** Without one it returns a clear "no
-vision model configured" message rather than pretending.
-
 ### Council brief
 **Print brief** opens your browser's print dialog with a clean one-page summary. Save as
 PDF from there.
@@ -189,51 +180,49 @@ PDF from there.
 
 Everything below was run and checked on 2026-08-07.
 
-- ✅ All eight API endpoints return 200.
+- ✅ All six API endpoints return 200.
 - ✅ Draw → plan → simulate → map, end to end.
-- ✅ **Speed: 0.84 seconds** for a full simulation (heat + air + equity + brief).
+- ✅ **Speed: under a second** for a full simulation (heat + air + equity + brief).
 - ✅ Heat, air and equity models all produce results, with the window named on every one.
 - ✅ Presets, typed sentences (English + Urdu), and sliders.
 - ✅ Refusals with visible arithmetic.
 - ✅ Compare slider, all four view tabs, legends.
-- ✅ Citizen photo reading, when a key is set.
-- ✅ Voice input in Chrome and Edge.
 - ✅ Printable brief.
-- ✅ **453 backend tests and 96 frontend tests pass.** Type and lint checks clean.
-- ✅ Works with **no API keys at all** — only the photo feature stops.
+- ✅ **411 backend tests and 79 frontend tests pass.** Type and lint checks clean.
+- ✅ **Works with no API key of any kind.** Nothing is gated behind a signup.
 
 ---
 
 ## 7. What is broken or limited
 
-Honest list. Nothing here stops the demo, but two items change what you may *claim*.
+### 🟢 The air model now passes — in winter
 
-### 🔴 The air model failed its accuracy test
+This changed on 2026-08-07 and it is the biggest improvement in the project.
 
-This is the big one. We checked it against **53 real air monitors** in Lahore. It **does
-not beat a dumb model** that just guesses the city average.
+It was checked against **53 real air monitors** in Lahore and originally **lost** to a dumb
+model that just guesses the city average. The cause turned out to be a mismatch of
+timescale: the model used a **single wind direction** for a whole three-month season, but
+the real wind over that season blew across almost the entire compass (68° to 331°). So it
+painted a narrow streak one way while the season's air went everywhere.
 
-```
-2025-winter, 53 stations:  our error 50.995  vs  dumb guess 50.953
-```
+Replacing that with an **even, all-directions spread** fixed it:
 
-Why: the pollution made *inside* this square is only about **3–7%** of what a monitor
-actually breathes. The rest blows in from outside Lahore and drowns out the signal.
+| version | agreement with monitors | error | beats the dumb model? |
+|---|---|---|---|
+| old, single wind direction | +0.16 | 51.0 | ❌ no |
+| **new, seasonal spread** | **+0.53** | **40.6** | ✅ **yes** |
 
-**What you may still say:** "removing this traffic reduces locally-generated PM2.5 by X" —
-the *change* is still meaningful, because the outside pollution is the same before and
-after and cancels out.
+Two honest caveats:
 
-**What you may no longer say:** "this street is more polluted than that one." That is the
-exact claim we tested, and it did not hold up.
+- **Summer still fails**, at every setting we tried. In summer the air mixes through 800 m
+  of depth by mid-morning, so local traffic disperses before it can make any pattern — and
+  only 15 monitors were usable. **Quote winter results. Say summer is unvalidated.**
+- The spread distance (1 km) was **tuned on the same 53 monitors** the score is quoted
+  from, so the score flatters itself a little. It is not a knife edge though — anything
+  from 400 m to 2 km beats the dumb model.
 
-### 🔴 Both API keys are currently dead
-
-The Groq and Gemini keys in `.env` were revoked (they were pasted into a chat, and the
-providers auto-revoke leaked keys). Right now:
-
-- Typed sentences still work — they fall back to the rule reader.
-- **Photo upload will fail.** You need a fresh free key.
+Still true: quote the **change**, never the level. Most of Lahore's real smog blows in from
+outside the square and is not counted.
 
 ### 🟠 The heat model over-predicts by ~2.5×
 
@@ -248,13 +237,18 @@ About −0.0003 µg/m³. Real, but too small to see. Trees are for heat here, no
 
 | Thing | Detail |
 |---|---|
-| Voice | Chrome/Edge only. Firefox and Safari show no microphone button (by design). It has no automated test — the one thing in the project checked only by hand |
 | `data/processed/cube.zarr` | A known-bad half-built file. Kept on purpose so the safety check has something to reject. The app serves `cube_phase9.zarr` |
 | Costs | Rough literature prices, marked `calibrated: false`. Fine for ranking two plans, not for a budget |
-| Photos never enter the cube | On purpose — a photo read by an AI is not a measurement, and mixing them would ruin the data |
 | Brick kilns | The pollution map found **0 kilns**, roads only. Unclear if that is real or a data gap |
 | Rebuilding data | The OpenStreetMap service times out often. Never rebuild the night before a demo |
-| Photo quality gate | Photos the AI can't read are rejected with a message. Threshold measured from 20 test images |
+| Only four windows | The served cube covers 2023 and 2024. A 2025 cube exists for validation but is not what the app serves |
+
+### ⚪ Removed on purpose
+
+**Citizen photos** and **voice input** were both built, both worked, and were both removed
+on 2026-08-07. The photo feature was the only thing in the project that *required* an API
+key, and voice was the only feature no automated test could drive. Cutting them means every
+route now works with no key and nothing is checked by hand only.
 
 ---
 
@@ -264,8 +258,7 @@ About −0.0003 µg/m³. Real, but too small to see. Trees are for heat here, no
 |---|---|---|
 | Page loads, everything errors | Frontend not on port 5173 | Free 5173, restart `npm run dev` |
 | Every data request says 503 | Backend started but the data file failed its check | Read the backend startup log — it names the reason |
-| Photo upload fails | No working API key | Get a free one, put it in `.env`, restart |
-| Typed plan gives a basic result | Falling back to the rule reader | Normal without a key. Also happens if the key is dead |
+| Typed plan gives a basic result | Falling back to the rule reader | Normal without a key, and fine — it handles ordinary phrasings |
 | "Run simulation" greyed out | No polygon yet | Draw one and click Finish |
 | ΔPM2.5 tab missing | Your plan removed no traffic | Raise the emissions slider |
 
@@ -273,15 +266,15 @@ About −0.0003 µg/m³. Real, but too small to see. Trees are for heat here, no
 
 ## 9. The honest summary
 
-The **product works**. Draw, plan, simulate, read, print — all of it, fast, on real data,
-for free.
+The **product works**, and works with no key of any kind. Draw, plan, simulate, read,
+print — all of it, fast, on real data, for free.
 
 The **heat model is the credible one**. It learned from this tile's own satellite record
 and its main error is known and corrected on screen.
 
-The **air model is built and tested and did not pass.** It gives sensible-looking,
-physically-reasonable differences, and its spatial detail has no evidence behind it. Say
-"change", never "level", and never rank two streets against each other.
+The **air model now earns its place in winter.** It was tested against real monitors,
+failed, was diagnosed, fixed, and re-tested — and it now beats the baseline by 20%. Summer
+is still unvalidated and should be described that way.
 
 The **equity model** is the most under-sold part — nobody else shows *who* gets the
 cooling, and the arithmetic there is sound.

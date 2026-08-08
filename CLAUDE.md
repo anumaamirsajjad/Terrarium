@@ -177,20 +177,17 @@ stops being read.
 Costs are `calibrated=False` everywhere: literature unit figures, in the same category as
 the air core's emission factors. Good for ranking two plans, not a budget.
 
-**Citizen observations get the grid, not the cube** (D19). `dsl/observe.py` reads a photo
-into a typed `Observation`; `api/observations.py` places it on the canonical 201×202 grid
-and keeps it there — its own store, its own endpoint, `measured: false` on every response,
-and no route into `cube.zarr`. Every cube variable is an instrument reading with a known
-error, and a language model's reading of a phone photo is not; merging them would make
-"what does the cube say" unanswerable. The store is bounded and unpersisted, unreported
-cells are **NaN** rather than 0, and a cell holds the **worst** severity reported rather
-than the mean. This is also the one path in the project with no offline fallback — no rule
-parser can read a photograph — so with no key it answers **503 with the reason** rather
-than an empty observation, which would render as a report nobody made.
+**Citizen photos and voice capture were removed on 2026-08-07.** Both were built and
+worked; both were cut because they were the only features that could not be defended
+offline. The photo path was the single route in the project that *required* a key — no
+rule parser can read a photograph — and voice was the single feature no automated test
+could drive. Removing them makes the zero-budget claim unconditional: **every route now
+works with no key at all.** D19 and D20 are closed as withdrawn, not as failed; the
+reasoning they recorded is still the reason not to reintroduce them casually.
 
-The rule parser reads **English and Urdu** (D20). That is not decoration: voice capture is
-`ur-PK`-capable, and with no LLM key the transcript goes straight to this parser, so an
-English-only parser would make "voice in Urdu" a microphone that produces a 422. Eastern
+The rule parser still reads **English and Urdu**. It outlived the voice capture it was
+originally written for, and is kept for the plainer reason: this is a tool about Lahore,
+and a Lahore resident typing in Urdu should not get a 422. Eastern
 Arabic-Indic digits are folded to ASCII before any pattern runs — ۵۰۰۰ matches no `\d`, and
 without that pass an Urdu sentence parses as a plan with no quantity in it.
 
@@ -318,21 +315,18 @@ terrarium/
 │   │   ├── validate.py     #   plan + measured polygon -> what /simulate takes, or refusal
 │   │   ├── library.py      #   costed presets. calibrated=False everywhere
 │   │   ├── planner.py      #   text -> Plan: model first, deterministic regex always.
-│   │   │                   #   English + Urdu, digits folded (D20)
+│   │   │                   #   English + Urdu, digits folded
 │   │   ├── explain.py      #   numbers -> brief. Templates, never a model
-│   │   ├── observe.py      #   citizen photo -> typed Observation. Never enters the cube
 │   │   └── llm.py          #   ← the ONLY file that talks to an LLM (D18). Optional
 │   └── api/
 │       ├── main.py         #   app factory, CORS, router wiring, loads the runtime
 │       ├── runtime.py      #   cube + model loaded ONCE; per-window validation
 │       ├── geometry.py     #   GeoJSON -> mask, lon/lat -> cell (D6). Only place doing this
 │       ├── measure.py      #   what the tile says a polygon can hold, for dsl/validate
-│       ├── observations.py #   in-memory citizen reports, rendered onto the grid (D19)
 │       ├── deps.py         #   the runtime as a FastAPI dependency
 │       ├── routes/         #   HTTP endpoints (thin)
 │       └── schemas/        #   Pydantic request/response contracts
 ├── web/                    # React + Vite + MapLibre + deck.gl
-│                           #   src/voice/     Web Speech capture, en + ur (D20)
 │                           #   src/panels/BriefDocument.tsx  print-to-PDF council brief
 ├── data/                   # gitignored: raw/ interim/ processed/
 │                           #   raw/pak_ppp_2020_constrained.tif (WorldPop, cached)
@@ -381,19 +375,27 @@ PM2.5**, and quote deltas rather than levels. Also say the magnitudes are **unca
 the emission factors are literature figures for a South Asian fleet, not measurements of
 Lahore's.
 
-**`validate_air.py` has now run, and the result is negative — say that, not "unvalidated".**
-Scored against 53 OpenAQ monitors over 2025-winter, the core **does not beat a null model**
-(MAE 50.995 against a null 50.953; corr +0.157; summer is worse still at n=15). The tile's
-own contribution is 0.3–13 µg/m³ against monitors reading 114–322, so it is ~3–7 % of the
-signal and the regional background swamps any spatial pattern. Two consequences, and the
-second is the one people get wrong:
+**`validate_air.py` has run, and the core now passes for winter.** Scored against 53
+OpenAQ monitors over 2025-winter it **beats the null model** — MAE **40.6** against a null
+**51.0**, correlation **+0.53**. That took a change of model, not a change of wording:
 
-- **The delta survives.** The background is identical either side of an intervention and
-  cancels, which is the whole reason the API ships a difference and never a level.
-- **The spatial pattern does not.** "This street is worse than that one" is precisely what
-  was tested and precisely what found no skill. Do not claim it. The fitted ×3.49 slope is
-  *not* applied and should not be — at that correlation it is not a calibration, it is a
-  line through noise.
+- **The dispersion kernel is `seasonal_kernel`, not `plume_kernel`.** Every window in the
+  cube is a *season*, and a single-direction plume answers a question about one *hour*.
+  Over 2025-winter the overpass-hour wind spans 68°–331°, so the plume pointed a narrow
+  streak one way while the season's air went everywhere. The plume scored corr **+0.157**
+  and *lost* to the null model. Averaging the plume over a 12-bin wind rose is **worse**
+  still (+0.018) — the error is in the kernel's radial profile, not only its direction.
+- **`seasonal_sigma_m` is the one fitted number in this core.** 1 km, chosen where
+  leave-one-station-out minimises error, on the same 53 stations the MAE is quoted from —
+  so that MAE is optimistic. The optimum is broad (400 m–2 km all beat the null), which is
+  the reassurance that it is not a knife edge.
+
+**Summer is still not validated and beats the null at no sigma.** Its boundary layer is
+800 m and well mixed by mid-morning, so local sources disperse before they make a pattern,
+and only 15 monitors span 44–56 µg/m³. Quote winter results; say summer is unvalidated.
+
+The delta was never in doubt — the background is identical either side of an intervention
+and cancels, which is why the API ships a difference and never a level.
 
 **Name the temperature precisely.** Landsat crosses Lahore at ~10:30 local and ST_B10
 measures the *surface*, not the air. Surface temperature runs several degrees above air
@@ -413,7 +415,7 @@ carry CRS in `.rio.crs`. Never `.values` a lazy array until you actually need it
 
 The point is one convincing vertical slice, not four shallow ones. Scope is **phase-gated,
 not permanently closed**: the plan schedules equity, an air dispersion core, a DSL, agents,
-voice and VLM into later phases. That is a roadmap, not a licence to start them.
+and an agent layer into later phases. That is a roadmap, not a licence to start them.
 
 **The rule:** build the phase that is currently open, in full, and nothing from a later
 one. Adding a placeholder module, an empty interface, or a "just the stub for now" ahead
@@ -447,12 +449,11 @@ The LLM went one better than free: it is **optional**. `TERRARIUM_GEMINI_API_KEY
 and everything still works, because the DSL, the validators, the costs and the brief are
 all deterministic and the planner falls back to a regex parser. Keep it that way — the
 demo must never require a key that a rate limit can revoke mid-pitch. The single exception
-is `POST /observations`, where no fallback is possible and the route says so.
+There is no longer any exception: the photo route that needed a key was removed, so a
+deployment with no key at all is a fully working deployment.
 
-Phase 11 added two more services that were budgeted for and not bought: **voice** is the
-browser's own `SpeechRecognition` (LiveKit meters minutes; Whisper needs a host), and the
-**council brief PDF** is the browser's own print dialog (WeasyPrint would have been a
-dependency and a font stack to reproduce a button every browser ships).
+Phase 11's **council brief PDF** is the browser's own print dialog, rather than WeasyPrint
+and a font stack, to reproduce a button every browser already ships.
 
 ---
 
@@ -474,11 +475,6 @@ uv run terrarium-api             # API on :8000, docs at /docs
                                  #                         + ΔPM2.5 when the request
                                  #                           removes emissions
                                  #                         + brief (findings + uncertainties)
-                                 #   POST /observations    citizen photo -> typed observation
-                                 #                         on the grid. The ONE route that
-                                 #                         needs a key: 503 without one
-                                 #   GET  /observations    what has been reported this run
-                                 #   GET  /observations/layer  those reports as a raster
                                  #   serves TERRARIUM_SERVE_ZARR_STORE, not the build path
 uv run pytest                    # tests
 uv run ruff check src/ scripts/  # lint
@@ -513,8 +509,7 @@ cd web && npm install && npm run dev      # frontend on :5173 (the API's CORS al
                                           #   fallback port, free 5173 instead)
 cd web && npm run test                    # vitest: raster decode, ramps, compare split,
                                           #   equity verdicts + panel render, scenario
-                                          #   presets + brief render, speech support
-                                          #   detection, printable brief, photo panel
+                                          #   presets + brief render, printable brief
 cd web && npm run build                   # tsc -b + production bundle
 ```
 

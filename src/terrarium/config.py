@@ -244,29 +244,12 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.6-flash"
 
     # Groq: the second free-tier provider, and the one tried first (`dsl.llm.resolve_adapter`).
-    # Free, no card, so it stays inside D13. Its model is the only vision-capable one on that
-    # tier, which the citizen-photo path requires; the other fourteen are text, audio or
-    # prompt-guard. Two providers is the actual remedy for the retirement above — one
-    # provider means one withdrawal notice is an outage.
+    # Free, no card, so it stays inside D13. Two providers rather than one because the
+    # failure that prompted it was a model *retirement* - see the note above - and a single
+    # provider makes one withdrawal notice an outage.
     groq_api_key: str | None = None
-    groq_model: str = "qwen/qwen3.6-27b"
+    groq_model: str = "llama-3.3-70b-versatile"
 
-    # Below this self-reported confidence, `POST /observations` refuses the photo instead
-    # of placing it on the grid. **Measured, not chosen** (2026-08-07): 20 images through
-    # the real reader, 12 real South Asian street photographs against 8 synthetic
-    # unreadables — noise, solid fills, a gradient, rendered text, a 20 px blur and an 8x8
-    # pixelation.
-    #
-    #   synthetic unreadable (n=8)   confidence exactly 0.00, every one
-    #   real street photo    (n=12)  confidence 0.90 - 0.95
-    #
-    # A gap that wide admits any threshold between the two. This one sits deliberately near
-    # the *bottom* of it, because the two errors are not symmetric: storing a weak report
-    # costs one faint cell on a layer already labelled "not measured", while rejecting a
-    # real one loses a citizen's observation and tells them their photo was unusable. The
-    # 12 positives were all clear daylight scenes, so a genuinely harder photo — dusk,
-    # partial, motion-blurred — has room to land well under 0.90 and still be kept.
-    min_observation_confidence: float = 0.25
 
     # Where `scripts/build_tile.py` writes by default.
     zarr_store: Path = DATA_DIR / "processed" / "cube.zarr"

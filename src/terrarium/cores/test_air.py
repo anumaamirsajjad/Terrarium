@@ -14,6 +14,7 @@ from terrarium.cores.air import (
     concentration,
     leave_one_station_out,
     plume_kernel,
+    seasonal_kernel,
     simulate,
 )
 from terrarium.cores.base import Intervention
@@ -174,10 +175,14 @@ def test_winter_inversion_concentrates_the_same_emissions() -> None:
     emissions = _point_source()
     winter = AirParameters.for_season("winter")
 
-    args = {"wind_speed_ms": 1.5, "wind_direction_deg": WESTERLY, "resolution_m": RES}
     canopy = np.zeros_like(emissions)
-    summer_field = concentration(emissions, canopy, SUMMER, **args)
-    winter_field = concentration(emissions, canopy, winter, **args)
+    args: dict[str, float] = {
+        "wind_speed_ms": 1.5,
+        "wind_direction_deg": WESTERLY,
+        "resolution_m": RES,
+    }
+    summer_field = concentration(emissions, canopy, SUMMER, seasonal=True, **args)
+    winter_field = concentration(emissions, canopy, winter, seasonal=True, **args)
 
     assert winter_field.max() > 3 * summer_field.max()
 
@@ -213,7 +218,14 @@ def test_no_emissions_no_concentration() -> None:
 # --------------------------------------------------------------------------------
 
 
-def test_removing_emissions_cleans_the_air_downwind() -> None:
+def test_removing_emissions_cleans_the_air_around_the_zone() -> None:
+    """`simulate` defaults to the **seasonal** kernel, which spreads in every direction.
+
+    That is a deliberate change of contract, and it is the one the monitors support: over a
+    season Lahore's overpass-hour wind covers nearly the whole compass, so a low-emission
+    zone benefits its neighbours all round rather than only the streets behind it. The
+    single-direction behaviour is still asserted, on `plume_kernel` and on the test below.
+    """
     emissions = np.zeros((81, 81))
     emissions[30:50, 30:40] = 0.01  # a busy corridor
     cube = _cube(emissions=emissions)
@@ -227,13 +239,57 @@ def test_removing_emissions_cleans_the_air_downwind() -> None:
     # Negative is cleaner, everywhere, and strongest inside.
     assert result.delta.max() <= 0
     assert result.stats.mean_delta_inside < 0
-    # Downwind of the corridor - east, for a westerly - must improve too. That is the
-    # point of a dispersion core: a low-emission zone benefits the streets behind it.
-    assert result.delta[40, 60] < 0
-    # And upwind must not, because nothing travels upwind. Not exactly zero: the field is
-    # an FFT convolution, so an untouched cell carries round-off ~1e-17 ug/m3 against a
-    # peak of ~1e-1. Anything above this floor would be transport, not arithmetic.
-    assert abs(result.delta[40, 5]) < 1e-12
+    # Neighbours on *both* sides improve, which is what an isotropic seasonal mean means.
+    assert result.delta[40, 60] < 0, "east of the corridor"
+    assert result.delta[40, 20] < 0, "west of the corridor"
+    # And it still decays with distance rather than being flat.
+    assert result.delta[40, 60] > result.delta[40, 45]
+
+
+def test_the_plume_mode_still_only_travels_downwind() -> None:
+    """The hourly, directional model is intact and reachable; it is just not the default.
+
+    Kept because `plume_kernel` remains correct physics for a single hour, and because the
+    seasonal kernel is normalised against it — if the plume's total drifted, magnitudes
+    would move without anything else noticing.
+    """
+    emissions = np.zeros((81, 81))
+    emissions[30:50, 30:40] = 0.01
+    canopy = np.zeros((81, 81))
+    args = {"wind_speed_ms": 2.0, "wind_direction_deg": WESTERLY, "resolution_m": RES}
+
+    field = concentration(emissions, canopy, SUMMER, seasonal=False, **args)
+
+    assert field[40, 60] > 0, "downwind of the corridor"
+    # Not exactly zero: an FFT convolution leaves round-off ~1e-17 against a peak of
+    # ~1e-1. Anything above this floor would be transport, not arithmetic.
+    assert abs(field[40, 5]) < 1e-12, "nothing travels upwind"
+
+
+def test_the_seasonal_kernel_preserves_the_plume_s_total_mass() -> None:
+    """Only the *pattern* changes, which is what keeps every magnitude claim true.
+
+    The winter/summer ratio, the tile total and the emission-factor caveat all rest on the
+    kernel's integral, and the seasonal kernel is normalised to the plume's own.
+    """
+    args = {"wind_speed_ms": 1.5, "deposition_velocity_m_s": 0.002, "resolution_m": RES}
+    seasonal = seasonal_kernel(SUMMER, **args)
+    plume = plume_kernel(SUMMER, wind_direction_deg=WESTERLY, **args)
+
+    assert seasonal.sum() == pytest.approx(plume.sum(), rel=1e-9)
+    # Isotropic: opposite offsets carry the same weight, which the plume never does.
+    centre = SUMMER.kernel_radius_cells
+    assert seasonal[centre, centre + 12] == pytest.approx(seasonal[centre, centre - 12])
+    assert seasonal[centre + 12, centre] == pytest.approx(seasonal[centre, centre + 12])
+
+
+def test_the_seasonal_kernel_still_concentrates_under_a_winter_inversion() -> None:
+    """The 6-7x seasonal factor is the core's headline finding and must survive the change."""
+    args = {"wind_speed_ms": 1.5, "deposition_velocity_m_s": 0.001, "resolution_m": RES}
+    winter = seasonal_kernel(AirParameters.for_season("winter"), **args)
+    summer = seasonal_kernel(AirParameters.for_season("summer"), **args)
+
+    assert winter.max() > 3 * summer.max()
 
 
 def test_doing_nothing_changes_nothing() -> None:

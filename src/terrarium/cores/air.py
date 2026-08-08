@@ -104,6 +104,19 @@ class AirParameters(BaseModel):
     # model - the same limitation as the missing background, stated in distance. It costs
     # ~40 ms per convolution against a < 3 s interactive budget.
     kernel_radius_cells: int = 200
+    # Spread of the **seasonal** kernel (see `seasonal_kernel`). Unlike every other number
+    # in this class this one is **fitted to Lahore**, not taken from the literature: it is
+    # where leave-one-station-out against 53 OpenAQ monitors minimises error.
+    #
+    #   sigma     400    600    800   1000   1200   1500   2000   2500  m
+    #   corr    +0.26  +0.40  +0.50  +0.53  +0.52  +0.44  +0.28  +0.16
+    #   MAE      50.7   46.8   42.4   40.6   40.9   44.0   49.3   51.5   (null: 51.0)
+    #
+    # Everything from 400 to 2000 m beats the null model, so this is a broad optimum rather
+    # than a knife edge. Two honesty notes that belong next to the number: the sigma was
+    # chosen on the same 53 stations the MAE is quoted from, so that MAE is optimistic; and
+    # it is fitted for **winter**, because summer never beats the null model at any sigma.
+    seasonal_sigma_m: float = 1000.0
 
     @classmethod
     def for_season(cls, season: str) -> AirParameters:
@@ -121,6 +134,90 @@ class AirParameters(BaseModel):
             # Apr-Jun: strong insolation has already broken the inversion by mid-morning.
             return cls(mixing_height_m=800.0, sigma_y_coefficient=0.11)
         raise ValueError(f"no dispersion parameters for season {season!r}")
+
+
+def seasonal_kernel(
+    params: AirParameters,
+    *,
+    wind_speed_ms: float,
+    deposition_velocity_m_s: float,
+    resolution_m: float,
+) -> np.ndarray:
+    """Isotropic kernel for a **seasonal mean** concentration, in s m-3.
+
+    ### Why this exists, and why it is the default
+
+    `plume_kernel` is the right physics for *one hour with the wind from one direction*.
+    Every window in this cube is a **season**, and the two are not the same question. Over
+    Lahore's 2025-winter the wind at the overpass hour spans essentially the whole compass
+    — 10th to 90th percentile is 68 deg to 331 deg — so a single median direction points a
+    narrow plume one way while the season's air went everywhere.
+
+    That mismatch is not cosmetic; it was measured against 53 OpenAQ monitors:
+
+    ```
+    isotropic seasonal kernel, sigma 1 km   corr +0.531   MAE 40.6   beats null
+    single-direction plume                  corr +0.157   MAE 51.0   loses to null
+                                                          (null model: 51.0)
+    ```
+
+    The inventory carries a real spatial signal. The directional plume was **destroying**
+    it, by concentrating almost all of a source's weight into its own cell and a thin
+    downwind streak, when a monitor integrates over kilometres of surrounding city.
+
+    Averaging the plume over a 12-bin wind rose was tried first and is *worse* (corr
+    +0.018), which is the useful negative result: the error is in the kernel's radial
+    profile, not only in its direction.
+
+    ### What it claims
+
+    Over a season with a broad wind rose and low wind speeds, the ensemble-mean dispersion
+    is approximately isotropic diffusion. `seasonal_sigma_m` is its scale, and it is
+    **fitted to this city's monitors** rather than derived — the one number in this core
+    that has seen Lahore's air.
+
+    **It is validated for winter and not for summer.** Winter beats the null model at every
+    sigma from 400 m to 2 km; summer beats it at none of them. That is not a bug to hide:
+    summer's boundary layer is 800 m deep and well mixed by mid-morning, so local sources
+    disperse before they can make a spatial pattern, and the 15 usable summer monitors span
+    only 44-56 ug/m3. The season this core exists to describe is the smog season, and that
+    is the one it can now defend.
+
+    Mass is preserved exactly as the plume would have deposited it: the kernel is
+    normalised to the plume's own total, so the tile-wide concentration and the winter /
+    summer mixing-height ratio are unchanged. **Only the spatial distribution moves.** That
+    keeps every magnitude statement this core has ever made true, and fixes the one thing
+    that was measurably wrong.
+    """
+    speed = max(wind_speed_ms, params.min_wind_speed_ms)
+    radius = params.kernel_radius_cells
+    sigma_cells = params.seasonal_sigma_m / resolution_m
+
+    offsets = np.arange(-radius, radius + 1, dtype="float64")
+    distance_cells = np.hypot(offsets[:, None], offsets[None, :])
+    distance_m = distance_cells * resolution_m
+
+    ventilation = speed * params.mixing_height_m
+    kernel = np.exp(-0.5 * (distance_cells / sigma_cells) ** 2)
+    # Deposition along the path, as in the plume: the same loss per second of travel, with
+    # radial distance standing in for the trajectory an isotropic average has smeared out.
+    kernel *= np.exp(-deposition_velocity_m_s * distance_m / ventilation)
+
+    total = kernel.sum()
+    if total <= 0.0:
+        raise ValueError("seasonal kernel summed to zero; sigma or resolution is degenerate")
+
+    # Normalised to the plume's total mass so magnitudes are untouched and only the pattern
+    # changes. Computed rather than assumed, because the plume's total depends on its own
+    # fetch limit and sigma_y growth and would drift if either were retuned.
+    reference = plume_kernel(
+        params,
+        wind_speed_ms=wind_speed_ms,
+        wind_direction_deg=0.0,
+        deposition_velocity_m_s=deposition_velocity_m_s,
+        resolution_m=resolution_m,
+    ).sum()
+    return np.asarray(kernel * (reference / total))
 
 
 def plume_kernel(
@@ -187,11 +284,18 @@ def concentration(
     wind_speed_ms: float,
     wind_direction_deg: float,
     resolution_m: float,
+    seasonal: bool = True,
 ) -> np.ndarray:
     """Locally-generated PM2.5, µg m-3, from a per-cell emission field.
 
     Not the total concentration - see the module docstring. The regional background is
     absent by construction, so read differences, not levels.
+
+    `seasonal=True` (the default) uses `seasonal_kernel`, because every window in this cube
+    is a season and that is the only version of this model that has been validated — it
+    beats a null model against 53 Lahore monitors where the directional plume loses to one.
+    `wind_direction_deg` is then unused and accepted only so the two modes share a
+    signature; set `seasonal=False` for the single-hour, single-direction plume.
     """
     # caveat: one deposition velocity for the whole tile, weighted by its mean canopy.
     # Making it vary per cell would mean integrating v_d along every source-receptor path,
@@ -205,12 +309,21 @@ def concentration(
         params.deposition_velocity_canopy_m_s - params.deposition_velocity_bare_m_s
     )
 
-    kernel = plume_kernel(
-        params,
-        wind_speed_ms=wind_speed_ms,
-        wind_direction_deg=wind_direction_deg,
-        deposition_velocity_m_s=deposition,
-        resolution_m=resolution_m,
+    kernel = (
+        seasonal_kernel(
+            params,
+            wind_speed_ms=wind_speed_ms,
+            deposition_velocity_m_s=deposition,
+            resolution_m=resolution_m,
+        )
+        if seasonal
+        else plume_kernel(
+            params,
+            wind_speed_ms=wind_speed_ms,
+            wind_direction_deg=wind_direction_deg,
+            deposition_velocity_m_s=deposition,
+            resolution_m=resolution_m,
+        )
     )
     field = fftconvolve(np.nan_to_num(emissions_g_s, nan=0.0), kernel, mode="same")
     # FFT round-off leaves ~1e-20 negatives where the answer is exactly zero. They are
@@ -314,13 +427,16 @@ def simulate(
 
     # The same wind on both sides. A low-emission zone does not change the synoptic
     # conditions, and letting it would attribute the weather to the intervention.
-    wind = {
-        "wind_speed_ms": _scalar(cube, "wind_speed_ms"),
-        "wind_direction_deg": _scalar(cube, "wind_direction_deg"),
-        "resolution_m": resolution_m,
-    }
-    baseline = concentration(emissions, canopy, params, **wind)
-    scenario = concentration(scenario_emissions, scenario_canopy, params, **wind)
+    speed = _scalar(cube, "wind_speed_ms")
+    direction = _scalar(cube, "wind_direction_deg")
+    baseline = concentration(
+        emissions, canopy, params,
+        wind_speed_ms=speed, wind_direction_deg=direction, resolution_m=resolution_m,
+    )
+    scenario = concentration(
+        scenario_emissions, scenario_canopy, params,
+        wind_speed_ms=speed, wind_direction_deg=direction, resolution_m=resolution_m,
+    )
 
     delta = (scenario - baseline).astype("float32")
     return CoreResult(

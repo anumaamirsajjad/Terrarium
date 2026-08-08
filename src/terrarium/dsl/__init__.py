@@ -9,12 +9,6 @@ point — the DSL is what makes the agent layer safe to hand a free-tier model.
 
 from terrarium.dsl.explain import Brief, BriefInputs, brief_for
 from terrarium.dsl.library import PRESETS, CostEstimate, Preset, estimate_cost, preset
-from terrarium.dsl.observe import (
-    Observation,
-    ObservationCategory,
-    ObservationError,
-    observation_from_photo,
-)
 from terrarium.dsl.planner import ParsedPlan, PlanParseError, parse_rules, plan_from_text
 from terrarium.dsl.schema import Plan, PlantTrees, RestrictVehicles
 from terrarium.dsl.validate import PlanError, PolygonMeasurement, ResolvedPlan, resolve
@@ -24,9 +18,6 @@ __all__ = [
     "Brief",
     "BriefInputs",
     "CostEstimate",
-    "Observation",
-    "ObservationCategory",
-    "ObservationError",
     "ParsedPlan",
     "Plan",
     "PlanError",
@@ -38,7 +29,6 @@ __all__ = [
     "RestrictVehicles",
     "brief_for",
     "estimate_cost",
-    "observation_from_photo",
     "parse_rules",
     "plan_from_text",
     "preset",

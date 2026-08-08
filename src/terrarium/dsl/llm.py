@@ -37,11 +37,8 @@ DEFAULT_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
 
 DEFAULT_GROQ_URL = "https://api.groq.com/openai/v1"
-# The only vision-capable model on Groq's free tier: the other fourteen are text, audio or
-# prompt-guard. Since `dsl.observe` needs vision and the planner does not, one model that
-# does both keeps this adapter the same shape as Gemini's rather than sprouting a second
-# model field that only one code path reads.
-DEFAULT_GROQ_MODEL = "qwen/qwen3.6-27b"
+# Text-only, which is all the planner needs. Fast and on the free tier.
+DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 
 
 class LLMUnavailable(RuntimeError):
@@ -63,23 +60,6 @@ class LLMAdapter(Protocol):
     def complete_json(self, *, system: str, user: str) -> str:
         """Return the model's raw text. Raises `LLMUnavailable` on any failure."""
         ...
-
-
-class VisionAdapter(Protocol):
-    """The same seam, with an image attached.
-
-    Separate from `LLMAdapter` because the two capabilities are separable: a text-only
-    provider can serve the planner and not the photo reader, and typing them as one would
-    make `dsl.observe` accept adapters that cannot do the job. Gemini implements both, and
-    the free tier is multimodal, which is why Phase 11 costs nothing extra over Phase 10.
-    """
-
-    @property
-    def name(self) -> str: ...
-
-    def complete_json_with_image(
-        self, *, system: str, user: str, image_base64: str, mime_type: str
-    ) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -108,22 +88,6 @@ class GeminiAdapter:
     def complete_json(self, *, system: str, user: str) -> str:
         return self._generate([{"text": user}], system=system)
 
-    def complete_json_with_image(
-        self, *, system: str, user: str, image_base64: str, mime_type: str
-    ) -> str:
-        """The same call with an inline image part.
-
-        Inline rather than the Files API: a citizen photo is a few hundred kB, it is used
-        once, and uploading it first would mean two round trips and a resource on Google's
-        side that this project would then own the lifecycle of.
-        """
-        return self._generate(
-            [
-                {"text": user},
-                {"inlineData": {"mimeType": mime_type, "data": image_base64}},
-            ],
-            system=system,
-        )
 
     def _generate(self, parts: list[dict[str, Any]], *, system: str) -> str:
         payload: dict[str, Any] = {
@@ -167,7 +131,7 @@ class GroqAdapter:
     a *model retirement*, not a bad provider: `gemini-2.5-flash` kept appearing in the
     model list and kept advertising `generateContent` while answering 404 to any key issued
     after it was withdrawn. Two providers means that failure costs a config change instead
-    of an outage on the one route with no offline fallback.
+    of a config change instead of an outage.
 
     Deliberately not an SDK and deliberately not LangChain (D17, D18). The request is one
     POST of one JSON body; `openai` or `langchain-groq` would put a dependency tree in
@@ -175,11 +139,11 @@ class GroqAdapter:
 
     Two provider-specific details, both discovered by running it rather than reading docs:
 
-    - **`reasoning_effort="none"`.** The vision model is a reasoning model and prefixes its
-      answer with a `<think>` block. With that block present Groq's own `json_object`
-      validator rejects the generation and returns `json_validate_failed` with an empty
-      body — so structured output and reasoning are mutually exclusive here, and the
-      schema-filling is what matters.
+    - **`reasoning_effort="none"`.** Groq's reasoning models prefix their answer with a
+      `<think>` block, and with that block present Groq's own `json_object` validator
+      rejects the generation and returns `json_validate_failed` with an empty body. So
+      structured output and reasoning are mutually exclusive here, and schema-filling is
+      what this seam is for.
     - **The key travels in a header**, not the URL as Gemini's does. That makes provider
       error text safe to log, though it is still not returned to a client.
     - **An explicit `User-Agent` is required.** Groq sits behind Cloudflare, which rejects
@@ -205,20 +169,6 @@ class GroqAdapter:
     def complete_json(self, *, system: str, user: str) -> str:
         return self._chat(user, system=system)
 
-    def complete_json_with_image(
-        self, *, system: str, user: str, image_base64: str, mime_type: str
-    ) -> str:
-        """The same call with the photo inlined as a data URI, per the OpenAI content parts."""
-        return self._chat(
-            [
-                {"type": "text", "text": user},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{mime_type};base64,{image_base64}"},
-                },
-            ],
-            system=system,
-        )
 
     def _chat(self, content: Any, *, system: str) -> str:
         payload: dict[str, Any] = {
@@ -271,11 +221,10 @@ def adapter_from_key(
     `None` is the expected state, not a degraded one. The rule-based parser handles the
     phrasings a demo actually uses, so a missing key costs flexibility, not function — and
     a deployment with no key still answers `/plan`. The one thing it does cost is
-    `/observations`, which has no offline reading of a photograph to fall back to.
+    nothing at all: every route answers, and free text is parsed by the rule parser.
 
-    Returns the concrete adapter rather than `LLMAdapter`, because Gemini satisfies both
-    that protocol and `VisionAdapter`, and narrowing the return type here would make the
-    photo path unable to use the same construction.
+    Returns the concrete adapter rather than `LLMAdapter` so a caller that wants the model
+    name for attribution does not have to narrow it back.
     """
     if not api_key:
         return None
@@ -323,14 +272,6 @@ class FallbackAdapter:
     def complete_json(self, *, system: str, user: str) -> str:
         return self._first(lambda a: a.complete_json(system=system, user=user))
 
-    def complete_json_with_image(
-        self, *, system: str, user: str, image_base64: str, mime_type: str
-    ) -> str:
-        return self._first(
-            lambda a: a.complete_json_with_image(
-                system=system, user=user, image_base64=image_base64, mime_type=mime_type
-            )
-        )
 
     def _first(self, call: Any) -> str:
         failures: list[str] = []
@@ -353,8 +294,7 @@ def resolve_adapter(settings: Any) -> Any:
     survive.
 
     `None` remains the expected state. Both keys unset is a working deployment: the planner
-    falls back to the rule parser and only `/observations` refuses, which it already
-    documents.
+    falls back to the rule parser and every route still answers.
 
     Typed against `Any` rather than importing `Settings`, so this module stays a leaf that
     `config` can be imported *by* without a cycle — the same reason `config` spells the

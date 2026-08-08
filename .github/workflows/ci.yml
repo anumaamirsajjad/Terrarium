@@ -1,10 +1,10 @@
 # Every check this repo already has, enforced rather than remembered.
 #
 # The suite is CI-safe by construction: **no test touches the network** (CLAUDE.md), the
-# cube fixtures are synthesised in-process, and the LLM is optional everywhere except
-# POST /observations, which answers 503 without a key and is tested for exactly that. So
-# no secrets are configured here on purpose - a workflow that needs TERRARIUM_GEMINI_API_KEY
-# would make a fork's first push fail for a reason that is not the fork's fault.
+# cube fixtures are synthesised in-process, and the LLM is optional everywhere - with no
+# key the planner falls back to its deterministic rule parser. So no secrets are configured
+# here on purpose: a workflow that needed one would make a fork's first push fail for a
+# reason that is not the fork's fault.
 name: CI
 
 on:

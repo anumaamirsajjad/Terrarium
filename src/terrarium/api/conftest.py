@@ -133,10 +133,10 @@ def no_ambient_keys() -> Iterator[None]:
 
     `Settings()` reads `.env`, so the moment somebody adds a working key the suite starts
     behaving differently on their machine than in CI — and not harmlessly. The tests that
-    assert the *no-model* fallback (`/plan` parsing by rules, `/observations` answering
-    503) began failing the moment a key existed, and one of them stopped being an offline
-    test at all: it reached Google and came back **502**, because a route that is supposed
-    to refuse without a model instead went and asked one.
+    assert the *no-model* fallback — `/plan` parsing by rules rather than by a model — began
+    failing the moment a key existed, and one of them stopped being an offline test at all:
+    it reached Google, because a path that is supposed to stay offline without a model went
+    and asked one.
 
     That is a direct breach of "no test may touch the network" (CLAUDE.md), and the CI
     network-isolation job would not have caught it, because CI has no key and so never

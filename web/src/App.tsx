@@ -14,11 +14,9 @@ import {
   type PlanResponse,
   type Preset,
   type SimulateResponse,
-  type StoredObservation,
   api,
 } from "./api/client";
 import { type LoadedLayer, loadLayer, useCubeLayer } from "./hooks/useCubeLayer";
-import { useObservationLayer } from "./hooks/useObservationLayer";
 import MapView, { type RasterOverlay } from "./map/MapView";
 import { type Position, useDrawnPolygon } from "./map/useDrawnPolygon";
 import Legend from "./panels/Legend";
@@ -26,7 +24,6 @@ import AirPanel from "./panels/AirPanel";
 import BriefDocument from "./panels/BriefDocument";
 import BriefPanel from "./panels/BriefPanel";
 import EquityPanel from "./panels/EquityPanel";
-import ObservationsPanel from "./panels/ObservationsPanel";
 import ResultPanel from "./panels/ResultPanel";
 import ScenarioPanel from "./panels/ScenarioPanel";
 import { decodeLayer } from "./raster/decode";
@@ -41,7 +38,6 @@ import {
 import {
   DIVERGING,
   HEAT,
-  SEVERITY,
   rampForVariable,
   symmetricDomain,
 } from "./raster/ramp";
@@ -64,21 +60,10 @@ const MAPPABLE = [
   "pm25_emission_g_s",
 ];
 
-/**
- * Sentinel value in the base-layer picker for the citizen-report raster.
- *
- * It shares the picker because it is a thing to look at, and shares nothing else: it comes
- * from `/observations/layer` rather than `/cube/layer/*`, and the legend says `not
- * measured` (D19). A double underscore because it must never collide with a cube variable
- * name arriving from `/cube/summary`.
- */
-const OBSERVATIONS_LAYER = "__observations";
 
 const TEMPERATURE = "lst_c";
 const MIN_VERTICES = 3;
 
-/** Severity is a fixed 1–5 scale, so its legend does not move with what got reported. */
-const SEVERITY_DOMAIN: [number, number] = [1, 5];
 
 type View = "baseline" | "delta" | "air" | "compare";
 
@@ -107,11 +92,6 @@ export default function App() {
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [planning, setPlanning] = useState(false);
-  const [observations, setObservations] = useState<StoredObservation[]>([]);
-  const [reader, setReader] = useState("no vision model configured");
-  // Where the next citizen photo is about. The map's last click, defaulting to the tile
-  // centre — nothing reads EXIF, so a photo can never silently report somewhere else.
-  const [photoAt, setPhotoAt] = useState<Position | null>(null);
 
   const draw = useDrawnPolygon();
 
@@ -156,26 +136,10 @@ export default function App() {
     };
   }, []);
 
-  const refreshObservations = useCallback(() => {
-    api
-      .observations()
-      .then((response) => {
-        setObservations(response.observations);
-        setReader(response.reader);
-      })
-      .catch(() => setObservations([]));
-  }, []);
 
-  useEffect(refreshObservations, [refreshObservations]);
 
-  const showingObservations = variable === OBSERVATIONS_LAYER;
+  const baseline = useCubeLayer(variable, selectedWindow);
 
-  const cubeBaseline = useCubeLayer(showingObservations ? null : variable, selectedWindow);
-  // Keyed on the report count so a newly submitted photo redraws the map rather than
-  // sitting in the list while the raster still says nobody reported anything.
-  const observationLayer = useObservationLayer(showingObservations, observations.length);
-
-  const baseline = showingObservations ? observationLayer : cubeBaseline;
 
   // Compare always works in temperature, whatever the base-layer picker shows, because
   // the delta the core returns is a temperature field.
@@ -292,8 +256,6 @@ export default function App() {
         draw.addVertex(position);
         return;
       }
-      // Not drawing: the click is choosing where the next citizen photo is about.
-      setPhotoAt(position);
     },
     [draw],
   );
@@ -322,13 +284,13 @@ export default function App() {
       const { raster, layer } = baseline.data;
       // Severity is a fixed 1-5 scale. Stretching it to whatever got reported would make
       // one mild report render as the same red as a burning waste pile.
-      const extent = showingObservations ? SEVERITY_DOMAIN : finiteExtent(raster);
+      const extent = finiteExtent(raster);
       if (!extent) return null;
       return {
         id: `baseline-${variable}-${layer.window ?? "static"}`,
         image: toCanvas(
           colourise(raster, {
-            ramp: showingObservations ? SEVERITY : rampForVariable(variable),
+            ramp: rampForVariable(variable),
             domain: extent,
             opacity,
           }),
@@ -392,7 +354,6 @@ export default function App() {
     view,
     baseline.data,
     variable,
-    showingObservations,
     opacity,
     result,
     deltaRaster,
@@ -424,11 +385,6 @@ export default function App() {
       const extent = finiteExtent(scenarioBase.raster) ?? [0, 1];
       return { ramp: HEAT, domain: extent, units: "°C", diverging: false };
     }
-    if (showingObservations) {
-      // Shown even with nothing reported yet, so the scale explains what the colours
-      // would mean rather than appearing only once the map is already painted.
-      return { ramp: SEVERITY, domain: SEVERITY_DOMAIN, units: "severity", diverging: false };
-    }
     if (baseline.data) {
       const extent = finiteExtent(baseline.data.raster);
       if (extent) {
@@ -441,7 +397,7 @@ export default function App() {
       }
     }
     return null;
-  }, [view, deltaDomain, airDomain, result, scenarioBase, showingObservations, baseline.data, variable]);
+  }, [view, deltaDomain, airDomain, result, scenarioBase, baseline.data, variable]);
 
   // ----------------------------------------------------------------- view ---
 
@@ -474,7 +430,6 @@ export default function App() {
         polygonClosed={draw.complete}
         drawing={draw.drawing}
         dividerLongitude={dividerLongitude}
-        photoAt={photoAt}
         onMapClick={handleMapClick}
       />
 
@@ -517,17 +472,9 @@ export default function App() {
                   {labelWithUnits(v.name, v.units)}
                 </option>
               ))}
-            <option value={OBSERVATIONS_LAYER}>Citizen reports (not measured)</option>
           </select>
           {baseline.loading && <p className="hint">Loading…</p>}
-          {showingObservations ? (
-            <p className="hint">
-              Worst severity reported per cell, from citizen photos read by a vision model.
-              <strong> Not measured</strong>, and never written into the cube — a cell with
-              no colour is one nobody has photographed, not one that is fine.
-              {observationLayer.count === 0 && " Nothing has been reported yet."}
-            </p>
-          ) : (
+          {(
             baseline.data && <p className="hint">{baseline.data.layer.description}</p>
           )}
           {baseline.error && <p className="error-text">{baseline.error}</p>}
@@ -752,13 +699,6 @@ export default function App() {
           </section>
         )}
 
-        <ObservationsPanel
-          lon={photoAt ? photoAt[0] : health.tile.centroid[0]}
-          lat={photoAt ? photoAt[1] : health.tile.centroid[1]}
-          observations={observations}
-          reader={reader}
-          onSubmitted={refreshObservations}
-        />
 
         <footer className="sidebar__footer muted">
           {/* D9: this label must appear wherever the temperature does. Worded as a

@@ -55,15 +55,16 @@ commands are included so each one can be re-checked rather than believed.
 | ~~A30~~ | ~~An unreadable photo was stored and drawn at severity 1~~ | **CLOSED** | api | fixed 2026-08-07 |
 | ~~A31~~ | ~~A developer's `.env` key made four tests reach the network~~ | **CLOSED** | tests | fixed 2026-08-07 |
 | ~~A32~~ | ~~A dead primary key shadowed a working second provider~~ | **CLOSED** | dsl | fixed 2026-08-07 |
+| ~~A33~~ | ~~The air core modelled one *hour* against a *seasonal* observation~~ | **CLOSED** | cores | fixed 2026-08-07 |
+| ~~A34~~ | ~~Photo and voice were the only key-gated and only untestable features~~ | **CLOSED** | scope | removed 2026-08-07 |
 
 Severities: **P0** the demo does not run · **P1** shipped work the user cannot see ·
 **P2** a correctness hole with no symptom yet · **P3** claims resting on unrun validation ·
 **P4** repo and documentation hygiene · **P5** small, real, cheap.
 
-**Thirty-one of the thirty-two are now closed** — A1–A8, A13–A17, A19, A20 on 2026-08-06, and
-everything else on 2026-08-07. **A12 alone remains open**, and is accepted rather than
-fixed: driving `SpeechRecognition` needs a real browser in CI, which is a large dependency
-for one button, and the panel already renders no microphone where the API is absent.
+**All thirty-four are now closed** — A1–A8, A13–A17, A19, A20 on 2026-08-06, and
+everything else on 2026-08-07. **A12 is closed by deletion** — voice was removed on 2026-08-07, so the one feature no
+automated test could drive is no longer in the product (see **A34**).
 
 **The single most important line in this document is now A9's result, and it is not a
 good one.** The air core was scored against 53 Lahore monitors and **does not beat a null
@@ -1051,6 +1052,85 @@ well under 0.90 and still be kept.
 
 Below the floor, `POST /observations` answers **422 with the reader's own words**, so the
 person who took the photo learns why.
+
+## A33 — The air core modelled one *hour* against a *seasonal* observation — **CLOSED 2026-08-07**
+
+A9 established that the core lost to a null model. This is the diagnosis and the fix, and
+the diagnosis is the interesting half: **the model was not wrong about physics, it was
+answering a different question from the one it was scored on.**
+
+`plume_kernel` is a steady-state Gaussian plume with one wind direction. That is correct
+for one hour. Every window in this cube is a **season**, and over 2025-winter the
+overpass-hour wind direction spans 68 deg to 331 deg at the 10th and 90th percentiles —
+essentially the whole compass. So the model painted a narrow streak one way while the
+season's air went everywhere.
+
+Three candidates were measured against 53 monitors before anything was changed:
+
+```
+                                        corr      MAE   (null: 51.0)
+single-direction plume                 +0.157    51.0   loses
+plume averaged over a 12-bin wind rose +0.018    52.0   loses, and worse
+isotropic kernel, sigma 1 km           +0.531    40.6   BEATS NULL
+```
+
+**The wind-rose result is the load-bearing one.** It is the obvious fix, it is worse, and
+it says the error is in the kernel's *radial profile* rather than only its direction: the
+plume puts almost all of a source's weight into its own cell and a thin tail, while a
+monitor integrates over kilometres of surrounding city.
+
+A plain smoothed emission density was checked too, and reaches +0.53 by itself — proof that
+the OSM inventory carries real spatial signal and the dispersion step was destroying it.
+
+**Closed** with `seasonal_kernel`, now the default for `concentration` and `simulate`:
+
+- **Isotropic**, because a seasonal mean over a broad wind rose is.
+- **Normalised to the plume's own total**, so tile-wide magnitude and the winter/summer
+  mixing-height ratio are untouched and *only the spatial distribution moves*.
+- `seasonal_sigma_m = 1000` is the **one fitted number in this core** — the only thing here
+  that has ever seen Lahore's air. Chosen on the same 53 stations the MAE is quoted from,
+  so that MAE is optimistic; the optimum is broad (400 m-2 km all beat the null), which is
+  the reassurance that it is not a knife edge.
+- `plume_kernel` is kept, tested, and reachable via `seasonal=False`. It is still the right
+  model for an hour, and the seasonal kernel is normalised against it.
+
+**Summer remains unvalidated** and beats the null at no sigma. Its boundary layer is 800 m
+and well mixed by mid-morning, so local sources disperse before making a pattern, and only
+15 monitors span 44-56 ug/m3. Quote winter; say summer is unvalidated.
+
+**One consequence to carry forward.** Reported deltas moved: the same request that returned
+**-0.578 ug/m3** now returns **-3.177**. Total mass is identical — the difference is that a
+source's contribution now lands near it instead of being carried 20 km downwind. Every
+ΔPM2.5 figure quoted before 2026-08-07 is superseded.
+
+**Verification:**
+`uv run python scripts/validate_air.py --zarr data/processed/cube_2025.zarr --window 2025-winter`
+
+## A34 — Photo and voice removed — **CLOSED 2026-08-07**
+
+Both were built, both worked, and both were withdrawn at the user's direction. Recorded
+here because the *reasons* are the ones this audit had already been circling:
+
+- **`POST /observations` was the only route in the project that required a key.** Every
+  other path degrades to a deterministic offline answer; a photograph has no rule-parser
+  fallback, so that one route could always be taken out by a revoked key or a rate limit —
+  which is exactly what happened during this audit (A29, A32).
+- **Voice was the only feature no automated test could drive** (the old A12). It was
+  accepted as untestable rather than fixed, and an accepted exception is a permanent one.
+
+Removing them makes the zero-budget claim unconditional: **every route now works with no
+key of any kind**, and nothing in the product is verified by hand only.
+
+Withdrawn, not failed. D19's argument — that a language model's reading of a phone photo is
+not a measurement and must never enter the cube — is still correct, and is the reason not to
+reintroduce it casually. The Urdu rule parser is **kept**: it outlived the voice capture it
+was written for, and a tool about Lahore should not answer 422 to a Lahore resident typing
+in Urdu.
+
+Also removed with them: `dsl/observe.py`, `api/observations.py`, the observations routes and
+schemas, `cell_from_lonlat`, the vision half of `dsl/llm.py`, the rate limiter, the
+confidence floor (A30), and the citizen layer, photo marker and microphone in the frontend.
+Six routes remain where there were nine.
 
 ## A32 — A dead primary key shadowed a working second provider
 
