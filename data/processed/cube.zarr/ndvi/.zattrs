@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "y",
+        "x"
+    ],
+    "description": "Normalised difference vegetation index from Sentinel-2 B08/B04",
+    "resampling": "bilinear",
+    "source_collection": "sentinel-2-l2a",
+    "units": "1"
+}

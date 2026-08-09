@@ -1,0 +1,490 @@
+
+========================================================================
+  Terrarium tile build - Lahore, PK
+========================================================================
+  bbox (WGS84)   (74.2533, 31.4305, 74.4641, 31.6103)
+  target CRS     EPSG:32643
+  resolution     100 m
+  grid shape     201 x 202  (y, x)
+  bounds (UTM)   (429000, 3477400, 449200, 3497500)
+  cloud ceiling  20.0%
+  max scenes     14 per collection, per window
+  windows        18
+    2016-summer      2016-04-01 .. 2016-06-30
+    2016-winter      2016-11-01 .. 2017-01-31
+    2017-summer      2017-04-01 .. 2017-06-30
+    2017-winter      2017-11-01 .. 2018-01-31
+    2018-summer      2018-04-01 .. 2018-06-30
+    2018-winter      2018-11-01 .. 2019-01-31
+    2019-summer      2019-04-01 .. 2019-06-30
+    2019-winter      2019-11-01 .. 2020-01-31
+    2020-summer      2020-04-01 .. 2020-06-30
+    2020-winter      2020-11-01 .. 2021-01-31
+    2021-summer      2021-04-01 .. 2021-06-30
+    2021-winter      2021-11-01 .. 2022-01-31
+    2022-summer      2022-04-01 .. 2022-06-30
+    2022-winter      2022-11-01 .. 2023-01-31
+    2023-summer      2023-04-01 .. 2023-06-30
+    2023-winter      2023-11-01 .. 2024-01-31
+    2024-summer      2024-04-01 .. 2024-06-30
+    2024-winter      2024-11-01 .. 2025-01-31
+
+02:26:50 DEBUG   pystac_client.stac_api_io: GET https://planetarycomputer.microsoft.com/api/stac/v1 Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive'}
+  searching + loading ...
+
+02:26:53 DEBUG   pystac_client.stac_api_io: GET https://planetarycomputer.microsoft.com/api/stac/v1/ Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive'}
+02:26:53 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '81', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "collections": ["cop-dem-glo-30"]}
+02:26:56 INFO    terrarium.ingest.client: cop-dem-glo-30: 1 found, 1 kept (cloud <= None)
+02:27:21 INFO    terrarium.ingest.pipeline: copernicus-dem: 1 variable(s) in 28.4s (attempt 1)
+02:27:21 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '81', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "collections": ["esa-worldcover"]}
+02:27:24 INFO    terrarium.ingest.client: esa-worldcover: 2 found, 2 kept (cloud <= None)
+02:27:27 INFO    terrarium.ingest.pipeline: worldcover: 1 variable(s) in 5.8s (attempt 1)
+02:27:27 INFO    terrarium.ingest.pipeline: using cached D:\credminds\Terrarium\data\raw\pak_ppp_2020_constrained.tif
+02:27:27 INFO    terrarium.ingest.pipeline: worldpop: 6203454 people in the bbox, 6259308 on the grid (+0.90%)
+02:27:27 INFO    terrarium.ingest.pipeline: worldpop: 1 variable(s) in 0.3s (attempt 1)
+02:27:27 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2016-04-01T00:00:00Z/2016-06-30T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:27:30 INFO    terrarium.ingest.client: sentinel-2-l2a: 37 found, 27 kept (cloud <= 20.0)
+02:27:30 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 27 usable scenes
+02:28:40 INFO    terrarium.ingest.pipeline: sentinel-2 [2016-summer]: 3 variable(s) in 72.5s (attempt 1)
+02:28:40 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2016-04-01T00:00:00Z/2016-06-30T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:28:45 INFO    terrarium.ingest.client: landsat-c2-l2: 15 found, 8 kept (cloud <= 20.0)
+02:28:45 INFO    terrarium.ingest.pipeline: dropped 5 Landsat scenes without a TIRS thermal band
+02:28:49 INFO    terrarium.ingest.pipeline: 2016-summer landsat-c2-l2: clear looks per pixel min=1 median=3 over 3 scenes
+02:28:49 INFO    terrarium.ingest.pipeline: landsat [2016-summer]: 1 variable(s) in 9.3s (attempt 1)
+02:28:52 INFO    terrarium.ingest.pipeline: open-meteo 2016-summer: 91 overpass hours from 2184 hourly records
+02:28:52 INFO    terrarium.ingest.pipeline: open-meteo [2016-summer]: 3 variable(s) in 2.3s (attempt 1)
+02:28:52 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2016-11-01T00:00:00Z/2017-01-31T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:28:52 INFO    terrarium.ingest.client: sentinel-2-l2a: 24 found, 13 kept (cloud <= 20.0)
+02:30:14 INFO    terrarium.ingest.pipeline: sentinel-2 [2016-winter]: 3 variable(s) in 82.8s (attempt 1)
+02:30:14 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2016-11-01T00:00:00Z/2017-01-31T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:30:15 INFO    terrarium.ingest.client: landsat-c2-l2: 18 found, 8 kept (cloud <= 20.0)
+02:30:15 INFO    terrarium.ingest.pipeline: dropped 5 Landsat scenes without a TIRS thermal band
+02:30:18 INFO    terrarium.ingest.pipeline: 2016-winter landsat-c2-l2: clear looks per pixel min=2 median=3 over 3 scenes
+02:30:18 INFO    terrarium.ingest.pipeline: landsat [2016-winter]: 1 variable(s) in 4.0s (attempt 1)
+02:30:20 INFO    terrarium.ingest.pipeline: open-meteo 2016-winter: 92 overpass hours from 2208 hourly records
+02:30:20 INFO    terrarium.ingest.pipeline: open-meteo [2016-winter]: 3 variable(s) in 1.5s (attempt 1)
+02:30:20 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2017-04-01T00:00:00Z/2017-06-30T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:30:20 INFO    terrarium.ingest.client: sentinel-2-l2a: 33 found, 23 kept (cloud <= 20.0)
+02:30:20 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 23 usable scenes
+02:31:11 INFO    terrarium.ingest.pipeline: sentinel-2 [2017-summer]: 3 variable(s) in 50.8s (attempt 1)
+02:31:11 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2017-04-01T00:00:00Z/2017-06-30T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:31:11 INFO    terrarium.ingest.client: landsat-c2-l2: 17 found, 13 kept (cloud <= 20.0)
+02:31:11 INFO    terrarium.ingest.pipeline: dropped 8 Landsat scenes without a TIRS thermal band
+02:31:16 INFO    terrarium.ingest.pipeline: 2017-summer landsat-c2-l2: clear looks per pixel min=3 median=4 over 5 scenes
+02:31:16 INFO    terrarium.ingest.pipeline: landsat [2017-summer]: 1 variable(s) in 5.2s (attempt 1)
+02:31:17 INFO    terrarium.ingest.pipeline: open-meteo 2017-summer: 91 overpass hours from 2184 hourly records
+02:31:17 INFO    terrarium.ingest.pipeline: open-meteo [2017-summer]: 3 variable(s) in 1.4s (attempt 1)
+02:31:17 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2017-11-01T00:00:00Z/2018-01-31T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:31:20 INFO    terrarium.ingest.client: sentinel-2-l2a: 65 found, 35 kept (cloud <= 20.0)
+02:31:20 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 35 usable scenes
+02:32:24 ERROR   odc.loader._rio: Aborting load due to failure while reading: https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/43/R/DQ/2017/11/19/S2A_MSIL2A_20171119T054121_N0212_R005_T43RDQ_20201014T205251.SAFE/GRANULE/L2A_T43RDQ_A012586_20171119T054938/IMG_DATA/R20m/T43RDQ_20171119T054121_B11_20m.tif?st=2026-08-03T21%3A27%3A30Z&se=2026-08-04T22%3A12%3A30Z&sp=rl&sv=2025-07-05&sr=c&skoid=9c8ff44a-6a2c-4dfb-b298-1c9212f64d9a&sktid=72f988bf-86f1-41af-91ab-2d7cd011db47&skt=2026-08-04T19%3A01%3A28Z&ske=2026-08-11T19%3A01%3A28Z&sks=b&skv=2025-07-05&sig=Pi9NpoCtWV4chflrlsyZTH3h26vps88tKokcmo0FRNU%3D:1
+02:32:24 WARNING terrarium.ingest.pipeline: sentinel-2 [2017-winter] ingest attempt 1/4 failed after 67.0s (Chunk and warp failed); retrying in 10s
+02:32:24 ERROR   odc.loader._rio: Aborting load due to failure while reading: https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/43/S/DR/2018/01/08/S2A_MSIL2A_20180108T055001_N0212_R005_T43SDR_20201014T040616.SAFE/GRANULE/L2A_T43SDR_A013301_20180108T055002/IMG_DATA/R20m/T43SDR_20180108T055001_B12_20m.tif?st=2026-08-03T21%3A27%3A30Z&se=2026-08-04T22%3A12%3A30Z&sp=rl&sv=2025-07-05&sr=c&skoid=9c8ff44a-6a2c-4dfb-b298-1c9212f64d9a&sktid=72f988bf-86f1-41af-91ab-2d7cd011db47&skt=2026-08-04T19%3A01%3A28Z&ske=2026-08-11T19%3A01%3A28Z&sks=b&skv=2025-07-05&sig=Pi9NpoCtWV4chflrlsyZTH3h26vps88tKokcmo0FRNU%3D:1
+02:32:24 WARNING rasterio._err: CPLE_AppDefined:HTTP error code: 0 - https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/43/R/DQ/2017/11/22/S2A_MSIL2A_20171122T055141_N0212_R048_T43RDQ_20201014T213115.SAFE/GRANULE/L2A_T43RDQ_A012629_20171122T055137/IMG_DATA/R10m/T43RDQ_20171122T055141_B02_10m.tif?st=2026-08-03T21%3A27%3A30Z&se=2026-08-04T22%3A12%3A30Z&sp=rl&sv=2025-07-05&sr=c&skoid=9c8ff44a-6a2c-4dfb-b298-1c9212f64d9a&sktid=72f988bf-86f1-41af-91ab-2d7cd011db47&skt=2026-08-04T19%3A01%3A28Z&ske=2026-08-11T19%3A01%3A28Z&sks=b&skv=2025-07-05&sig=Pi9NpoCtWV4chflrlsyZTH3h26vps88tKokcmo0FRNU%3D. Retrying again in 0.5 secs
+02:32:24 ERROR   odc.loader._rio: Aborting load due to failure while reading: https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/43/S/DR/2017/11/19/S2A_MSIL2A_20171119T054121_N0212_R005_T43SDR_20201014T205253.SAFE/GRANULE/L2A_T43SDR_A012586_20171119T054938/IMG_DATA/R10m/T43SDR_20171119T054121_B04_10m.tif?st=2026-08-03T21%3A27%3A30Z&se=2026-08-04T22%3A12%3A30Z&sp=rl&sv=2025-07-05&sr=c&skoid=9c8ff44a-6a2c-4dfb-b298-1c9212f64d9a&sktid=72f988bf-86f1-41af-91ab-2d7cd011db47&skt=2026-08-04T19%3A01%3A28Z&ske=2026-08-11T19%3A01%3A28Z&sks=b&skv=2025-07-05&sig=Pi9NpoCtWV4chflrlsyZTH3h26vps88tKokcmo0FRNU%3D:1
+02:32:24 ERROR   odc.loader._rio: Aborting load due to failure while reading: https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/43/S/DR/2017/11/24/S2B_MSIL2A_20171124T054129_N0212_R005_T43SDR_20201014T220315.SAFE/GRANULE/L2A_T43SDR_A003749_20171124T054132/IMG_DATA/R10m/T43SDR_20171124T054129_B08_10m.tif?st=2026-08-03T21%3A27%3A30Z&se=2026-08-04T22%3A12%3A30Z&sp=rl&sv=2025-07-05&sr=c&skoid=9c8ff44a-6a2c-4dfb-b298-1c9212f64d9a&sktid=72f988bf-86f1-41af-91ab-2d7cd011db47&skt=2026-08-04T19%3A01%3A28Z&ske=2026-08-11T19%3A01%3A28Z&sks=b&skv=2025-07-05&sig=Pi9NpoCtWV4chflrlsyZTH3h26vps88tKokcmo0FRNU%3D:1
+02:32:24 ERROR   odc.loader._rio: Aborting load due to failure while reading: https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/43/S/DR/2017/11/19/S2A_MSIL2A_20171119T054121_N0212_R005_T43SDR_20201014T205253.SAFE/GRANULE/L2A_T43SDR_A012586_20171119T054938/IMG_DATA/R10m/T43SDR_20171119T054121_B02_10m.tif?st=2026-08-03T21%3A27%3A30Z&se=2026-08-04T22%3A12%3A30Z&sp=rl&sv=2025-07-05&sr=c&skoid=9c8ff44a-6a2c-4dfb-b298-1c9212f64d9a&sktid=72f988bf-86f1-41af-91ab-2d7cd011db47&skt=2026-08-04T19%3A01%3A28Z&ske=2026-08-11T19%3A01%3A28Z&sks=b&skv=2025-07-05&sig=Pi9NpoCtWV4chflrlsyZTH3h26vps88tKokcmo0FRNU%3D:1
+02:32:25 ERROR   odc.loader._rio: Aborting load due to failure while reading: https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/43/R/DQ/2017/11/22/S2A_MSIL2A_20171122T055141_N0212_R048_T43RDQ_20201014T213115.SAFE/GRANULE/L2A_T43RDQ_A012629_20171122T055137/IMG_DATA/R10m/T43RDQ_20171122T055141_B02_10m.tif?st=2026-08-03T21%3A27%3A30Z&se=2026-08-04T22%3A12%3A30Z&sp=rl&sv=2025-07-05&sr=c&skoid=9c8ff44a-6a2c-4dfb-b298-1c9212f64d9a&sktid=72f988bf-86f1-41af-91ab-2d7cd011db47&skt=2026-08-04T19%3A01%3A28Z&ske=2026-08-11T19%3A01%3A28Z&sks=b&skv=2025-07-05&sig=Pi9NpoCtWV4chflrlsyZTH3h26vps88tKokcmo0FRNU%3D:1
+02:32:34 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2017-11-01T00:00:00Z/2018-01-31T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:32:37 INFO    terrarium.ingest.client: sentinel-2-l2a: 65 found, 35 kept (cloud <= 20.0)
+02:32:37 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 35 usable scenes
+02:32:37 ERROR   odc.loader._rio: Aborting load due to failure while reading: https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/43/R/DQ/2018/01/13/S2B_MSIL2A_20180113T054159_N0212_R005_T43RDQ_20201014T052935.SAFE/GRANULE/L2A_T43RDQ_A004464_20180113T055004/IMG_DATA/R20m/T43RDQ_20180113T054159_SCL_20m.tif?st=2026-08-03T21%3A27%3A30Z&se=2026-08-04T22%3A12%3A30Z&sp=rl&sv=2025-07-05&sr=c&skoid=9c8ff44a-6a2c-4dfb-b298-1c9212f64d9a&sktid=72f988bf-86f1-41af-91ab-2d7cd011db47&skt=2026-08-04T19%3A01%3A28Z&ske=2026-08-11T19%3A01%3A28Z&sks=b&skv=2025-07-05&sig=Pi9NpoCtWV4chflrlsyZTH3h26vps88tKokcmo0FRNU%3D:1
+02:32:37 ERROR   odc.loader._rio: Aborting load due to failure while reading: https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/43/R/DQ/2018/01/08/S2A_MSIL2A_20180108T055001_N0212_R005_T43RDQ_20201014T040627.SAFE/GRANULE/L2A_T43RDQ_A013301_20180108T055002/IMG_DATA/R10m/T43RDQ_20180108T055001_B04_10m.tif?st=2026-08-03T21%3A27%3A30Z&se=2026-08-04T22%3A12%3A30Z&sp=rl&sv=2025-07-05&sr=c&skoid=9c8ff44a-6a2c-4dfb-b298-1c9212f64d9a&sktid=72f988bf-86f1-41af-91ab-2d7cd011db47&skt=2026-08-04T19%3A01%3A28Z&ske=2026-08-11T19%3A01%3A28Z&sks=b&skv=2025-07-05&sig=Pi9NpoCtWV4chflrlsyZTH3h26vps88tKokcmo0FRNU%3D:1
+02:32:37 ERROR   odc.loader._rio: Aborting load due to failure while reading: https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/43/S/DR/2018/01/06/S2B_MSIL2A_20180106T055219_N0212_R048_T43SDR_20201014T034449.SAFE/GRANULE/L2A_T43SDR_A004364_20180106T055715/IMG_DATA/R10m/T43SDR_20180106T055219_B08_10m.tif?st=2026-08-03T21%3A27%3A30Z&se=2026-08-04T22%3A12%3A30Z&sp=rl&sv=2025-07-05&sr=c&skoid=9c8ff44a-6a2c-4dfb-b298-1c9212f64d9a&sktid=72f988bf-86f1-41af-91ab-2d7cd011db47&skt=2026-08-04T19%3A01%3A28Z&ske=2026-08-11T19%3A01%3A28Z&sks=b&skv=2025-07-05&sig=Pi9NpoCtWV4chflrlsyZTH3h26vps88tKokcmo0FRNU%3D:1
+02:32:37 WARNING terrarium.ingest.pipeline: sentinel-2 [2017-winter] ingest attempt 2/4 failed after 3.1s ('/vsicurl/https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/43/R/DQ/2018/01/13/S2B_MSIL2A_20180113T054159_N0212_R005_T43RDQ_20201014T052935.SAFE/GRANULE/L2A_T43RDQ_A004464_20180113T055004/IMG_DATA/R20m/T43RDQ_20180113T054159_SCL_20m.tif?st=2026-08-03T21%3A27%3A30Z&se=2026-08-04T22%3A12%3A30Z&sp=rl&sv=2025-07-05&sr=c&skoid=9c8ff44a-6a2c-4dfb-b298-1c9212f64d9a&sktid=72f988bf-86f1-41af-91ab-2d7cd011db47&skt=2026-08-04T19%3A01%3A28Z&ske=2026-08-11T19%3A01%3A28Z&sks=b&skv=2025-07-05&sig=Pi9NpoCtWV4chflrlsyZTH3h26vps88tKokcmo0FRNU%3D' not recognized as being in a supported file format.); retrying in 20s
+02:32:37 ERROR   odc.loader._rio: Aborting load due to failure while reading: https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/43/S/DR/2018/01/06/S2B_MSIL2A_20180106T055219_N0212_R048_T43SDR_20201014T034449.SAFE/GRANULE/L2A_T43SDR_A004364_20180106T055715/IMG_DATA/R10m/T43SDR_20180106T055219_B04_10m.tif?st=2026-08-03T21%3A27%3A30Z&se=2026-08-04T22%3A12%3A30Z&sp=rl&sv=2025-07-05&sr=c&skoid=9c8ff44a-6a2c-4dfb-b298-1c9212f64d9a&sktid=72f988bf-86f1-41af-91ab-2d7cd011db47&skt=2026-08-04T19%3A01%3A28Z&ske=2026-08-11T19%3A01%3A28Z&sks=b&skv=2025-07-05&sig=Pi9NpoCtWV4chflrlsyZTH3h26vps88tKokcmo0FRNU%3D:1
+02:32:37 ERROR   odc.loader._rio: Aborting load due to failure while reading: https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/43/S/DR/2017/11/24/S2B_MSIL2A_20171124T054129_N0212_R005_T43SDR_20201014T220315.SAFE/GRANULE/L2A_T43SDR_A003749_20171124T054132/IMG_DATA/R10m/T43SDR_20171124T054129_B08_10m.tif?st=2026-08-03T21%3A27%3A30Z&se=2026-08-04T22%3A12%3A30Z&sp=rl&sv=2025-07-05&sr=c&skoid=9c8ff44a-6a2c-4dfb-b298-1c9212f64d9a&sktid=72f988bf-86f1-41af-91ab-2d7cd011db47&skt=2026-08-04T19%3A01%3A28Z&ske=2026-08-11T19%3A01%3A28Z&sks=b&skv=2025-07-05&sig=Pi9NpoCtWV4chflrlsyZTH3h26vps88tKokcmo0FRNU%3D:1
+02:32:57 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2017-11-01T00:00:00Z/2018-01-31T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:32:58 INFO    terrarium.ingest.client: sentinel-2-l2a: 65 found, 35 kept (cloud <= 20.0)
+02:32:58 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 35 usable scenes
+02:32:59 ERROR   odc.loader._rio: Aborting load due to failure while reading: https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/43/S/DR/2017/11/24/S2B_MSIL2A_20171124T054129_N0212_R005_T43SDR_20201014T220315.SAFE/GRANULE/L2A_T43SDR_A003749_20171124T054132/IMG_DATA/R10m/T43SDR_20171124T054129_B08_10m.tif?st=2026-08-03T21%3A27%3A30Z&se=2026-08-04T22%3A12%3A30Z&sp=rl&sv=2025-07-05&sr=c&skoid=9c8ff44a-6a2c-4dfb-b298-1c9212f64d9a&sktid=72f988bf-86f1-41af-91ab-2d7cd011db47&skt=2026-08-04T19%3A01%3A28Z&ske=2026-08-11T19%3A01%3A28Z&sks=b&skv=2025-07-05&sig=Pi9NpoCtWV4chflrlsyZTH3h26vps88tKokcmo0FRNU%3D:1
+02:32:59 WARNING terrarium.ingest.pipeline: sentinel-2 [2017-winter] ingest attempt 3/4 failed after 2.0s (Chunk and warp failed); retrying in 40s
+02:33:39 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2017-11-01T00:00:00Z/2018-01-31T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:33:40 INFO    terrarium.ingest.client: sentinel-2-l2a: 65 found, 35 kept (cloud <= 20.0)
+02:33:40 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 35 usable scenes
+02:33:41 ERROR   odc.loader._rio: Aborting load due to failure while reading: https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/43/S/DR/2017/11/24/S2B_MSIL2A_20171124T054129_N0212_R005_T43SDR_20201014T220315.SAFE/GRANULE/L2A_T43SDR_A003749_20171124T054132/IMG_DATA/R10m/T43SDR_20171124T054129_B08_10m.tif?st=2026-08-03T21%3A27%3A30Z&se=2026-08-04T22%3A12%3A30Z&sp=rl&sv=2025-07-05&sr=c&skoid=9c8ff44a-6a2c-4dfb-b298-1c9212f64d9a&sktid=72f988bf-86f1-41af-91ab-2d7cd011db47&skt=2026-08-04T19%3A01%3A28Z&ske=2026-08-11T19%3A01%3A28Z&sks=b&skv=2025-07-05&sig=Pi9NpoCtWV4chflrlsyZTH3h26vps88tKokcmo0FRNU%3D:1
+02:33:41 ERROR   terrarium.ingest.pipeline: sentinel-2 [2017-winter] ingest failed after 4 attempts; leaving its variables unpopulated
+rasterio._err.CPLE_AppDefinedError: TIFFFillTile:Read error at row 4294967295, col 4294967295, tile 6; got 245245 bytes, expected 283424
+
+The above exception was the direct cause of the following exception:
+
+rasterio._err.CPLE_AppDefinedError: TIFFReadEncodedTile() failed.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "rasterio/_warp.pyx", line 646, in rasterio._warp._reproject
+  File "rasterio/_warp.pyx", line 646, in rasterio._warp._reproject
+  File "rasterio/_warp.pyx", line 654, in rasterio._warp._reproject
+  File "rasterio/_err.pyx", line 325, in rasterio._err.StackChecker.exc_wrap_int
+rasterio._err.CPLE_AppDefinedError: IReadBlock failed at X offset 0, Y offset 2: TIFFReadEncodedTile() failed.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\credminds\Terrarium\src\terrarium\ingest\pipeline.py", line 721, in _ingest_with_retries
+    name: _clean(array, VARIABLES_BY_NAME[name], grid)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\credminds\Terrarium\src\terrarium\ingest\pipeline.py", line 776, in _clean
+    data = np.asarray(source.transpose("y", "x").values)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\xarray\core\dataarray.py", line 803, in values
+    return self.variable.values
+           ^^^^^^^^^^^^^^^^^^^^
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\xarray\core\variable.py", line 555, in values
+    return _as_array_or_item(self._data)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\xarray\core\variable.py", line 335, in _as_array_or_item
+    data = np.asarray(data)
+           ^^^^^^^^^^^^^^^^
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\dask\array\core.py", line 1720, in __array__
+    x = self.compute()
+        ^^^^^^^^^^^^^^
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\dask\base.py", line 392, in compute
+    (result,) = compute(self, traverse=False, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\dask\base.py", line 769, in compute
+    results = schedule(expr, keys, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\odc\loader\_builder.py", line 498, in _dask_loader_tyx
+    _fill_nd_slice(
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\odc\loader\_builder.py", line 583, in _fill_nd_slice
+    return fuse_nd_slices(
+           ^^^^^^^^^^^^^^^
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\odc\loader\_builder.py", line 549, in fuse_nd_slices
+    for yx_roi, pix in srcs:
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\odc\loader\_builder.py", line 584, in <genexpr>
+    (src.read(cfg, dst_gbox, selection=selection) for src in srcs),
+     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\odc\loader\_rio.py", line 140, in read
+    return rio_read(self._src, cfg, dst_geobox, dst=dst, selection=selection)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\odc\loader\_rio.py", line 567, in rio_read
+    raise e
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\odc\loader\_rio.py", line 553, in rio_read
+    _rio_read(src, cfg, dst_geobox, prep_dst(dst), selection=selection)
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\odc\loader\_rio.py", line 622, in _rio_read
+    return _do_read(
+           ^^^^^^^^^
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\odc\loader\_rio.py", line 481, in _do_read
+    rasterio.warp.reproject(
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\rasterio\env.py", line 411, in wrapper
+    return f(*args, **kwds)
+           ^^^^^^^^^^^^^^^^
+  File "D:\credminds\Terrarium\.venv\Lib\site-packages\rasterio\warp.py", line 385, in reproject
+    dest = _reproject(
+           ^^^^^^^^^^^
+  File "rasterio/_warp.pyx", line 389, in rasterio._warp._reproject
+  File "rasterio/_warp.pyx", line 657, in rasterio._warp._reproject
+rasterio.errors.WarpOperationError: Chunk and warp failed
+02:33:41 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2017-11-01T00:00:00Z/2018-01-31T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:33:41 INFO    terrarium.ingest.client: landsat-c2-l2: 17 found, 10 kept (cloud <= 20.0)
+02:33:41 INFO    terrarium.ingest.pipeline: dropped 6 Landsat scenes without a TIRS thermal band
+02:33:44 INFO    terrarium.ingest.pipeline: 2017-winter landsat-c2-l2: clear looks per pixel min=2 median=4 over 4 scenes
+02:33:44 INFO    terrarium.ingest.pipeline: landsat [2017-winter]: 1 variable(s) in 3.0s (attempt 1)
+02:33:46 INFO    terrarium.ingest.pipeline: open-meteo 2017-winter: 92 overpass hours from 2208 hourly records
+02:33:46 INFO    terrarium.ingest.pipeline: open-meteo [2017-winter]: 3 variable(s) in 2.0s (attempt 1)
+02:33:46 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2018-04-01T00:00:00Z/2018-06-30T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:33:46 INFO    terrarium.ingest.client: sentinel-2-l2a: 72 found, 47 kept (cloud <= 20.0)
+02:33:46 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 47 usable scenes
+02:34:22 INFO    terrarium.ingest.pipeline: sentinel-2 [2018-summer]: 3 variable(s) in 36.0s (attempt 1)
+02:34:22 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2018-04-01T00:00:00Z/2018-06-30T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:34:22 INFO    terrarium.ingest.client: landsat-c2-l2: 16 found, 11 kept (cloud <= 20.0)
+02:34:22 INFO    terrarium.ingest.pipeline: dropped 7 Landsat scenes without a TIRS thermal band
+02:34:24 INFO    terrarium.ingest.pipeline: 2018-summer landsat-c2-l2: clear looks per pixel min=3 median=4 over 4 scenes
+02:34:24 INFO    terrarium.ingest.pipeline: landsat [2018-summer]: 1 variable(s) in 2.5s (attempt 1)
+02:34:27 INFO    terrarium.ingest.pipeline: open-meteo 2018-summer: 91 overpass hours from 2184 hourly records
+02:34:27 INFO    terrarium.ingest.pipeline: open-meteo [2018-summer]: 3 variable(s) in 2.8s (attempt 1)
+02:34:27 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2018-11-01T00:00:00Z/2019-01-31T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:34:28 INFO    terrarium.ingest.client: sentinel-2-l2a: 71 found, 31 kept (cloud <= 20.0)
+02:34:28 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 31 usable scenes
+02:35:08 INFO    terrarium.ingest.pipeline: sentinel-2 [2018-winter]: 3 variable(s) in 41.5s (attempt 1)
+02:35:08 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2018-11-01T00:00:00Z/2019-01-31T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:35:09 INFO    terrarium.ingest.client: landsat-c2-l2: 17 found, 11 kept (cloud <= 20.0)
+02:35:09 INFO    terrarium.ingest.pipeline: dropped 8 Landsat scenes without a TIRS thermal band
+02:35:11 INFO    terrarium.ingest.pipeline: 2018-winter landsat-c2-l2: clear looks per pixel min=2 median=3 over 3 scenes
+02:35:11 INFO    terrarium.ingest.pipeline: landsat [2018-winter]: 1 variable(s) in 2.5s (attempt 1)
+02:35:13 INFO    terrarium.ingest.pipeline: open-meteo 2018-winter: 92 overpass hours from 2208 hourly records
+02:35:13 INFO    terrarium.ingest.pipeline: open-meteo [2018-winter]: 3 variable(s) in 1.8s (attempt 1)
+02:35:13 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2019-04-01T00:00:00Z/2019-06-30T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:35:13 INFO    terrarium.ingest.client: sentinel-2-l2a: 70 found, 48 kept (cloud <= 20.0)
+02:35:13 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 48 usable scenes
+02:36:05 INFO    terrarium.ingest.pipeline: sentinel-2 [2019-summer]: 3 variable(s) in 52.7s (attempt 1)
+02:36:05 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2019-04-01T00:00:00Z/2019-06-30T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:36:06 INFO    terrarium.ingest.client: landsat-c2-l2: 18 found, 12 kept (cloud <= 20.0)
+02:36:06 INFO    terrarium.ingest.pipeline: dropped 8 Landsat scenes without a TIRS thermal band
+02:36:07 INFO    terrarium.ingest.pipeline: 2019-summer landsat-c2-l2: clear looks per pixel min=3 median=4 over 4 scenes
+02:36:07 INFO    terrarium.ingest.pipeline: landsat [2019-summer]: 1 variable(s) in 2.0s (attempt 1)
+02:36:11 INFO    terrarium.ingest.pipeline: open-meteo 2019-summer: 91 overpass hours from 2184 hourly records
+02:36:11 INFO    terrarium.ingest.pipeline: open-meteo [2019-summer]: 3 variable(s) in 3.8s (attempt 1)
+02:36:11 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2019-11-01T00:00:00Z/2020-01-31T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:36:12 INFO    terrarium.ingest.client: sentinel-2-l2a: 70 found, 20 kept (cloud <= 20.0)
+02:36:12 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 20 usable scenes
+02:37:00 INFO    terrarium.ingest.pipeline: sentinel-2 [2019-winter]: 3 variable(s) in 48.7s (attempt 1)
+02:37:00 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2019-11-01T00:00:00Z/2020-01-31T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:37:00 INFO    terrarium.ingest.client: landsat-c2-l2: 18 found, 4 kept (cloud <= 20.0)
+02:37:00 INFO    terrarium.ingest.pipeline: dropped 3 Landsat scenes without a TIRS thermal band
+02:37:01 INFO    terrarium.ingest.pipeline: 2019-winter landsat-c2-l2: clear looks per pixel min=0 median=1 over 1 scenes
+02:37:01 WARNING terrarium.ingest.pipeline: 2019-winter landsat-c2-l2: some pixels have no clear observation at all - their composite is a gap, not a measurement, and will read as ~100% valid in a report rounded to one decimal
+02:37:01 INFO    terrarium.ingest.pipeline: landsat [2019-winter]: 1 variable(s) in 1.4s (attempt 1)
+02:37:06 INFO    terrarium.ingest.pipeline: open-meteo 2019-winter: 92 overpass hours from 2208 hourly records
+02:37:06 INFO    terrarium.ingest.pipeline: open-meteo [2019-winter]: 3 variable(s) in 4.7s (attempt 1)
+02:37:06 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2020-04-01T00:00:00Z/2020-06-30T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:37:09 INFO    terrarium.ingest.client: sentinel-2-l2a: 70 found, 41 kept (cloud <= 20.0)
+02:37:09 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 41 usable scenes
+02:37:30 INFO    terrarium.ingest.pipeline: sentinel-2 [2020-summer]: 3 variable(s) in 24.4s (attempt 1)
+02:37:30 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2020-04-01T00:00:00Z/2020-06-30T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:37:31 INFO    terrarium.ingest.client: landsat-c2-l2: 19 found, 10 kept (cloud <= 20.0)
+02:37:31 INFO    terrarium.ingest.pipeline: dropped 5 Landsat scenes without a TIRS thermal band
+02:37:33 INFO    terrarium.ingest.pipeline: 2020-summer landsat-c2-l2: clear looks per pixel min=4 median=5 over 5 scenes
+02:37:33 INFO    terrarium.ingest.pipeline: landsat [2020-summer]: 1 variable(s) in 2.6s (attempt 1)
+02:37:35 INFO    terrarium.ingest.pipeline: open-meteo 2020-summer: 91 overpass hours from 2184 hourly records
+02:37:35 INFO    terrarium.ingest.pipeline: open-meteo [2020-summer]: 3 variable(s) in 1.9s (attempt 1)
+02:37:35 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2020-11-01T00:00:00Z/2021-01-31T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:37:36 INFO    terrarium.ingest.client: sentinel-2-l2a: 73 found, 31 kept (cloud <= 20.0)
+02:37:36 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 31 usable scenes
+02:38:09 INFO    terrarium.ingest.pipeline: sentinel-2 [2020-winter]: 3 variable(s) in 33.6s (attempt 1)
+02:38:09 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2020-11-01T00:00:00Z/2021-01-31T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:38:09 INFO    terrarium.ingest.client: landsat-c2-l2: 15 found, 5 kept (cloud <= 20.0)
+02:38:09 INFO    terrarium.ingest.pipeline: dropped 5 Landsat scenes without a TIRS thermal band
+02:38:09 INFO    terrarium.ingest.pipeline: landsat [2020-winter]: 0 variable(s) in 0.4s (attempt 1)
+02:38:10 INFO    terrarium.ingest.pipeline: open-meteo 2020-winter: 92 overpass hours from 2208 hourly records
+02:38:10 INFO    terrarium.ingest.pipeline: open-meteo [2020-winter]: 3 variable(s) in 0.9s (attempt 1)
+02:38:10 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2021-04-01T00:00:00Z/2021-06-30T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:38:11 INFO    terrarium.ingest.client: sentinel-2-l2a: 73 found, 47 kept (cloud <= 20.0)
+02:38:11 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 47 usable scenes
+02:38:50 INFO    terrarium.ingest.pipeline: sentinel-2 [2021-summer]: 3 variable(s) in 40.5s (attempt 1)
+02:38:50 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2021-04-01T00:00:00Z/2021-06-30T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:38:51 INFO    terrarium.ingest.client: landsat-c2-l2: 18 found, 10 kept (cloud <= 20.0)
+02:38:51 INFO    terrarium.ingest.pipeline: dropped 6 Landsat scenes without a TIRS thermal band
+02:38:53 INFO    terrarium.ingest.pipeline: 2021-summer landsat-c2-l2: clear looks per pixel min=2 median=4 over 4 scenes
+02:38:53 INFO    terrarium.ingest.pipeline: landsat [2021-summer]: 1 variable(s) in 2.4s (attempt 1)
+02:38:54 INFO    terrarium.ingest.pipeline: open-meteo 2021-summer: 91 overpass hours from 2184 hourly records
+02:38:54 INFO    terrarium.ingest.pipeline: open-meteo [2021-summer]: 3 variable(s) in 1.0s (attempt 1)
+02:38:54 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2021-11-01T00:00:00Z/2022-01-31T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:38:55 INFO    terrarium.ingest.client: sentinel-2-l2a: 82 found, 49 kept (cloud <= 20.0)
+02:38:55 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 49 usable scenes
+02:38:55 WARNING terrarium.ingest.pipeline: mixed Sentinel-2 processing baselines [3.0, 4.0]; applying the -1000.0 DN offset to all
+02:39:34 INFO    terrarium.ingest.pipeline: sentinel-2 [2021-winter]: 3 variable(s) in 40.1s (attempt 1)
+02:39:34 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2021-11-01T00:00:00Z/2022-01-31T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:39:34 INFO    terrarium.ingest.client: landsat-c2-l2: 13 found, 7 kept (cloud <= 20.0)
+02:39:34 INFO    terrarium.ingest.pipeline: dropped 3 Landsat scenes without a TIRS thermal band
+02:39:37 INFO    terrarium.ingest.pipeline: 2021-winter landsat-c2-l2: clear looks per pixel min=2 median=3 over 4 scenes
+02:39:37 INFO    terrarium.ingest.pipeline: landsat [2021-winter]: 1 variable(s) in 2.9s (attempt 1)
+02:39:41 INFO    terrarium.ingest.pipeline: open-meteo 2021-winter: 92 overpass hours from 2208 hourly records
+02:39:41 INFO    terrarium.ingest.pipeline: open-meteo [2021-winter]: 3 variable(s) in 4.7s (attempt 1)
+02:39:41 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2022-04-01T00:00:00Z/2022-06-30T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:39:42 INFO    terrarium.ingest.client: sentinel-2-l2a: 106 found, 89 kept (cloud <= 20.0)
+02:39:42 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 89 usable scenes
+02:40:28 INFO    terrarium.ingest.pipeline: sentinel-2 [2022-summer]: 3 variable(s) in 46.2s (attempt 1)
+02:40:28 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2022-04-01T00:00:00Z/2022-06-30T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:40:28 INFO    terrarium.ingest.client: landsat-c2-l2: 20 found, 14 kept (cloud <= 20.0)
+02:40:28 INFO    terrarium.ingest.pipeline: dropped 2 Landsat scenes without a TIRS thermal band
+02:40:30 WARNING rasterio._err: CPLE_AppDefined:Value 1 in the source dataset has been changed to 0 in the destination dataset to avoid being treated as NoData. To avoid this, select a different NoData value for the destination dataset.
+02:40:30 WARNING rasterio._err: CPLE_AppDefined:Value 1 in the source dataset has been changed to 0 in the destination dataset to avoid being treated as NoData. To avoid this, select a different NoData value for the destination dataset.
+02:40:30 WARNING rasterio._err: CPLE_AppDefined:Value 1 in the source dataset has been changed to 0 in the destination dataset to avoid being treated as NoData. To avoid this, select a different NoData value for the destination dataset.
+02:40:31 WARNING rasterio._err: CPLE_AppDefined:Value 1 in the source dataset has been changed to 0 in the destination dataset to avoid being treated as NoData. To avoid this, select a different NoData value for the destination dataset.
+02:40:31 INFO    terrarium.ingest.pipeline: 2022-summer landsat-c2-l2: clear looks per pixel min=8 median=8 over 12 scenes
+02:40:31 INFO    terrarium.ingest.pipeline: landsat [2022-summer]: 1 variable(s) in 3.3s (attempt 1)
+02:40:32 INFO    terrarium.ingest.pipeline: open-meteo 2022-summer: 91 overpass hours from 2184 hourly records
+02:40:32 INFO    terrarium.ingest.pipeline: open-meteo [2022-summer]: 3 variable(s) in 1.2s (attempt 1)
+02:40:32 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2022-11-01T00:00:00Z/2023-01-31T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:40:33 INFO    terrarium.ingest.client: sentinel-2-l2a: 89 found, 46 kept (cloud <= 20.0)
+02:40:33 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 46 usable scenes
+02:41:15 INFO    terrarium.ingest.pipeline: sentinel-2 [2022-winter]: 3 variable(s) in 42.6s (attempt 1)
+02:41:15 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2022-11-01T00:00:00Z/2023-01-31T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:41:15 INFO    terrarium.ingest.client: landsat-c2-l2: 11 found, 7 kept (cloud <= 20.0)
+02:41:16 WARNING rasterio._err: CPLE_AppDefined:Value 1 in the source dataset has been changed to 0 in the destination dataset to avoid being treated as NoData. To avoid this, select a different NoData value for the destination dataset.
+02:41:17 INFO    terrarium.ingest.pipeline: 2022-winter landsat-c2-l2: clear looks per pixel min=4 median=5 over 7 scenes
+02:41:17 INFO    terrarium.ingest.pipeline: landsat [2022-winter]: 1 variable(s) in 2.5s (attempt 1)
+02:41:23 INFO    terrarium.ingest.pipeline: open-meteo 2022-winter: 92 overpass hours from 2208 hourly records
+02:41:23 INFO    terrarium.ingest.pipeline: open-meteo [2022-winter]: 3 variable(s) in 5.7s (attempt 1)
+02:41:23 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2023-04-01T00:00:00Z/2023-06-30T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:41:25 INFO    terrarium.ingest.client: sentinel-2-l2a: 126 found, 84 kept (cloud <= 20.0)
+02:41:25 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 84 usable scenes
+02:42:16 INFO    terrarium.ingest.pipeline: sentinel-2 [2023-summer]: 3 variable(s) in 53.1s (attempt 1)
+02:42:16 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2023-04-01T00:00:00Z/2023-06-30T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:42:16 INFO    terrarium.ingest.client: landsat-c2-l2: 22 found, 14 kept (cloud <= 20.0)
+02:42:16 INFO    terrarium.ingest.pipeline: dropped 6 Landsat scenes without a TIRS thermal band
+02:42:18 WARNING rasterio._err: CPLE_AppDefined:Value 1 in the source dataset has been changed to 0 in the destination dataset to avoid being treated as NoData. To avoid this, select a different NoData value for the destination dataset.
+02:42:18 WARNING rasterio._err: CPLE_AppDefined:Value 1 in the source dataset has been changed to 0 in the destination dataset to avoid being treated as NoData. To avoid this, select a different NoData value for the destination dataset.
+02:42:18 INFO    terrarium.ingest.pipeline: 2023-summer landsat-c2-l2: clear looks per pixel min=4 median=6 over 8 scenes
+02:42:18 INFO    terrarium.ingest.pipeline: landsat [2023-summer]: 1 variable(s) in 2.4s (attempt 1)
+02:42:20 INFO    terrarium.ingest.pipeline: open-meteo 2023-summer: 91 overpass hours from 2184 hourly records
+02:42:20 INFO    terrarium.ingest.pipeline: open-meteo [2023-summer]: 3 variable(s) in 1.1s (attempt 1)
+02:42:20 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2023-11-01T00:00:00Z/2024-01-31T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:42:20 INFO    terrarium.ingest.client: sentinel-2-l2a: 84 found, 39 kept (cloud <= 20.0)
+02:42:20 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 39 usable scenes
+02:43:15 INFO    terrarium.ingest.pipeline: sentinel-2 [2023-winter]: 3 variable(s) in 55.7s (attempt 1)
+02:43:15 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2023-11-01T00:00:00Z/2024-01-31T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:43:16 INFO    terrarium.ingest.client: landsat-c2-l2: 15 found, 5 kept (cloud <= 20.0)
+02:43:16 INFO    terrarium.ingest.pipeline: dropped 2 Landsat scenes without a TIRS thermal band
+02:43:17 INFO    terrarium.ingest.pipeline: 2023-winter landsat-c2-l2: clear looks per pixel min=0 median=3 over 3 scenes
+02:43:17 WARNING terrarium.ingest.pipeline: 2023-winter landsat-c2-l2: some pixels have no clear observation at all - their composite is a gap, not a measurement, and will read as ~100% valid in a report rounded to one decimal
+02:43:17 INFO    terrarium.ingest.pipeline: landsat [2023-winter]: 1 variable(s) in 1.8s (attempt 1)
+02:43:18 INFO    terrarium.ingest.pipeline: open-meteo 2023-winter: 92 overpass hours from 2208 hourly records
+02:43:18 INFO    terrarium.ingest.pipeline: open-meteo [2023-winter]: 3 variable(s) in 0.9s (attempt 1)
+02:43:18 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2024-04-01T00:00:00Z/2024-06-30T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:43:19 INFO    terrarium.ingest.client: sentinel-2-l2a: 74 found, 49 kept (cloud <= 20.0)
+02:43:19 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 49 usable scenes
+02:44:13 INFO    terrarium.ingest.pipeline: sentinel-2 [2024-summer]: 3 variable(s) in 55.0s (attempt 1)
+02:44:13 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2024-04-01T00:00:00Z/2024-06-30T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:44:13 INFO    terrarium.ingest.client: landsat-c2-l2: 15 found, 12 kept (cloud <= 20.0)
+02:44:14 WARNING rasterio._err: CPLE_AppDefined:Value 1 in the source dataset has been changed to 0 in the destination dataset to avoid being treated as NoData. To avoid this, select a different NoData value for the destination dataset.
+02:44:16 WARNING rasterio._err: CPLE_AppDefined:Value 1 in the source dataset has been changed to 0 in the destination dataset to avoid being treated as NoData. To avoid this, select a different NoData value for the destination dataset.
+02:44:16 INFO    terrarium.ingest.pipeline: 2024-summer landsat-c2-l2: clear looks per pixel min=8 median=10 over 12 scenes
+02:44:16 INFO    terrarium.ingest.pipeline: landsat [2024-summer]: 1 variable(s) in 3.1s (attempt 1)
+02:44:17 INFO    terrarium.ingest.pipeline: open-meteo 2024-summer: 91 overpass hours from 2184 hourly records
+02:44:17 INFO    terrarium.ingest.pipeline: open-meteo [2024-summer]: 3 variable(s) in 1.0s (attempt 1)
+02:44:17 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '138', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2024-11-01T00:00:00Z/2025-01-31T23:59:59Z", "collections": ["sentinel-2-l2a"]}
+02:44:18 INFO    terrarium.ingest.client: sentinel-2-l2a: 72 found, 34 kept (cloud <= 20.0)
+02:44:18 INFO    terrarium.ingest.client: sentinel-2-l2a: compositing the 14 clearest of 34 usable scenes
+02:45:04 INFO    terrarium.ingest.pipeline: sentinel-2 [2024-winter]: 3 variable(s) in 46.9s (attempt 1)
+02:45:04 DEBUG   pystac_client.stac_api_io: POST https://planetarycomputer.microsoft.com/api/stac/v1/search Headers: {'User-Agent': 'python-requests/2.34.2', 'Accept-Encoding': 'gzip, deflate', 'Accept': '*/*', 'Connection': 'keep-alive', 'Content-Length': '137', 'Content-Type': 'application/json'} Payload: {"bbox": [74.2533, 31.4305, 74.4641, 31.6103], "datetime": "2024-11-01T00:00:00Z/2025-01-31T23:59:59Z", "collections": ["landsat-c2-l2"]}
+02:45:04 INFO    terrarium.ingest.client: landsat-c2-l2: 12 found, 5 kept (cloud <= 20.0)
+02:45:05 WARNING rasterio._err: CPLE_AppDefined:Value 1 in the source dataset has been changed to 0 in the destination dataset to avoid being treated as NoData. To avoid this, select a different NoData value for the destination dataset.
+02:45:05 INFO    terrarium.ingest.pipeline: 2024-winter landsat-c2-l2: clear looks per pixel min=3 median=4 over 5 scenes
+02:45:06 INFO    terrarium.ingest.pipeline: landsat [2024-winter]: 1 variable(s) in 1.5s (attempt 1)
+02:45:09 INFO    terrarium.ingest.pipeline: open-meteo 2024-winter: 92 overpass hours from 2208 hourly records
+02:45:09 INFO    terrarium.ingest.pipeline: open-meteo [2024-winter]: 3 variable(s) in 3.3s (attempt 1)
+------------------------------------------------------------------------
+  SCENES
+------------------------------------------------------------------------
+  window         collection                 found  passed cloud  composited   cloud <=
+  -------------- ------------------------ ------- ------------- ----------- ----------
+  (static)       cop-dem-glo-30                 1             1           1          -
+  (static)       esa-worldcover                 2             2           2          -
+  (static)       worldpop                       1             1           1          -
+  2016-summer    sentinel-2-l2a                37            27          14        20%
+  2016-summer    landsat-c2-l2                 15             3           3        20%
+  2016-summer    open-meteo                  2184            91          91          -
+  2016-winter    sentinel-2-l2a                24            13          13        20%
+  2016-winter    landsat-c2-l2                 18             3           3        20%
+  2016-winter    open-meteo                  2208            92          92          -
+  2017-summer    sentinel-2-l2a                33            23          14        20%
+  2017-summer    landsat-c2-l2                 17             5           5        20%
+  2017-summer    open-meteo                  2184            91          91          -
+  2017-winter    landsat-c2-l2                 17             4           4        20%
+  2017-winter    open-meteo                  2208            92          92          -
+  2018-summer    sentinel-2-l2a                72            47          14        20%
+  2018-summer    landsat-c2-l2                 16             4           4        20%
+  2018-summer    open-meteo                  2184            91          91          -
+  2018-winter    sentinel-2-l2a                71            31          14        20%
+  2018-winter    landsat-c2-l2                 17             3           3        20%
+  2018-winter    open-meteo                  2208            92          92          -
+  2019-summer    sentinel-2-l2a                70            48          14        20%
+  2019-summer    landsat-c2-l2                 18             4           4        20%
+  2019-summer    open-meteo                  2184            91          91          -
+  2019-winter    sentinel-2-l2a                70            20          14        20%
+  2019-winter    landsat-c2-l2                 18             1           1        20%
+  2019-winter    open-meteo                  2208            92          92          -
+  2020-summer    sentinel-2-l2a                70            41          14        20%
+  2020-summer    landsat-c2-l2                 19             5           5        20%
+  2020-summer    open-meteo                  2184            91          91          -
+  2020-winter    sentinel-2-l2a                73            31          14        20%
+  2020-winter    landsat-c2-l2                 15             0           0        20%
+  2020-winter    open-meteo                  2208            92          92          -
+  2021-summer    sentinel-2-l2a                73            47          14        20%
+  2021-summer    landsat-c2-l2                 18             4           4        20%
+  2021-summer    open-meteo                  2184            91          91          -
+  2021-winter    sentinel-2-l2a                82            49          14        20%
+  2021-winter    landsat-c2-l2                 13             4           4        20%
+  2021-winter    open-meteo                  2208            92          92          -
+  2022-summer    sentinel-2-l2a               106            89          14        20%
+  2022-summer    landsat-c2-l2                 20            12          12        20%
+  2022-summer    open-meteo                  2184            91          91          -
+  2022-winter    sentinel-2-l2a                89            46          14        20%
+  2022-winter    landsat-c2-l2                 11             7           7        20%
+  2022-winter    open-meteo                  2208            92          92          -
+  2023-summer    sentinel-2-l2a               126            84          14        20%
+  2023-summer    landsat-c2-l2                 22             8           8        20%
+  2023-summer    open-meteo                  2184            91          91          -
+  2023-winter    sentinel-2-l2a                84            39          14        20%
+  2023-winter    landsat-c2-l2                 15             3           3        20%
+  2023-winter    open-meteo                  2208            92          92          -
+  2024-summer    sentinel-2-l2a                74            49          14        20%
+  2024-summer    landsat-c2-l2                 15            12          12        20%
+  2024-summer    open-meteo                  2184            91          91          -
+  2024-winter    sentinel-2-l2a                72            34          14        20%
+  2024-winter    landsat-c2-l2                 12             5           5        20%
+  2024-winter    open-meteo                  2208            92          92          -
+
+------------------------------------------------------------------------
+  CUBE (all windows)
+------------------------------------------------------------------------
+  variable               units    dims          valid        min       mean        max
+  ---------------------- -------- ----------- ------- ---------- ---------- ----------
+  lst_c                  degC     time,y,x      94.3%     -8.597     33.085     54.460
+  ndvi                   1        time,y,x      94.4%     -0.573      0.211      0.990
+  ndbi                   1        time,y,x      94.4%     -0.787      0.020      0.545
+  albedo                 1        time,y,x      94.4%      0.014      0.163      0.401
+  elevation_m            m        y,x            100%    198.141    215.889    239.940
+  landcover              class    y,x            100%     10.000     45.185     80.000
+  population             people   y,x            100%      0.000    154.163    264.028
+  air_temp_c             degC     time           100%     13.900     24.589     35.800
+  wind_speed_ms          m s-1    time           100%      0.790      1.745      2.610
+  relative_humidity_pct  %        time           100%     26.000     50.611     82.000
+
+------------------------------------------------------------------------
+  PER WINDOW
+------------------------------------------------------------------------
+  window                  lst_c         ndvi         ndbi       albedo   air_temp_c wind_speed_ms relative_humidity_pct
+  ---------------- ------------ ------------ ------------ ------------ ------------ ------------ ------------
+  2016-summer              100%         100%         100%         100%        35.40         2.53        30.00
+  2016-winter              100%      99.968%      99.968%      99.968%        17.75         1.50        60.00
+  2017-summer              100%      99.998%      99.998%      99.998%        35.30         2.24        26.00
+  2017-winter              100%      MISSING      MISSING      MISSING        15.95         1.21        61.00
+  2018-summer              100%         100%         100%         100%        34.40         2.61        36.00
+  2018-winter              100%      99.988%      99.988%      99.988%        14.55         1.40        59.00
+  2019-summer              100%      99.993%      99.993%      99.993%        34.90         2.08        27.00
+  2019-winter             98.1%      99.961%      99.961%      99.961%        13.90         1.33        73.50
+  2020-summer              100%      99.998%      99.998%      99.998%        32.00         2.20        41.00
+  2020-winter           MISSING      99.983%      99.983%      99.983%        14.80         1.32        65.50
+  2021-summer              100%      99.998%      99.998%      99.998%        33.60         2.30        34.00
+  2021-winter              100%         100%         100%         100%        14.50         1.12        71.50
+  2022-summer              100%         100%         100%         100%        35.80         2.21        26.00
+  2022-winter              100%         100%         100%         100%        15.30         1.12        67.50
+  2023-summer              100%         100%         100%         100%        31.50         2.14        43.00
+  2023-winter           99.978%         100%         100%         100%        14.85         1.06        82.00
+  2024-summer              100%         100%         100%         100%        34.00         2.25        37.00
+  2024-winter              100%         100%         100%         100%        14.10         0.79        71.00
+
+  (maps show valid-pixel share, scalars show the value)
+
+02:45:09 DEBUG   numcodecs: Registering codec 'zlib'
+02:45:09 DEBUG   numcodecs: Registering codec 'gzip'
+02:45:09 DEBUG   numcodecs: Registering codec 'bz2'
+02:45:09 DEBUG   numcodecs: Registering codec 'lzma'
+02:45:09 DEBUG   numcodecs: Registering codec 'blosc'
+02:45:09 DEBUG   numcodecs: Registering codec 'zstd'
+02:45:09 DEBUG   numcodecs: Registering codec 'lz4'
+02:45:09 DEBUG   numcodecs: Registering codec 'astype'
+02:45:09 DEBUG   numcodecs: Registering codec 'delta'
+02:45:09 DEBUG   numcodecs: Registering codec 'quantize'
+02:45:09 DEBUG   numcodecs: Registering codec 'fixedscaleoffset'
+02:45:09 DEBUG   numcodecs: Registering codec 'packbits'
+02:45:09 DEBUG   numcodecs: Registering codec 'categorize'
+02:45:09 DEBUG   numcodecs: Registering codec 'pickle'
+02:45:09 DEBUG   numcodecs: Registering codec 'base64'
+02:45:09 DEBUG   numcodecs: Registering codec 'shuffle'
+02:45:09 DEBUG   numcodecs: Registering codec 'bitround'
+02:45:09 DEBUG   numcodecs: Registering codec 'crc32'
+02:45:09 DEBUG   numcodecs: Registering codec 'adler32'
+02:45:09 DEBUG   numcodecs: Registering codec 'jenkins_lookup3'
+02:45:09 DEBUG   numcodecs: Registering codec 'json2'
+02:45:09 DEBUG   numcodecs: Registering codec 'vlen-utf8'
+02:45:09 DEBUG   numcodecs: Registering codec 'vlen-bytes'
+02:45:09 DEBUG   numcodecs: Registering codec 'vlen-array'
+02:45:09 DEBUG   numcodecs: Registering codec 'fletcher32'
+02:45:09 DEBUG   numcodecs: Registering codec 'n5_wrapper'
+02:45:10 INFO    terrarium.state.store: wrote cube to data\processed\cube_hindcast.zarr
+02:45:10 INFO    terrarium.state.store: catalogued build 4a812f30ad48
+------------------------------------------------------------------------
+  build 4a812f30ad48 finished in 1098.9s
+  zarr      data\processed\cube_hindcast.zarr
+  catalog   D:\credminds\Terrarium\data\processed\terrarium.duckdb
+  windows   18: 2016-summer, 2016-winter, 2017-summer, 2017-winter, 2018-summer, 2018-winter, 2019-summer, 2019-winter, 2020-summer, 2020-winter, 2021-summer, 2021-winter, 2022-summer, 2022-winter, 2023-summer, 2023-winter, 2024-summer, 2024-winter
+  populated 10/10: lst_c, ndvi, ndbi, albedo, elevation_m, landcover, population, air_temp_c, wind_speed_ms, relative_humidity_pct
+  GAPS      2017-winter/ndvi, 2017-winter/ndbi, 2017-winter/albedo, 2020-winter/lst_c
+------------------------------------------------------------------------
+

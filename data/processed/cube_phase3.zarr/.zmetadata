@@ -1,0 +1,480 @@
+{
+    "metadata": {
+        ".zattrs": {
+            "bounds": [
+                429000.0,
+                3477400.0,
+                449200.0,
+                3497500.0
+            ],
+            "crs": "EPSG:32643",
+            "grid": "{\"crs\": \"EPSG:32643\", \"resolution_m\": 100, \"bounds\": [429000.0, 3477400.0, 449200.0, 3497500.0], \"shape\": [201, 202]}",
+            "resolution_m": 100,
+            "windows": [
+                "2024-summer",
+                "2024-winter"
+            ]
+        },
+        ".zgroup": {
+            "zarr_format": 2
+        },
+        "air_temp_c/.zarray": {
+            "chunks": [
+                2
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2
+            ],
+            "zarr_format": 2
+        },
+        "air_temp_c/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ],
+            "coordinates": "season window",
+            "description": "2 m air temperature at the ~10:30 local overpass hour, window median (Open-Meteo ERA5 archive). Air, not surface temperature.",
+            "resampling": "none",
+            "source_collection": "open-meteo",
+            "units": "degC"
+        },
+        "albedo/.zarray": {
+            "chunks": [
+                1,
+                201,
+                202
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2,
+                201,
+                202
+            ],
+            "zarr_format": 2
+        },
+        "albedo/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "y",
+                "x"
+            ],
+            "coordinates": "season window",
+            "description": "Broadband shortwave albedo, Liang (2001) coefficients on Sentinel-2 bands",
+            "resampling": "bilinear",
+            "source_collection": "sentinel-2-l2a",
+            "units": "1"
+        },
+        "elevation_m/.zarray": {
+            "chunks": [
+                201,
+                202
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                201,
+                202
+            ],
+            "zarr_format": 2
+        },
+        "elevation_m/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "y",
+                "x"
+            ],
+            "description": "Surface elevation (DSM, incl. buildings) above EGM2008, Copernicus DEM GLO-30",
+            "resampling": "bilinear",
+            "source_collection": "cop-dem-glo-30",
+            "units": "m"
+        },
+        "landcover/.zarray": {
+            "chunks": [
+                201,
+                202
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "|u1",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                201,
+                202
+            ],
+            "zarr_format": 2
+        },
+        "landcover/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "y",
+                "x"
+            ],
+            "description": "ESA WorldCover 2021 class code",
+            "resampling": "nearest",
+            "source_collection": "esa-worldcover",
+            "units": "class"
+        },
+        "lst_c/.zarray": {
+            "chunks": [
+                1,
+                201,
+                202
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2,
+                201,
+                202
+            ],
+            "zarr_format": 2
+        },
+        "lst_c/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "y",
+                "x"
+            ],
+            "coordinates": "season window",
+            "description": "Mid-morning land surface temperature (~10:30 local) from Landsat ST_B10, clear-sky median. Surface, not air temperature.",
+            "resampling": "bilinear",
+            "source_collection": "landsat-c2-l2",
+            "units": "degC"
+        },
+        "ndbi/.zarray": {
+            "chunks": [
+                1,
+                201,
+                202
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2,
+                201,
+                202
+            ],
+            "zarr_format": 2
+        },
+        "ndbi/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "y",
+                "x"
+            ],
+            "coordinates": "season window",
+            "description": "Normalised difference built-up index from Sentinel-2 B11/B08",
+            "resampling": "bilinear",
+            "source_collection": "sentinel-2-l2a",
+            "units": "1"
+        },
+        "ndvi/.zarray": {
+            "chunks": [
+                1,
+                201,
+                202
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2,
+                201,
+                202
+            ],
+            "zarr_format": 2
+        },
+        "ndvi/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time",
+                "y",
+                "x"
+            ],
+            "coordinates": "season window",
+            "description": "Normalised difference vegetation index from Sentinel-2 B08/B04",
+            "resampling": "bilinear",
+            "source_collection": "sentinel-2-l2a",
+            "units": "1"
+        },
+        "population/.zarray": {
+            "chunks": [
+                201,
+                202
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                201,
+                202
+            ],
+            "zarr_format": 2
+        },
+        "population/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "y",
+                "x"
+            ],
+            "description": "Residents per 100 m cell, WorldPop 2020 constrained (BSGM)",
+            "resampling": "sum",
+            "source_collection": "worldpop",
+            "units": "people"
+        },
+        "relative_humidity_pct/.zarray": {
+            "chunks": [
+                2
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2
+            ],
+            "zarr_format": 2
+        },
+        "relative_humidity_pct/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ],
+            "coordinates": "season window",
+            "description": "2 m relative humidity at the ~10:30 local overpass hour, window median (Open-Meteo ERA5 archive)",
+            "resampling": "none",
+            "source_collection": "open-meteo",
+            "units": "%"
+        },
+        "season/.zarray": {
+            "chunks": [
+                2
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U16",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2
+            ],
+            "zarr_format": 2
+        },
+        "season/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ]
+        },
+        "time/.zarray": {
+            "chunks": [
+                2
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<i8",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2
+            ],
+            "zarr_format": 2
+        },
+        "time/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ],
+            "calendar": "proleptic_gregorian",
+            "units": "days since 2024-05-16 00:00:00"
+        },
+        "wind_speed_ms/.zarray": {
+            "chunks": [
+                2
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f4",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2
+            ],
+            "zarr_format": 2
+        },
+        "wind_speed_ms/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ],
+            "coordinates": "season window",
+            "description": "10 m wind speed at the ~10:30 local overpass hour, window median (Open-Meteo ERA5 archive)",
+            "resampling": "none",
+            "source_collection": "open-meteo",
+            "units": "m s-1"
+        },
+        "window/.zarray": {
+            "chunks": [
+                2
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<U32",
+            "fill_value": null,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                2
+            ],
+            "zarr_format": 2
+        },
+        "window/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "time"
+            ]
+        },
+        "x/.zarray": {
+            "chunks": [
+                202
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                202
+            ],
+            "zarr_format": 2
+        },
+        "x/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "x"
+            ]
+        },
+        "y/.zarray": {
+            "chunks": [
+                201
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dtype": "<f8",
+            "fill_value": "NaN",
+            "filters": null,
+            "order": "C",
+            "shape": [
+                201
+            ],
+            "zarr_format": 2
+        },
+        "y/.zattrs": {
+            "_ARRAY_DIMENSIONS": [
+                "y"
+            ]
+        }
+    },
+    "zarr_consolidated_format": 1
+}

@@ -1,0 +1,12 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "time",
+        "y",
+        "x"
+    ],
+    "coordinates": "season window",
+    "description": "Broadband shortwave albedo, Liang (2001) coefficients on Sentinel-2 bands",
+    "resampling": "bilinear",
+    "source_collection": "sentinel-2-l2a",
+    "units": "1"
+}

@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "y",
+        "x"
+    ],
+    "description": "ESA WorldCover 2021 class code",
+    "resampling": "nearest",
+    "source_collection": "esa-worldcover",
+    "units": "class"
+}

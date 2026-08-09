@@ -1,0 +1,8 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "y",
+        "x"
+    ],
+    "description": "Ground-level PM2.5 emission rate per 100 m cell: OSM road length x class traffic x fleet emission factor, plus brick-kiln point sources. A modelled inventory, not a measurement.",
+    "units": "g s-1"
+}

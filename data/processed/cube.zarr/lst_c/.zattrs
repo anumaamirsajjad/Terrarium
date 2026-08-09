@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "y",
+        "x"
+    ],
+    "description": "Land surface temperature from Landsat ST_B10, clear-sky median",
+    "resampling": "bilinear",
+    "source_collection": "landsat-c2-l2",
+    "units": "degC"
+}
