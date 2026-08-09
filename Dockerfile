@@ -35,7 +35,7 @@ RUN uv sync --frozen --no-dev
 # ---------------------------------------------------------
 
 # Point the API to the cube, and listen on all interfaces
-ENV TERRARIUM_SERVE_ZARR_STORE=data/processed/cube.zarr
+ENV TERRARIUM_SERVE_ZARR_STORE=data/processed/cube_v2.zarr
 ENV TERRARIUM_API_HOST=0.0.0.0
 ENV TERRARIUM_API_PORT=8000
 
