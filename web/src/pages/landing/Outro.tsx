@@ -13,15 +13,17 @@ import { useRef } from "react";
 
 import { RISE, STAGGER } from "../../motion/springs";
 import { useMarginNote } from "./marginNote";
-import { Eyebrow, Rule } from "./primitives";
+import { Eyebrow, InlineCaveat, Rule } from "./primitives";
 
-const REPO = "https://github.com/otto-cr/terrarium";
+const REPO = "https://github.com/anumaamirsajjad/Terrarium";
+
+const NOTE = {
+  subject: "Costs rank plans. They do not budget one.",
+  body: "Every unit figure in the library is `calibrated=False` — literature values, in the same category as the air core's emission factors. Useful for saying which of two plans is dearer, and for nothing a council could sign.",
+};
 
 export default function Outro() {
-  const section = useMarginNote("brief", {
-    subject: "Costs rank plans. They do not budget one.",
-    body: "Every unit figure in the library is `calibrated=False` — literature values, in the same category as the air core's emission factors. Useful for saying which of two plans is dearer, and for nothing a council could sign.",
-  });
+  const section = useMarginNote("brief", NOTE);
 
   const sheet = useRef<HTMLDivElement>(null);
   const { scrollYProgress } = useScroll({ target: sheet, offset: ["start end", "end start"] });
@@ -54,6 +56,8 @@ export default function Outro() {
             It prints through the browser&rsquo;s own print dialog. No rendering service, no
             font stack, no extra dependency: a button every browser already ships.
           </p>
+
+          <InlineCaveat note={NOTE} />
         </motion.div>
 
         <motion.div

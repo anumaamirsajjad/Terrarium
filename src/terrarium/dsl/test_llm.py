@@ -15,7 +15,10 @@ from io import BytesIO
 from typing import Any
 
 import pytest
+from langchain_core.language_models import FakeListChatModel
 
+from terrarium.dsl import llm
+from terrarium.dsl.explain import PlainSummary
 from terrarium.dsl.llm import (
     FallbackAdapter,
     GeminiAdapter,
@@ -238,3 +241,220 @@ def test_no_keys_at_all_resolves_to_nothing() -> None:
         gemini_api_key = None
 
     assert resolve_adapter(_Settings()) is None
+
+
+# --- The plain-language narrator (D21) ----------------------------------------------
+#
+# The guard, not the prose, is what these cover. Whether the model writes a nice sentence
+# is not testable offline and does not matter; whether a model that invents a figure can
+# get that figure onto the dashboard is both, and is the only reason this seam was
+# allowed to exist at all.
+
+
+class _Exploding(FakeListChatModel):
+    """A provider that fails mid-call, which is the common real failure.
+
+    Subclasses langchain-core's own fake rather than a hand-rolled object, because a
+    hand-rolled one is not a `Runnable` and `prompt | model | parser` refuses to build
+    with it - so the test would pass for the wrong reason, never having exercised the
+    chain at all.
+    """
+
+    def _call(self, *_args: Any, **_kwargs: Any) -> str:
+        # `_call` rather than `invoke`: this is where a real provider's transport error
+        # surfaces, so failing here exercises the same path a dead network would.
+        raise RuntimeError("provider on fire")
+
+
+def _plain() -> PlainSummary:
+    return PlainSummary(
+        verdict="small",
+        headline="Planting across 16.7 km2 would cool the ground about 0.16 degC.",
+        points=("About 6.2 million people live here.", "Rough cost: about $2.7 million."),
+        caveat="This is a model, not a measurement.",
+    )
+
+
+def _narrate_with(monkeypatch: pytest.MonkeyPatch, text: str) -> PlainSummary:
+    """Run `narrate` against a real LCEL chain whose model answers with `text`."""
+    model = FakeListChatModel(responses=[text])
+    monkeypatch.setattr(llm, "_chat_model", lambda _settings: model)
+    return llm.narrate(_plain(), settings=object())
+
+
+def test_no_key_returns_the_template_untouched() -> None:
+    """The keyless deployment is the default one, and it must cost nothing."""
+    plain = _plain()
+
+    # `_chat_model` returns None for a settings object with no keys on it at all.
+    assert llm.narrate(plain, settings=object()) is plain
+
+
+def test_a_faithful_rewrite_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = _narrate_with(
+        monkeypatch,
+        json.dumps(
+            {
+                "headline": "Planting over 16.7 km2 cools the ground by roughly 0.16 degC.",
+                "points": ["Around 6.2 million residents live here."],
+                "caveat": "A model estimate, not a measurement.",
+            }
+        ),
+    )
+
+    assert result.source.startswith("langchain:")
+    assert "16.7" in result.headline
+
+
+def test_an_invented_figure_rejects_the_whole_rewrite(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The failure this seam exists to stop.
+
+    A rewrite that quietly upgrades 0.16 degC to 1.6 degC is exactly the class of error
+    that kept a model out of `explain.py`, and it must not reach the dashboard - not even
+    with the rest of the rewrite intact, because a partly-trustworthy report is one
+    somebody has to check line by line.
+    """
+    template = _plain()
+    result = _narrate_with(
+        monkeypatch,
+        json.dumps(
+            {
+                "headline": "Planting over 16.7 km2 cools the ground by a full 1.6 degC.",
+                "points": ["Around 6.2 million residents live here."],
+                "caveat": "A model estimate, not a measurement.",
+            }
+        ),
+    )
+
+    assert result == template
+    assert result.source == "template"
+
+
+def test_rounding_a_figure_counts_as_inventing_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """16.7 -> 17 is an edit to a number, and the guard is deliberately strict about it."""
+    result = _narrate_with(
+        monkeypatch,
+        json.dumps(
+            {
+                "headline": "Planting over 17 km2 cools the ground about 0.16 degC.",
+                "points": ["About 6.2 million people live here."],
+                "caveat": "A model estimate.",
+            }
+        ),
+    )
+
+    assert result.source == "template"
+
+
+def test_dropping_a_secondary_figure_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A shorter report is fine. The cost line is editorial; the headline is not."""
+    result = _narrate_with(
+        monkeypatch,
+        json.dumps(
+            {
+                "headline": "Planting over 16.7 km2 cools the ground about 0.16 degC.",
+                "points": ["Millions of people live nearby."],
+            }
+        ),
+    )
+
+    assert result.source.startswith("langchain:")
+
+
+def test_dropping_the_headline_figures_keeps_the_template(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The failure a real Groq call produced on the first run.
+
+    Told loudly enough never to invent a number, a model finds the safest way to comply:
+    drop every number. "Planting cools the ground a little" passes the faithfulness guard
+    and is worthless to somebody deciding whether to fund it, so it must lose to the
+    template rather than replace it.
+    """
+    result = _narrate_with(
+        monkeypatch,
+        json.dumps(
+            {
+                "headline": "Planting here cools the ground a little.",
+                "points": ["Millions of people live nearby."],
+            }
+        ),
+    )
+
+    assert result.source == "template"
+
+
+def test_the_caveat_is_never_the_model_s_to_rewrite(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Observed: "already scaled down" came back as "may be less than predicted".
+
+    That is a different claim, and no numeral changed, so the faithfulness guard had
+    nothing to catch. The caveat is not sent and not read back.
+    """
+    template = _plain()
+    result = _narrate_with(
+        monkeypatch,
+        json.dumps(
+            {
+                "headline": "Planting over 16.7 km2 cools the ground about 0.16 degC.",
+                "points": ["About 6.2 million people live here."],
+                "caveat": "Results may be a little lower in practice.",
+            }
+        ),
+    )
+
+    assert result.source.startswith("langchain:")
+    assert result.caveat == template.caveat
+
+
+def test_thousands_separators_do_not_count_as_a_new_number() -> None:
+    """`180,905` and `180905` are one figure written two ways, not two figures."""
+    assert llm._numbers_are_faithful(source="180905 trees", rewritten="180,905 trees")
+
+
+def test_malformed_json_keeps_the_template(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _narrate_with(monkeypatch, "I'm afraid I can't do that.").source == "template"
+
+
+def test_a_fenced_block_is_unwrapped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Groq is asked for JSON by prompt, so a fence is the common way it leaks through."""
+    body = json.dumps(
+        {
+            "headline": "Planting over 16.7 km2 cools the ground about 0.16 degC.",
+            "points": ["About 6.2 million people live here."],
+            "caveat": "A model estimate.",
+        }
+    )
+
+    assert _narrate_with(monkeypatch, f"```json\n{body}\n```").source.startswith("langchain:")
+
+
+def test_a_dropped_section_keeps_the_template(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A report with no findings in it is not a shorter report, it is an empty one."""
+    result = _narrate_with(
+        monkeypatch,
+        json.dumps({"headline": "Planting cools things.", "points": []}),
+    )
+
+    assert result.source == "template"
+
+
+def test_a_provider_that_raises_keeps_the_template(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`narrate` never raises: a dead provider costs prose, never a request.
+
+    The canned response is a *valid, faithful* rewrite, so this test can only pass because
+    the exception fired. Given an unparseable string instead it would land on the template
+    either way and pass without ever testing the thing it is named for.
+    """
+    faithful = json.dumps(
+        {
+            "headline": "Planting over 16.7 km2 cools the ground about 0.16 degC.",
+            "points": ["About 6.2 million people live here."],
+            "caveat": "A model estimate.",
+        }
+    )
+    assert _narrate_with(monkeypatch, faithful).source.startswith("langchain:")
+
+    monkeypatch.setattr(llm, "_chat_model", lambda _settings: _Exploding(responses=[faithful]))
+
+    assert llm.narrate(_plain(), settings=object()).source == "template"
+

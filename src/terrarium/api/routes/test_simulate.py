@@ -276,3 +276,19 @@ def test_a_removal_fraction_above_one_is_rejected_by_the_schema(client: TestClie
     )
 
     assert response.status_code == 422
+
+
+def test_unknown_field_is_rejected_rather_than_defaulted(client: TestClient) -> None:
+    """A misspelled fraction must 422, not fall back to the default silently.
+
+    Both fractions have defaults, so with `extra="ignore"` a client that sends
+    `emission_fraction` (the name the field had in nobody's version) gets 200 and a
+    thermal-only answer — the same response a plan that asked for no traffic change
+    would get. Indistinguishable, and wrong.
+    """
+    response = client.post(
+        "/simulate",
+        json={"geometry": PLANTABLE, "canopy_fraction": 0.3, "emission_fraction": 0.5},
+    )
+    assert response.status_code == 422
+    assert "canopy_fraction" in response.text

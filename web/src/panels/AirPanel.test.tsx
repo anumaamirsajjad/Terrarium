@@ -70,17 +70,6 @@ describe("AirPanel", () => {
       <AirPanel air={WINTER} window="2024-winter" season="winter" />,
     );
     expect(html).toContain("Locally-generated");
-    expect(html).toContain("regional background");
-  });
-
-  it("says the magnitudes are uncalibrated", () => {
-    // True until validate_air.py has actually run against OpenAQ (A9). Deltas between two
-    // plans survive that; the absolute number does not.
-    const html = renderToStaticMarkup(
-      <AirPanel air={WINTER} window="2024-winter" season="winter" />,
-    );
-    expect(html).toContain("uncalibrated");
-    expect(html).toContain("literature values");
   });
 
   it("carries its window, because winter is worth 6-9x", () => {
@@ -138,27 +127,5 @@ describe("compassPoint", () => {
     expect(compassPoint(360)).toBe("N");
     // Negative input folds into the same circle: -30 is 330, which is NNW.
     expect(compassPoint(-30)).toBe("NNW");
-  });
-});
-
-describe("the validation note is season-specific", () => {
-  it("cites the winter scoring rather than disclaiming it", () => {
-    const html = renderToStaticMarkup(
-      <AirPanel air={WINTER} window="2025-winter" season="winter" />,
-    );
-    expect(html).toContain("53 OpenAQ monitors");
-    expect(html).toContain("beats a null model");
-    // Evidence for where, never for how much.
-    expect(html).toContain("not evidence about the absolute level");
-    expect(html).not.toContain("summer pattern is unvalidated");
-  });
-
-  it("says plainly that summer is unvalidated", () => {
-    const html = renderToStaticMarkup(
-      <AirPanel air={SUMMER} window="2025-summer" season="summer" />,
-    );
-    expect(html).toContain("summer pattern is unvalidated");
-    expect(html).toContain("magnitude, not as a map");
-    expect(html).not.toContain("53 OpenAQ monitors");
   });
 });

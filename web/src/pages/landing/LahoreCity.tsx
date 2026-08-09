@@ -610,10 +610,12 @@ function Scene({
   plant,
   animate,
   flying,
+  lowPower,
 }: {
   plant: MotionValue<number>;
   animate: boolean;
   flying: boolean;
+  lowPower: boolean;
 }) {
   const data = useLoader(JsonLoader, "/lahore.json") as unknown as LahoreExtract;
   const group = useRef<THREE.Group>(null);
@@ -658,8 +660,11 @@ function Scene({
         position={SUN_POSITION}
         intensity={3.4}
         color="#ffe9cc"
-        castShadow
-        shadow-mapSize={[2048, 2048]}
+        // Off on a coarse-pointer/narrow-viewport device: a 2048² shadow map plus two
+        // post-processing passes below is a desktop GPU's budget, not a phone's, and this
+        // scene has no capability check anywhere else to fall back on.
+        castShadow={!lowPower}
+        shadow-mapSize={lowPower ? [512, 512] : [2048, 2048]}
         // In metres, because the scene is. Depth bias alone either leaves acne on the
         // sunlit walls or peels every shadow away from the wall that casts it; offsetting
         // along the normal is what fixes both at this scale.
@@ -719,10 +724,12 @@ function Scene({
        * No SMAA: the composer multisamples, which is what the canvas's own `antialias`
        * was doing before it was drawing into a render target.
        */}
-      <EffectComposer multisampling={4}>
-        <N8AO aoRadius={18} intensity={2.4} distanceFalloff={0.6} halfRes />
-        <Bloom intensity={0.5} luminanceThreshold={0.86} luminanceSmoothing={0.3} mipmapBlur />
-      </EffectComposer>
+      {!lowPower && (
+        <EffectComposer multisampling={4}>
+          <N8AO aoRadius={18} intensity={2.4} distanceFalloff={0.6} halfRes />
+          <Bloom intensity={0.5} luminanceThreshold={0.86} luminanceSmoothing={0.3} mipmapBlur />
+        </EffectComposer>
+      )}
     </>
   );
 }
@@ -734,27 +741,55 @@ export interface LahoreCityProps {
   animate?: boolean;
   /** True once the CTA is pressed: the camera dives into the streets. */
   flying?: boolean;
+  /**
+   * False once the hero has scrolled out of view. R3F's default `frameloop="always"`
+   * renders this scene — two post-processing passes, a shadow map, an orbiting group —
+   * forever, whether or not it is on screen. With no gate it kept burning a frame budget
+   * three sections later, which is what made the sticky-scroll narratives below (the
+   * seven-sources grid, the core visualisations) feel like they were dropping frames: they
+   * were competing with a full 3D render nobody could see.
+   */
+  inView?: boolean;
 }
 
 export default function LahoreCity({
   plant,
   animate = true,
   flying = false,
+  inView = true,
 }: LahoreCityProps) {
+  // Coarse pointer (touch) or a narrow viewport, checked once at mount rather than tracked
+  // live: this is a decorative scene, not a layout, so it does not need to re-tier itself
+  // if a window resizes. Nothing else in this codebase gates 3D quality on device
+  // capability — a 2048² shadow map and two post-processing passes are a desktop GPU's
+  // budget, and the only other place this project checks `prefers-reduced-motion` is CSS
+  // media, not a capability tier.
+  const lowPower = useMemo(
+    () =>
+      typeof window !== "undefined" &&
+      (window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768),
+    [],
+  );
+
   return (
     <Canvas
       className="absolute inset-0"
       // PCF-soft shadow maps. The sun is low, so the shadows are long and their softness
-      // is most of what stops 2,048 texels from reading as a staircase.
-      shadows="soft"
+      // is most of what stops 2,048 texels from reading as a staircase. Off entirely on a
+      // low-power device — see `lowPower` above.
+      shadows={lowPower ? false : "soft"}
       // Low and close, like an oblique aerial rather than a satellite. The façades carry
       // storey lines and window bays now, and from 2 km up none of that resolves — the
       // detail only pays for itself if the camera is near enough to read it.
       camera={{ position: [560, 300, 760], fov: 40, near: 5, far: 12000 }}
       // Uncapped DPR quadruples the pixels on a retina panel for no visible gain on flat
-      // shaded boxes. 1.6 is where the edges stop looking stepped.
-      dpr={[1, 1.6]}
+      // shaded boxes. 1.6 is where the edges stop looking stepped — and where there's no
+      // budget for it at all, 1 is the floor.
+      dpr={lowPower ? 1 : [1, 1.6]}
       gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
+      // "always" while the hero is on screen, "demand" the moment it scrolls away — demand
+      // mode stops the internal rAF loop entirely and just holds the last frame.
+      frameloop={inView ? "always" : "demand"}
     >
       {/* Fog in the page's own black, so the district dissolves into the background
           instead of ending on a visible edge. */}
@@ -763,7 +798,7 @@ export default function LahoreCity({
           has to be inside the geometry for the city to end in haze instead of at an edge. */}
       <fog attach="fog" args={[HAZE_HEX, 1100, 3200]} />
       <Suspense fallback={null}>
-        <Scene plant={plant} animate={animate} flying={flying} />
+        <Scene plant={plant} animate={animate} flying={flying} lowPower={lowPower} />
       </Suspense>
     </Canvas>
   );

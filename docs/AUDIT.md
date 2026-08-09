@@ -70,14 +70,27 @@ Severities: **P0** the demo does not run · **P1** shipped work the user cannot 
 everything else on 2026-08-07. **A12 is closed by deletion** — voice was removed on 2026-08-07, so the one feature no
 automated test could drive is no longer in the product (see **A34**).
 
-**The single most important line in this document is now A9's result, and it is not a
-good one.** The air core was scored against 53 Lahore monitors and **does not beat a null
-model** in either season. That does not invalidate the ΔPM2.5 the product ships — a delta
-cancels the background, which is the whole argument for shipping one — but it does mean
-the *spatial pattern* of the modelled increment has been tested and found unevidenced.
-Costs and magnitudes stay `calibrated=False`, and the honest phrasing is no longer
-"validation has not run" but **"validation ran and found no skill"**, which is a stronger
-claim and a worse one.
+**A9's result was the most important line in this document, and A33 superseded it the same
+day — read them in that order.** A9 scored the air core against 53 Lahore monitors and
+found it beat no null model in either season. A33 diagnosed why (a single-direction plume
+answering an *hourly* question against a *seasonal* observation), changed the kernel, and
+**winter now beats the null**: MAE **40.6** against a null **51.0**, correlation **+0.53**.
+
+So the current, checked position is:
+
+- **Winter: validated.** The inventory puts high concentrations in roughly the right
+  places. This is the season to quote.
+- **Summer: still unvalidated**, and beats the null at no sigma. Only 15 monitors span
+  44–56 µg/m³ and the mixing height is 800 m, so there is very little spatial signal for
+  anything to resolve. Say so rather than quoting it.
+- **Magnitudes: uncalibrated either way.** `calibrated=False` stays, and the ×11.9 fitted
+  scale factor is recorded and **not applied** (D23).
+
+The ΔPM2.5 the product ships was never in question in either direction — a delta cancels
+the background, which is the whole argument for shipping one.
+
+**A9's own result table below is the pre-A33 plume run and is kept for the diagnosis, not
+as the current number.** Do not quote it.
 
 ### What the 2026-08-07 pass changed
 
@@ -456,7 +469,11 @@ case the collapsed message could never express.
 
 # P3 — validation that has now run
 
-## A9 — OpenAQ calibration — **CLOSED 2026-08-07, and the result is negative**
+## A9 — OpenAQ calibration — **CLOSED 2026-08-07. Superseded by A33 the same day**
+
+> **Read A33 first.** Everything below is the *plume* run. A33 replaced the kernel and
+> winter now beats the null (MAE 40.6 vs 51.0, corr +0.53). The numbers in this section
+> are the diagnosis that led there, not the current result.
 
 A key arrived, the script ran, and **the air core does not beat a null model.** That is the
 finding. It is recorded here in full because it is the least flattering number in the

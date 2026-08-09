@@ -50,7 +50,10 @@ export default function BriefDocument({ result, plan, tile, producedAt }: BriefD
         <table className="doc__table">
           <tbody>
             <tr>
-              <th scope="row">Mean ΔLST inside</th>
+              {/* Spelled out, matching `ResultPanel`'s caption - a table header abbreviated
+                  to "ΔLST" is exactly the bare-jargon case D9 exists to rule out; the
+                  qualifier belongs on the label a reader sees, not only in a caveat below. */}
+              <th scope="row">Mean land-surface temperature change (inside)</th>
               <td>{signed(stats.mean_delta_inside)} °C</td>
             </tr>
             <tr>

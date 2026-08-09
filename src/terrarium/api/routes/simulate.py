@@ -27,6 +27,7 @@ from terrarium.api.schemas.simulate import (
     SimulateRequest,
     SimulateResponse,
 )
+from terrarium.config import Settings, get_settings
 from terrarium.cores.air import EMISSION_VARIABLE as AIR_EMISSION_VARIABLE
 from terrarium.cores.air import AirParameters
 from terrarium.cores.air import simulate as simulate_air
@@ -40,6 +41,7 @@ from terrarium.cores.thermal.simulate import (
 )
 from terrarium.dsl.explain import AirInputs, Brief, BriefInputs, EquityInputs, brief_for
 from terrarium.dsl.library import estimate_cost, trees_for_canopy
+from terrarium.dsl.llm import narrate
 from terrarium.state.cube import select_window
 
 logger = logging.getLogger(__name__)
@@ -177,12 +179,18 @@ def _brief(
     context: PlausibilityContext,
     equity: EquityResponse | None,
     air: AirResponse | None,
+    settings: Settings,
 ) -> Brief:
     """Write the narrative block from the numbers already computed. No new physics.
 
     Costed from the canopy that was *actually* added rather than what was asked for: the
     core caps each cell at its own headroom, so the requested fraction is a ceiling and
     billing for it would price trees the plan cannot plant.
+
+    The plain-language block is then offered to the narrator (D24), which either rewords
+    it or hands it straight back. `narrate` cannot raise, so there is nothing to catch and
+    no branch here for the keyless case - which is the point: a deployment with no key
+    produces the template prose and the same response shape.
     """
     area_km2 = area_m2 / 1_000_000.0
     tree_count = trees_for_canopy(context.mean_canopy_added, area_m2)
@@ -191,7 +199,7 @@ def _brief(
         restricted_area_km2=area_km2 if request.emission_fraction_removed > 0 else 0.0,
     )
 
-    return brief_for(
+    brief = brief_for(
         BriefInputs(
             plan_name=_plan_name(request),
             window=label,
@@ -216,6 +224,7 @@ def _brief(
                     concentrated=equity.concentrated,
                     shares_reliable=equity.shares_reliable,
                     uninhabited_fraction=equity.uninhabited_fraction,
+                    population_covered=equity.population_covered,
                 )
                 if equity is not None and equity.deciles
                 else None
@@ -234,6 +243,7 @@ def _brief(
             ),
         )
     )
+    return brief.model_copy(update={"plain": narrate(brief.plain, settings=settings)})
 
 
 @router.post(
@@ -244,6 +254,7 @@ def _brief(
 async def run_simulation(
     request: SimulateRequest,
     runtime: Annotated[Runtime, Depends(get_runtime)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> SimulateResponse:
     try:
         label = runtime.resolve_window(request.window)
@@ -329,6 +340,7 @@ async def run_simulation(
             context=context,
             equity=equity,
             air=air,
+            settings=settings,
         ),
         delta=build_layer(
             result.delta,

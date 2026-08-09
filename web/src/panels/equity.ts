@@ -58,7 +58,7 @@ export function equityVerdict(equity: Equity): EquityVerdict {
       headline: `${(wasted * 100).toFixed(0)}% of this cooling reaches nobody`,
       detail:
         "It lands on cells with no residents. A plan can cool more overall and still " +
-        "help fewer people — compare plans on this number, not on ΔLST alone.",
+        "help fewer people — compare plans on this number, not on the cooling map alone.",
     };
   }
 

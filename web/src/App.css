@@ -422,18 +422,6 @@ code {
   background: var(--badge-bg);
 }
 
-@media (max-width: 52rem) {
-  .app {
-    grid-template-columns: 1fr;
-    grid-template-rows: 60vh 1fr;
-  }
-
-  .sidebar {
-    border-left: none;
-    border-top: 1px solid var(--border);
-  }
-}
-
 /* ------------------------------------------------------------- scenario --- */
 
 .scenario__presets {

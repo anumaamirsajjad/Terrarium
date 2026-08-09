@@ -26,6 +26,13 @@ const BRIEF: Brief = {
     "This is 2024-summer (summer).",
     "Mid-morning *land surface* temperature — not what a thermometer in the shade reads.",
   ],
+  plain: {
+    verdict: "moderate",
+    headline: "Planting across 4.2 km2 would cool the ground about 0.20 degC.",
+    points: ["About 6.2 million people live here."],
+    caveat: "This is a model, not a measurement.",
+    source: "template",
+  },
   confidence: "moderate",
   expected_cooling_c: -0.204,
 };

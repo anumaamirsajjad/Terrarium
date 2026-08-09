@@ -1,17 +1,12 @@
 /**
  * What the air core returned.
  *
- * Mirrors `ResultPanel`, and inherits two naming rules from the API rather than inventing
- * its own wording:
- *
- * 1. **Locally-generated PM2.5, never "air quality".** The inventory covers this tile's
- *    own roads and nothing else, so the regional background that dominates Lahore's
- *    absolute PM2.5 is absent *by construction*. This is a delta and never a level, and
- *    it is not what a monitor reads.
- * 2. **Uncalibrated.** The emission factors are literature figures for a South Asian
- *    fleet. Nothing in this core has seen Lahore's air — `validate_air.py` needs an
- *    OpenAQ key and has never run. Good for ranking two plans, not for a number to quote
- *    on its own.
+ * Mirrors `ResultPanel`. Named "Locally-generated PM2.5", never "air quality" — the
+ * inventory covers this tile's own roads and nothing else, so this is a delta and never a
+ * level, and not what a monitor reads. The uncalibrated/unvalidated caveats that used to
+ * sit below the stats (here and in `dsl/explain.py`'s technical brief) were removed by
+ * request; the underlying facts (literature emission factors, no summer validation) are
+ * still true and still drive `confidence`, they are simply no longer spelled out in prose.
  *
  * The season is shown because it is worth a factor of 6–7, not as a detail: the winter
  * inversion drops the mixing height ~3x and slows lateral spread, so identical emissions
@@ -122,36 +117,6 @@ export default function AirPanel({ air, window, season }: AirPanelProps) {
           )}
         </p>
 
-        {/* Season-specific because the validation is. Winter was scored against 53 OpenAQ
-            monitors and beats a null model; summer beats one at no setting tested. Calling
-            a winter figure unvalidated understates it and calling a summer figure
-            validated is false, so there is no general sentence to write here. The brief
-            carries the same split in `dsl/explain.py`, where it is testable. */}
-        <p className={winter ? "result__note" : "result__caveat"}>
-          {winter ? (
-            <>
-              The <strong>winter</strong> pattern was scored against{" "}
-              <strong>53 OpenAQ monitors</strong> and beats a null model (error 40.6 against
-              51.0). That is evidence the inventory puts high concentrations in roughly the
-              right places — not evidence about the absolute level.
-            </>
-          ) : (
-            <>
-              The <strong>summer pattern is unvalidated</strong>: it beats no null model at
-              any setting tested, because summer air mixes too deeply for local sources to
-              leave one. Read the summer figure as a magnitude, not as a map.
-            </>
-          )}
-        </p>
-
-        <p className="result__caveat">
-          <strong>Locally-generated</strong>, and <strong>uncalibrated</strong>. This is the
-          modelled contribution of <em>this tile&rsquo;s own roads</em> at the same ~10:30
-          hour — not a concentration a monitor reads, because the regional background that
-          dominates Lahore&rsquo;s PM2.5 is absent by construction. The emission factors are
-          literature values for a South Asian fleet; nothing here has been checked against a
-          station. Compare two plans with it; do not quote the magnitude on its own.
-        </p>
       </div>
     </section>
   );

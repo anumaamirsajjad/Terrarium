@@ -38,6 +38,15 @@ dependencies = [
     # just pulled in transitively by scikit-learn.
     "scipy>=1.14",
     "numba>=0.66.0",
+    # --- Intelligence: the plain-language narrator (D17 reopened, D24) ---
+    # LangChain rather than the hand-rolled urllib adapters that sit beside it in
+    # dsl/llm.py. Both providers stay free-tier and keyless-by-default, so the zero-budget
+    # rule is intact; what this buys is one prompt and one output parser across two
+    # providers instead of two hand-written request shapes. `langchain-core` is imported
+    # directly for ChatPromptTemplate and StrOutputParser, not just pulled in.
+    "langchain-core>=0.3",
+    "langchain-groq>=0.2",
+    "langchain-google-genai>=2.0",
 ]
     
 [project.optional-dependencies]

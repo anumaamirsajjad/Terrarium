@@ -15,7 +15,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useState } from "react";
 
 import { useMarginNote } from "./marginNote";
-import { Eyebrow, Rule } from "./primitives";
+import { Eyebrow, InlineCaveat, Rule } from "./primitives";
 
 const LINES = [
   { text: "Plant 5,000 trees near the Canal", dir: "ltr" as const },
@@ -26,11 +26,13 @@ const TYPE_MS = 45;
 const DELETE_MS = 25;
 const HOLD_MS = 2200;
 
+const NOTE = {
+  subject: "The parser is a front door, not a safety mechanism.",
+  body: "Nothing about reading a sentence makes a plan safe. What makes it safe is that whatever produces one — a model, a preset button, a regex — it is re-validated as a plan and then against the tile before a core sees a number.",
+};
+
 export default function CommandDemo() {
-  const section = useMarginNote("dsl", {
-    subject: "The parser is a front door, not a safety mechanism.",
-    body: "Nothing about reading a sentence makes a plan safe. What makes it safe is that whatever produces one — a model, a preset button, a regex — it is re-validated as a plan and then against the tile before a core sees a number.",
-  });
+  const section = useMarginNote("dsl", NOTE);
   const reduced = useReducedMotion();
   const [line, setLine] = useState(0);
   const [count, setCount] = useState(0);
@@ -138,6 +140,8 @@ export default function CommandDemo() {
           sees a number.
         </p>
       </div>
+
+      <InlineCaveat note={NOTE} />
 
       <motion.blockquote
         initial={{ opacity: 0 }}

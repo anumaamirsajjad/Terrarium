@@ -19,17 +19,11 @@
  * sheets in perspective read as a stack.
  */
 
-import {
-  type MotionValue,
-  motion,
-  useMotionTemplate,
-  useScroll,
-  useTransform,
-} from "motion/react";
+import { type MotionValue, motion, useScroll, useTransform } from "motion/react";
 import { useRef } from "react";
 
 import { useMarginNote } from "./marginNote";
-import { Eyebrow, Rule } from "./primitives";
+import { Eyebrow, InlineCaveat, Rule } from "./primitives";
 
 /** The analysis grid, as pixels on this stage. One cell is 100 m in the cube. */
 const LOCKED_CELL = 32;
@@ -199,8 +193,13 @@ function Sheet({
 
   // The grid itself converges. A sheet arriving at the right place with the wrong cell size
   // is still not aligned, and the cell size is the thing the reader is being told about.
-  const cell = useTransform(land, [0, 1], [source.cell, LOCKED_CELL]);
-  const cellSize = useMotionTemplate`${cell}px ${cell}px`;
+  //
+  // Driven as a `scale` transform on a fixed-size background rather than as an animated
+  // `backgroundSize`: `background-size` is not a compositable property, so re-stringing it
+  // every scroll tick forced a style recalc and repaint on all six sheets at once — the
+  // main-thread cost behind the section reading as choppy. `scale` is a transform, so this
+  // now costs the compositor nothing the sheet's own scale wasn't already paying for.
+  const gridScale = useTransform(land, [0, 1], [source.cell / LOCKED_CELL, 1]);
   // A vector layer has no cell until the ingest gives it one, so its grid arrives with it.
   const gridOpacity = useTransform(land, (l) => (source.vector ? l : 1));
 
@@ -212,13 +211,22 @@ function Sheet({
   // two the last sheet in the array — the road network — simply sat over the others and
   // the cube read as a page of orange diagonals rather than as a grid.
   const roadOpacity = useTransform(collapse, (c) => (1 - c) * 0.7);
-  const border = useTransform(collapse, [0, 1], [colour, "rgba(255,255,255,0.18)"]);
+  // Crossfaded rather than colour-interpolated: `border-color` paints on every frame it
+  // changes, same as `background-size` above. The method colour stays a static border and
+  // the "locked" colour arrives as a separate layer whose only animated property is
+  // opacity, which the compositor handles for free.
+  const lockedBorderOpacity = collapse;
 
   return (
     <motion.div
-      style={{ x, y, rotate, scale, opacity, borderColor: border }}
+      style={{ x, y, rotate, scale, opacity, borderColor: colour }}
       className="absolute inset-[19%] overflow-hidden rounded-sm border bg-black/45 backdrop-blur-[2px]"
     >
+      <motion.div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 rounded-sm border border-white/[0.18]"
+        style={{ opacity: lockedBorderOpacity }}
+      />
       {source.vector && (
         <motion.div
           aria-hidden
@@ -233,7 +241,12 @@ function Sheet({
       <motion.div
         aria-hidden
         className="absolute inset-0"
-        style={{ backgroundImage: GRID_IMAGE, backgroundSize: cellSize, opacity: gridOpacity }}
+        style={{
+          backgroundImage: GRID_IMAGE,
+          backgroundSize: `${LOCKED_CELL}px ${LOCKED_CELL}px`,
+          opacity: gridOpacity,
+          scale: gridScale,
+        }}
       />
       <motion.div
         style={{ opacity: labelOpacity }}
@@ -266,14 +279,16 @@ const RULES: readonly { method: Source["method"]; kind: string; why: string }[] 
   },
 ];
 
+const NOTE = {
+  subject: "A remote fetch that succeeds is not a fetch that completed.",
+  body: "WorldPop's server drops connections mid-transfer without raising, and a short read yields a valid-looking GeoTIFF with rows missing. The ingest verifies the content length and renames a partial file into place, because otherwise a truncated download looks exactly like a cache hit.",
+};
+
 export default function Alignment() {
   const track = useRef<HTMLDivElement>(null);
   // The ref goes on the sticky pane, never on the tall track: `useInView` wants a fraction
   // of the *element* on screen, and 40 % of two and a half viewports never is.
-  const pane = useMarginNote<HTMLDivElement>("alignment", {
-    subject: "A remote fetch that succeeds is not a fetch that completed.",
-    body: "WorldPop's server drops connections mid-transfer without raising, and a short read yields a valid-looking GeoTIFF with rows missing. The ingest verifies the content length and renames a partial file into place, because otherwise a truncated download looks exactly like a cache hit.",
-  });
+  const pane = useMarginNote<HTMLDivElement>("alignment", NOTE);
 
   const { scrollYProgress } = useScroll({ target: track, offset: ["start start", "end end"] });
 
@@ -293,8 +308,14 @@ export default function Alignment() {
 
   return (
     <section className="mx-auto max-w-[92rem] px-8">
-      <div ref={track} className="relative h-[260vh]">
-        <div ref={pane} className="sticky top-0 flex h-screen items-center">
+      {/* The scroll-scrubbed reveal below needs runway: 260vh of track for a pane pinned at
+          `h-screen`. Below `lg` that same runway is where it broke — the text block and a
+          full aspect-square visualisation cannot both fit inside one short phone viewport,
+          and a `sticky`/`h-screen` pane has nowhere to put what overflows but clip it. Below
+          `lg` this is a plain block instead: normal height, normal flow, no pin, so a short
+          viewport just scrolls it like any other section rather than cropping it. */}
+      <div ref={track} className="relative lg:h-[260vh]">
+        <div ref={pane} className="flex flex-col py-20 lg:sticky lg:top-0 lg:h-screen lg:flex-row lg:items-center lg:py-0">
           <div className="grid w-full items-center gap-16 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
             <div>
               <Eyebrow>ingest/ · state/</Eyebrow>
@@ -366,12 +387,14 @@ export default function Alignment() {
                   style={{ opacity: lossOpacity }}
                   className="mt-3 max-w-md text-[0.72rem] leading-relaxed text-white/45"
                 >
-                  <span className="text-red-400">−26 %.</span> 1.6 million people deleted by
+                  <span className="text-red-400">−26 %.</span> 1.7 million people deleted by
                   interpolating a head count. Every equity figure divides by this number,
                   and nothing in the shapes, the coordinates or the cube summary would have
                   said so.
                 </motion.p>
               </div>
+
+              <InlineCaveat note={NOTE} />
             </div>
 
             <div className="relative mx-auto aspect-square w-full max-w-[34rem]">

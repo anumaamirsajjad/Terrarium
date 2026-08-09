@@ -31,7 +31,9 @@ class PlanRequest(BaseModel):
     mean guessing which the user meant.
     """
 
-    model_config = ConfigDict(frozen=True)
+    # `extra="forbid"`: see SimulateRequest. A misspelled `preset` here silently becomes
+    # "no plan at all" rather than a 422 naming the typo.
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     geometry: dict[str, Any] = Field(
         description=(

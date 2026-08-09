@@ -111,7 +111,12 @@ function Slice({ season, active }: { season: Season; active: boolean }) {
         plume.current = staged.canvas;
       }
 
-      const dt = Math.min(0.05, Math.max(0, elapsed - last.current));
+      // `elapsed` restarts near 0 every time this pane goes from inactive to active —
+      // `useCanvasLoop` remounts its rAF loop on that transition. Without this guard
+      // `last.current` still held the pre-pause value, so `elapsed - last.current` went
+      // deeply negative, clamped to 0, and every mote froze until `elapsed` caught back up
+      // to wherever it had been — tens of seconds of a motionless plume.
+      const dt = elapsed < last.current ? 0 : Math.min(0.05, elapsed - last.current);
       last.current = elapsed;
 
       ctx.clearRect(0, 0, width, height);

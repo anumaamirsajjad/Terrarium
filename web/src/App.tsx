@@ -16,6 +16,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import {
   Check,
+  ChevronDown,
   PenLine,
   Play,
   Printer,
@@ -45,6 +46,7 @@ import BriefPanel from "./panels/BriefPanel";
 import CommandPalette from "./panels/CommandPalette";
 import EquityPanel from "./panels/EquityPanel";
 import FloatingPanel from "./panels/FloatingPanel";
+import PlainPanel from "./panels/PlainPanel";
 import ResultPanel from "./panels/ResultPanel";
 import { decodeLayer } from "./raster/decode";
 import { toCanvas } from "./raster/canvas";
@@ -57,7 +59,7 @@ import {
   splitRasters,
 } from "./raster/image";
 import { DIVERGING, HEAT, rampForVariable, symmetricDomain } from "./raster/ramp";
-import { labelWithUnits } from "./units";
+import { plainVariableBlurb, plainVariableLabel } from "./units";
 import "./App.css";
 
 /**
@@ -120,7 +122,10 @@ function ToolButton({
                   }`}
     >
       <Icon className="size-3.5 shrink-0" />
-      {label && <span className="whitespace-nowrap">{label}</span>}
+      {/* Icon-only under `sm`: three or four of these in a row, each with a label, is wider
+          than a phone screen — the pill has no scroll affordance and would bleed off both
+          edges since it's centred. `title`/`aria-label` above already carry the name. */}
+      {label && <span className="hidden whitespace-nowrap sm:inline">{label}</span>}
     </motion.button>
   );
 }
@@ -129,7 +134,7 @@ export default function App() {
   const [boot, setBoot] = useState<Boot>({ kind: "loading" });
   const [selectedWindow, setSelectedWindow] = useState<string | null>(null);
   const [variable, setVariable] = useState(TEMPERATURE);
-  const [opacity, setOpacity] = useState(0.85);
+  const [opacity, setOpacity] = useState(0.3);
   const [canopy, setCanopy] = useState(0.3);
   // The traffic lever. 0 means the plan says nothing about emissions and no air block
   // comes back — which is a different answer from "the cube cannot model air".
@@ -497,11 +502,14 @@ export default function App() {
 
   const views: { key: View; label: string; show: boolean }[] = [
     { key: "baseline", label: "Base", show: true },
-    { key: "delta", label: "ΔLST", show: true },
+    { key: "delta", label: "Temp change", show: true },
     // Only when there is an air result. Offering the tab for a plan that never touched
     // traffic would paint an empty map and read as a broken button.
-    { key: "air", label: "ΔPM2.5", show: Boolean(result?.air) },
-    { key: "compare", label: "Compare", show: true },
+    { key: "air", label: "Air change", show: Boolean(result?.air) },
+    // Always the ground-temperature before/after, whatever the base-layer picker shows
+    // above - see the note on `scenarioBase`. The label says "temperature" rather than
+    // naming the picker's variable, so it stops implying it follows the picker.
+    { key: "compare", label: "Compare temperature", show: true },
   ];
 
   return (
@@ -517,188 +525,221 @@ export default function App() {
         onMapClick={handleMapClick}
       />
 
-      {/* ------------------------------------------------------ brand, top left --- */}
-      <div className="glass noise absolute top-5 left-5 z-10 px-4 py-3">
-        <h1 className="font-mono text-sm tracking-tight text-white">Terrarium</h1>
-        <p className="mt-0.5 font-mono text-[0.65rem] text-white/40">
-          {health.tile.name}, {health.tile.country} · {summary.shape[0]}×{summary.shape[1]} @{" "}
-          {summary.resolution_m}&nbsp;m
-        </p>
-      </div>
+      {/* ------------------------------------------------------------ top cluster --- */}
+      {/* Below `sm` these four stack in normal flow instead of floating independently:
+          brand (top-left), the window/layer pill (top-centre) and the results rail
+          (top-right) are all wide enough, and close enough together, that a phone-width
+          viewport had nowhere to put all three without overlap. `sm:contents` drops this
+          wrapper from the box model at the desktop breakpoint, so each child's own
+          `sm:absolute` positions it exactly where it always sat, pixel for pixel. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col gap-3 p-4 sm:contents">
+        {/* brand, top left */}
+        <div className="glass noise pointer-events-auto z-10 self-start px-4 py-3 sm:absolute sm:top-5 sm:left-5">
+          <h1 className="font-mono text-sm tracking-tight text-white">Terrarium</h1>
+          <p className="mt-0.5 font-mono text-[0.65rem] text-white/40">
+            {health.tile.name}, {health.tile.country} · {summary.shape[0]}×{summary.shape[1]} @{" "}
+            {summary.resolution_m}&nbsp;m
+          </p>
+        </div>
 
-      {/* ---------------------------------------------- window + layer, top centre --- */}
-      <motion.div
-        animate={{ opacity: pending ? 0.45 : 1 }}
-        transition={SNAP}
-        aria-busy={pending}
-        className="glass absolute top-5 left-1/2 z-10 -translate-x-1/2 px-3 py-2"
-      >
-        <div className="flex items-center gap-2">
-          <select
-            value={selectedWindow ?? ""}
-            onChange={(event) => selectWindow(event.target.value)}
-            className="bg-transparent font-mono text-xs text-white outline-none"
-            aria-label="Seasonal window"
-          >
-            {summary.windows.map((label) => (
-              <option key={label} value={label} className="bg-[#0a0d12]">
-                {label}
-              </option>
-            ))}
-          </select>
-          <span className="h-4 w-px bg-white/10" />
-          <select
-            value={variable}
-            onChange={(event) => setVariable(event.target.value)}
-            className="max-w-56 bg-transparent font-mono text-xs text-white/70 outline-none"
-            aria-label="Base layer"
-          >
-            {summary.variables
-              .filter((v) => MAPPABLE.includes(v.name))
-              .map((v) => (
-                <option key={v.name} value={v.name} className="bg-[#0a0d12]">
-                  {labelWithUnits(v.name, v.units)}
+        {/* window + layer, top centre */}
+        <motion.div
+          animate={{ opacity: pending ? 0.45 : 1 }}
+          transition={SNAP}
+          aria-busy={pending}
+          className="glass pointer-events-auto z-10 px-3 py-2 sm:absolute sm:top-5 sm:left-1/2 sm:-translate-x-1/2"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={selectedWindow ?? ""}
+              onChange={(event) => selectWindow(event.target.value)}
+              className="bg-transparent font-mono text-xs text-white outline-none"
+              aria-label="Seasonal window"
+            >
+              {summary.windows.map((label) => (
+                <option key={label} value={label} className="bg-[#0a0d12]">
+                  {label}
                 </option>
               ))}
-          </select>
-        </div>
-        {/* The window is part of the answer, not a detail: the same planting cools about
-            four times more in summer than in winter. */}
-        <p className="mt-1 max-w-md text-[0.62rem] leading-snug text-white/35">
-          {baseline.loading || pending
-            ? "Loading…"
-            : (baseline.error ?? baseline.data?.layer.description ?? "")}
-        </p>
-      </motion.div>
+            </select>
+            <span className="h-4 w-px bg-white/10" />
+            <select
+              value={variable}
+              onChange={(event) => setVariable(event.target.value)}
+              className="max-w-56 bg-transparent font-mono text-xs text-white/70 outline-none"
+              aria-label="Base layer"
+            >
+              {summary.variables
+                .filter((v) => MAPPABLE.includes(v.name))
+                .map((v) => (
+                  <option key={v.name} value={v.name} className="bg-[#0a0d12]">
+                    {plainVariableLabel(v.name)}
+                  </option>
+                ))}
+            </select>
+          </div>
+          {/* The window is part of the answer, not a detail: the same planting cools about
+              four times more in summer than in winter. */}
+          <p className="mt-1 max-w-md text-[0.62rem] leading-snug text-white/35">
+            {baseline.loading || pending
+              ? "Loading…"
+              : (baseline.error ?? plainVariableBlurb(variable))}
+          </p>
+        </motion.div>
 
-      {/* view switcher, under the pill, once there is something to switch between */}
-      <AnimatePresence>
-        {result && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={GLIDE}
-            className="glass absolute top-[6.2rem] left-1/2 z-10 flex -translate-x-1/2
-                       items-center gap-1 p-1"
-          >
-            {views
-              .filter((entry) => entry.show)
-              .map((entry) => (
-                <button
-                  key={entry.key}
-                  type="button"
-                  onClick={() => setView(entry.key)}
-                  className={`rounded-md px-3 py-1.5 font-mono text-[0.68rem] transition-colors ${
-                    view === entry.key
-                      ? "bg-white/12 text-white"
-                      : "text-white/45 hover:text-white/80"
-                  }`}
-                >
-                  {entry.label}
-                </button>
-              ))}
+        {/* view switcher, under the pill, once there is something to switch between */}
+        <AnimatePresence>
+          {result && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={GLIDE}
+              className="glass pointer-events-auto z-10 flex flex-wrap items-center gap-1
+                         self-start p-1 sm:absolute sm:top-[6.2rem] sm:left-1/2 sm:-translate-x-1/2"
+            >
+              {views
+                .filter((entry) => entry.show)
+                .map((entry) => (
+                  <button
+                    key={entry.key}
+                    type="button"
+                    onClick={() => setView(entry.key)}
+                    className={`rounded-md px-3 py-1.5 font-mono text-[0.68rem] transition-colors ${
+                      view === entry.key
+                        ? "bg-white/12 text-white"
+                        : "text-white/45 hover:text-white/80"
+                    }`}
+                  >
+                    {entry.label}
+                  </button>
+                ))}
 
-            {view === "compare" && (
-              <label className="ml-2 flex items-center gap-2 pr-2">
-                {/* Kept and focusable rather than deleted: the grip on the map is a mouse
-                    affordance, and the split has to stay keyboard-operable without it. */}
-                <span className="sr-only">Split position</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={splitFraction}
-                  onChange={(event) => setSplitFraction(Number(event.target.value))}
-                  className="w-28 accent-white/70"
-                />
-              </label>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* --------------------------------------------------- results, right rail --- */}
-      <div
-        className="absolute top-5 right-5 z-10 flex max-h-[calc(100vh-2.5rem)] w-96
-                   flex-col gap-3 overflow-x-hidden overflow-y-auto"
-      >
-        <AnimatePresence mode="popLayout">
-          {result && (
-            <FloatingPanel key="result">
-              <ResultPanel result={result} />
-            </FloatingPanel>
-          )}
-          {result && (
-            <FloatingPanel key="equity">
-              <EquityPanel equity={result.equity} />
-            </FloatingPanel>
-          )}
-          {result?.air && (
-            <FloatingPanel key="air">
-              <AirPanel air={result.air} window={result.window} season={result.season} />
-            </FloatingPanel>
-          )}
-          {result && (
-            <FloatingPanel key="brief">
-              <BriefPanel brief={result.brief} />
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg
-                           border border-white/12 py-2 text-xs text-white/70
-                           hover:bg-white/10"
-              >
-                <Printer className="size-3.5" />
-                Save the council brief as PDF
-              </button>
-              <p className="mt-2 text-[0.62rem] leading-relaxed text-white/35">
-                The browser&rsquo;s own print dialog — no rendering service and no extra
-                dependency. The numbers, the findings and every caveat, on one sheet.
-              </p>
-            </FloatingPanel>
+              {view === "compare" && (
+                <label className="ml-2 flex items-center gap-2 pr-2">
+                  {/* Kept and focusable rather than deleted: the grip on the map is a mouse
+                      affordance, and the split has to stay keyboard-operable without it. */}
+                  <span className="sr-only">Split position</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={splitFraction}
+                    onChange={(event) => setSplitFraction(Number(event.target.value))}
+                    className="w-28 accent-white/70"
+                  />
+                </label>
+              )}
+            </motion.div>
           )}
         </AnimatePresence>
-      </div>
 
-      {/* ------------------------------------------------ legend + opacity, bottom left --- */}
-      <div className="glass noise absolute bottom-6 left-5 z-10 w-80 p-4">
-        {legend ? (
-          <Legend
-            ramp={legend.ramp}
-            domain={legend.domain}
-            units={legend.units}
-            diverging={legend.diverging}
-          />
-        ) : (
-          <p className="text-xs text-white/40">No layer loaded.</p>
-        )}
+        {/* results, right rail. Capped to 50vh in the stacked mobile flow so it can never
+            push the toolbar and legend off screen; the full-height scroll returns once it
+            is its own floating rail at `sm` and up. */}
+        <div
+          className="pointer-events-auto z-10 flex max-h-[50vh] flex-col gap-3
+                     overflow-x-hidden overflow-y-auto sm:absolute sm:top-5 sm:right-5
+                     sm:max-h-[calc(100vh-2.5rem)] sm:w-96"
+        >
+          <AnimatePresence mode="popLayout">
+            {result && (
+              <FloatingPanel key="plain">
+                <PlainPanel brief={result.brief} />
 
-        <label className="mt-3 flex items-center gap-3">
-          <span className="font-mono text-[0.62rem] whitespace-nowrap text-white/40">
-            opacity
-          </span>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={opacity}
-            onChange={(event) => setOpacity(Number(event.target.value))}
-            className="w-full accent-white/70"
-          />
-        </label>
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg
+                             border border-white/12 py-2 text-xs text-white/70
+                             hover:bg-white/10"
+                >
+                  <Printer className="size-3.5" />
+                  Save the full brief as PDF
+                </button>
+              </FloatingPanel>
+            )}
 
-        {/* D9: this label must appear wherever the temperature does. Worded as a statement
-            about lst_c and ΔLST specifically, because it sits under a layer picker that
-            can be showing NDVI. */}
-        <p className="mt-3 border-t border-white/10 pt-3 text-[0.62rem] leading-relaxed text-white/35">
-          <strong className="text-white/55">lst_c</strong> and{" "}
-          <strong className="text-white/55">ΔLST</strong> are mid-morning land surface
-          temperature (~10:30 local, Landsat ST_B10) — the radiating surface, not air
-          temperature, and not the afternoon peak.
-        </p>
+            {/* Everything below is the technical read, collapsed by default.
+                `<details>` rather than a `useState` toggle: the browser already ships the
+                open/closed state, the keyboard handling, the ARIA expanded semantics and
+                find-in-page opening the section to reveal a match. None of that is worth
+                re-implementing, and the print stylesheet can force it open with one rule. */}
+            {result && (
+              <FloatingPanel key="detail">
+                <details className="group">
+                  <summary
+                    className="flex cursor-pointer list-none items-center justify-between
+                               text-xs text-white/55 hover:text-white/80"
+                  >
+                    <span>Show the technical detail</span>
+                    <ChevronDown
+                      aria-hidden="true"
+                      className="size-3.5 transition-transform group-open:rotate-180"
+                    />
+                  </summary>
+
+                  <div className="mt-4 space-y-5 border-t border-white/8 pt-4">
+                    <ResultPanel result={result} />
+                    <EquityPanel equity={result.equity} />
+                    {result.air && (
+                      <AirPanel
+                        air={result.air}
+                        window={result.window}
+                        season={result.season}
+                      />
+                    )}
+                    <BriefPanel brief={result.brief} />
+                  </div>
+                </details>
+              </FloatingPanel>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* legend + opacity. In the mobile stack it flows below the results rail; at `sm`
+            and up it pops back out to its usual floating spot, bottom left. It used to be
+            pinned there unconditionally, which put it directly under the toolbar pill on
+            any narrow screen — same bottom offset, overlapping horizontal range, so the
+            draw/run/clear buttons rendered half-hidden behind it. */}
+        <div className="glass noise pointer-events-auto z-10 p-4 sm:absolute sm:bottom-6 sm:left-5 sm:w-80">
+          {legend ? (
+            <Legend
+              ramp={legend.ramp}
+              domain={legend.domain}
+              units={legend.units}
+              diverging={legend.diverging}
+            />
+          ) : (
+            <p className="text-xs text-white/40">No layer loaded.</p>
+          )}
+
+          <label className="mt-3 flex items-center gap-3">
+            <span className="font-mono text-[0.62rem] whitespace-nowrap text-white/40">
+              opacity
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={opacity}
+              onChange={(event) => setOpacity(Number(event.target.value))}
+              className="w-full accent-white/70"
+            />
+          </label>
+
+          {/* D9: this label must appear wherever the temperature does. Worded as a
+              statement about lst_c and ΔLST specifically, because it sits under a layer
+              picker that can be showing NDVI. */}
+          <p className="mt-3 border-t border-white/10 pt-3 text-[0.62rem] leading-relaxed text-white/35">
+            <strong className="text-white/55">lst_c</strong> and{" "}
+            <strong className="text-white/55">ΔLST</strong> are mid-morning land surface
+            temperature (~10:30 local, Landsat ST_B10) — the radiating surface, not air
+            temperature, and not the afternoon peak.
+          </p>
+        </div>
       </div>
 
       {/* ------------------------------------------------------- levers, above toolbar --- */}

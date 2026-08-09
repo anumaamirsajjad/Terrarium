@@ -88,6 +88,20 @@ export default function Hero() {
   const reduced = useReducedMotion();
   const section = useRef<HTMLElement>(null);
   const [flying, setFlying] = useState(false);
+  // Starts true: the hero is what paints first. Once it leaves the viewport the 3D canvas
+  // drops to `frameloop="demand"`, so the sticky-scroll sections below it stop competing
+  // with a full render nobody can see. A generous rootMargin means the loop resumes just
+  // before the hero is back in frame, not after — no visible cold start on scroll-up.
+  const [inView, setInView] = useState(true);
+  useEffect(() => {
+    const node = section.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(([entry]) => setInView(!!entry?.isIntersecting), {
+      rootMargin: "20% 0px",
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   // Reduced motion skips the flight entirely rather than shortening it — the whole point
   // of the gesture is the movement, so there is nothing left to show at a shorter one.
@@ -126,7 +140,7 @@ export default function Hero() {
             The page must never open on a black rectangle. */}
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_72%,#0c2c5c_0%,#05070a_58%)]" />
         <Suspense fallback={null}>
-          <LahoreCity plant={plant} animate={!reduced} flying={flying} />
+          <LahoreCity plant={plant} animate={!reduced} flying={flying} inView={inView} />
         </Suspense>
         {/* Two scrims. The vertical one lifts the headline off the city; the corner one
             darkens behind the eyebrow, which sat unreadable on a block of red roofs. */}

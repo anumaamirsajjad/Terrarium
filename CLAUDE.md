@@ -165,10 +165,33 @@ Four rules govern this package:
   out at all. Whatever produces a plan — a model, a button, a regex — it is re-validated as
   a `Plan` and then against the tile before a core sees a number. That is the entire safety
   argument for putting a free-tier model in front of a simulator.
+- **A model may reword a number; it may never source one** (D24). `dsl/llm.py` also holds
+  `narrate`, a LangChain chain that rewrites `explain.plain_summary`'s jargon-free block
+  into friendlier prose for the dashboard. What makes that safe is not the prompt:
+  `_numbers_are_faithful` is a **post-check on the model's own output**, and any numeral
+  that was not in the template's version rejects the whole rewrite back to the template.
+  Rounding 16.7 km² to 17 km² counts as inventing a figure, deliberately. `narrate` cannot
+  raise, so a missing key, a dead provider or malformed JSON all return the template and
+  the response keeps its shape.
+- **Three things the narrator is not handed and cannot touch**, each earned by watching a
+  real call get it wrong. **The caveat** is not sent and not read back: it went round once
+  and returned as "the outcome may be less than predicted", which reads like a hedge but is
+  a different claim — the template says the figure has *already* been scaled down, and the
+  rewrite quietly re-applied the correction. No numeral changed, so the faithfulness guard
+  had nothing to catch. **`PlainSummary.verdict`** — how big the change is, on the tile's
+  own bare-to-leafy scale — is computed in `explain._impact` and excluded from the update,
+  so a model cannot talk a marginal plan up. And **the headline's figures must survive**:
+  `_numbers_are_faithful` is one-directional, so a model told loudly enough never to invent
+  a number complies by dropping every number, which passed every check and produced "many
+  trees are needed to achieve this small change". `_headline_figures_survive` is the second,
+  opposite guard — invent nothing, gut nothing.
 
 `dsl/explain.py` writes the brief, and writes it from templates. A generative explainer
 would occasionally restate a figure it did not receive and would smooth a caveat into a
 hedge; a template can do neither, and its caveats are structural, so they can be tested.
+That still holds for `brief_for`, which writes the text somebody would be asked to defend.
+`plain_summary` is the same numbers with the jargon removed, for the dashboard — also a
+template, and the only thing a model is allowed near, under the guard described above.
 Every brief carries the hindcast correction, the window, and the surface-versus-air
 distinction, `uncertainties` is never empty, and `confidence` has no `high`. **A caveat
 attaches to a figure, not to a plan** — a traffic-only plan carries no thermal caveats,

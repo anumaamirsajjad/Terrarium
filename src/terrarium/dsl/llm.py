@@ -23,10 +23,14 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from terrarium.dsl.explain import PlainSummary
 
 logger = logging.getLogger(__name__)
 
@@ -131,11 +135,13 @@ class GroqAdapter:
     a *model retirement*, not a bad provider: `gemini-2.5-flash` kept appearing in the
     model list and kept advertising `generateContent` while answering 404 to any key issued
     after it was withdrawn. Two providers means that failure costs a config change instead
-    of a config change instead of an outage.
+    of an outage.
 
-    Deliberately not an SDK and deliberately not LangChain (D17, D18). The request is one
-    POST of one JSON body; `openai` or `langchain-groq` would put a dependency tree in
-    front of it whose only user is the optional path.
+    Still plain urllib, and still the right call *for this path*: the planner's request is
+    one POST of one JSON body whose answer is re-validated as a `Plan` regardless of who
+    produced it, so a framework would buy nothing. LangChain does now live in this module
+    (D24) but only under `narrate`, where one prompt has to reach two providers and the
+    output is prose rather than a schema. The two paths coexist on purpose; see D24.
 
     Two provider-specific details, both discovered by running it rather than reading docs:
 
@@ -319,3 +325,225 @@ def resolve_adapter(settings: Any) -> Any:
     if len(configured) == 1:
         return configured[0]
     return FallbackAdapter(adapters=tuple(configured))
+
+
+# --- The plain-language narrator (D24) ----------------------------------------------
+#
+# This is the second thing in the project that may speak to a model, and it lives here
+# rather than in `dsl/explain.py` because D18 says the LLM lives in exactly one file and
+# that rule did not stop being useful when the narrator was added.
+#
+# What it may do is narrow on purpose: **reword numbers it was handed.** It never sources
+# a figure, never reaches the cube, and never decides what is worth saying. The template
+# in `explain.plain_summary` decides all three, and this rewrites its prose. That is what
+# makes a generative explainer defensible here when `brief_for` still refuses to be one:
+# `brief_for` writes the caveats a regulator would read, and those must be structural and
+# testable; this writes the dashboard's welcome mat.
+#
+# The guard that makes it safe is `_numbers_are_faithful`, below. It is not a prompt
+# instruction - it is a post-check applied to the model's own output, and any number that
+# was not in the template's version rejects the whole rewrite back to the template.
+
+NARRATOR_SYSTEM = """You rewrite short reports about urban climate models for a general \
+audience: a city councillor or a resident, not a scientist. They do not want the figures \
+read back to them - they want to know what the plan would actually do, whether it is worth \
+doing, and what they should do differently.
+
+Rules, in order of importance:
+1. NEVER introduce a number, percentage, quantity or unit that is not in the input. \
+Copy every number EXACTLY as written - do not round, rescale, convert or combine them.
+2. KEEP the input's numbers. "Many trees" and "a rough cost" are useless to somebody \
+deciding whether to fund this - they need the figures. Explain what each figure MEANS in \
+everyday terms, alongside the figure, never instead of it.
+3. Do not add a fact, a cause, a comparison to another city, or any claim the input does \
+not make. Put the input's own content into plainer, more useful words - nothing else.
+4. Do not change how big or small the report says the effect is. If it calls the change \
+small, it stays small. Talking a weak plan up is the worst thing you can do here.
+5. Plain words. No jargon: say "ground temperature" not "land surface temperature", \
+"fumes" not "particulate matter", "area" not "polygon".
+6. Short sentences. British English. No exclamation marks, no salesmanship.
+
+Return JSON only, with exactly these keys:
+{{"headline": str, "points": [str, ...]}}"""
+
+_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _numbers_in(text: str) -> set[str]:
+    """Every numeral in a string, with thousands separators normalised away.
+
+    `180,905` and `180905` are the same figure written two ways, so the comparison strips
+    separators before matching - otherwise the guard would reject a rewrite for correctly
+    reformatting a number it had copied faithfully.
+    """
+    return set(_NUMBER.findall(text.replace(",", "")))
+
+
+def _numbers_are_faithful(*, source: str, rewritten: str) -> bool:
+    """True when the rewrite invented no figures.
+
+    Deliberately one-directional: the rewrite may *drop* a number (it is allowed to be
+    shorter) but may not contain one the source did not. Dropping a figure costs detail;
+    inventing one is the failure this whole seam is defended against, and it is the exact
+    failure that kept a model out of `explain.py`.
+
+    Strict about rounding, and that is the intended trade: a model that turns 16.7 into 17
+    is a model that is editing figures, and the cheapest way to be sure it is not is to
+    refuse the whole rewrite and ship the template. A refusal costs nicer prose; a missed
+    edit costs a wrong number on the one screen most people actually read.
+
+    Dropping is policed separately by `_headline_figures_survive`, because "may not invent"
+    and "may not gut" are different failures needing different tests.
+    """
+    return _numbers_in(rewritten) <= _numbers_in(source)
+
+
+def _headline_figures_survive(*, headline: str, rewritten: str) -> bool:
+    """True when the rewrite kept the figures the report is actually about.
+
+    The faithfulness guard above is one-directional, and a model handed a prompt that
+    shouts NEVER INVENT A NUMBER discovers the safest way to obey it: drop every number.
+    That passed every check and produced "many trees are needed to achieve this small
+    change" — prose with nothing in it a person could fund, refuse or quote, which is a
+    worse dashboard than the template it replaced.
+
+    Only the *headline's* figures are required, not every figure in the report. The
+    headline is what the panel is about — the cooling, the area — and a rewrite that
+    editorially drops the cost line is still a good rewrite. Checked against the whole
+    rewrite rather than against its headline, so moving a figure into a bullet is fine.
+    """
+    return _numbers_in(headline) <= _numbers_in(rewritten)
+
+
+def _strip_fence(text: str) -> str:
+    """Unwrap a fenced code block if the model added one despite being asked for bare JSON.
+
+    Gemini honours a JSON mime type; Groq is asked for JSON by prompt here rather than by
+    `response_format`, because LangChain's Groq binding sends that differently, and a
+    fenced block is the common way it leaks through.
+    """
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        if "\n" in stripped:
+            stripped = stripped.split("\n", 1)[1]
+        stripped = stripped.rsplit("```", 1)[0]
+    return stripped.strip()
+
+
+# 8 s, against a /simulate budget of 3 s that the route measures 0.84 s warm against. The
+# narrator is allowed to overrun that budget because it is the last thing to run and the
+# alternative is worse prose, but it is not allowed to hang a request indefinitely.
+NARRATOR_TIMEOUT_S = 8.0
+
+
+def _chat_model(settings: Any) -> Any:
+    """A LangChain chat model for whichever provider has a key, or `None` for neither.
+
+    Groq first, matching `resolve_adapter` - same reasoning, and having the two disagree
+    about provider order would be a confusing thing to debug at a demo.
+
+    Imported lazily because these packages pull a non-trivial import tree, and the API
+    loads this module at startup on deployments that have no key at all - where every one
+    of those imports would be paid for nothing.
+    """
+    groq_key = getattr(settings, "groq_api_key", None)
+    if groq_key:
+        from langchain_groq import ChatGroq
+
+        return ChatGroq(
+            api_key=groq_key,
+            model=getattr(settings, "groq_model", DEFAULT_GROQ_MODEL),
+            temperature=0.0,
+            timeout=NARRATOR_TIMEOUT_S,
+            max_retries=0,
+        )
+
+    gemini_key = getattr(settings, "gemini_api_key", None)
+    if gemini_key:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        return ChatGoogleGenerativeAI(
+            google_api_key=gemini_key,
+            model=getattr(settings, "gemini_model", DEFAULT_GEMINI_MODEL),
+            temperature=0.0,
+            timeout=NARRATOR_TIMEOUT_S,
+            max_retries=0,
+        )
+
+    return None
+
+
+def narrate(plain: PlainSummary, *, settings: Any) -> PlainSummary:
+    """Reword a `PlainSummary` through a model, or return it untouched.
+
+    **Never raises and never fails a request.** Every failure path - no key, no network, a
+    refusal, malformed JSON, an invented number - returns the input unchanged, so the
+    caller has nothing to handle and `/simulate` keeps answering on a laptop with the
+    wi-fi off. That is the same contract `dsl.planner` has with the rule parser, and it is
+    what keeps the zero-budget claim unconditional: the key buys nicer prose, not function.
+    """
+    model = _chat_model(settings)
+    if model is None:
+        return plain
+
+    # The caveat is not sent to be rewritten and is not read back. It went round once and
+    # came back as "the actual outcome may be less than predicted" — which reads like a
+    # hedge but is a different claim: the template says the figure has *already* been
+    # scaled down, and the rewrite quietly re-applied the correction the reader was being
+    # told about. No numeral changed, so the faithfulness guard had nothing to catch. The
+    # sentence is already plain, so nothing is lost by fixing it.
+    source = "\n".join((plain.headline, *plain.points))
+
+    try:
+        from langchain_core.output_parsers import StrOutputParser
+        from langchain_core.prompts import ChatPromptTemplate
+
+        chain = (
+            ChatPromptTemplate.from_messages(
+                [("system", NARRATOR_SYSTEM), ("human", "{report}")]
+            )
+            | model
+            | StrOutputParser()
+        )
+        raw = chain.invoke({"report": source})
+    except Exception as exc:
+        # Broad by intent. This is an optional cosmetic path behind a total fallback, and
+        # the alternative is enumerating three vendors' exception trees so that a new one
+        # can 500 a route which already has a perfectly good answer in hand.
+        logger.warning("narrator unavailable, keeping the template: %s", type(exc).__name__)
+        return plain
+
+    try:
+        payload = json.loads(_strip_fence(raw))
+        headline = str(payload["headline"])
+        points = tuple(str(point) for point in payload["points"])
+    except (ValueError, KeyError, TypeError) as exc:
+        logger.warning(
+            "narrator returned unusable JSON (%s), keeping the template", type(exc).__name__
+        )
+        return plain
+
+    if not points or not headline.strip():
+        logger.warning("narrator dropped a required section, keeping the template")
+        return plain
+
+    rewritten = "\n".join((headline, *points))
+    if not _numbers_are_faithful(source=source, rewritten=rewritten):
+        invented = sorted(_numbers_in(rewritten) - _numbers_in(source))
+        logger.warning("narrator invented figures %s, keeping the template", invented)
+        return plain
+
+    if not _headline_figures_survive(headline=plain.headline, rewritten=rewritten):
+        dropped = sorted(_numbers_in(plain.headline) - _numbers_in(rewritten))
+        logger.warning("narrator dropped headline figures %s, keeping the template", dropped)
+        return plain
+
+    # Both attributes are absent on some bindings (langchain-core's own fakes among them),
+    # so the final literal is what stops the response attributing prose to "langchain:None".
+    name = getattr(model, "model_name", None) or getattr(model, "model", None) or "model"
+    # `caveat` and `verdict` are absent on purpose: the model rewords the report, it does
+    # not get to soften the limitation or to restate how big the change was.
+    return plain.model_copy(
+        update={"headline": headline, "points": points, "source": f"langchain:{name}"}
+    )
+

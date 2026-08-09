@@ -85,7 +85,13 @@ def test_a_winter_planting_explains_why_the_ratio_is_missing() -> None:
     assert "withheld" in joined
 
 
-def test_an_air_result_forces_the_local_increment_caveat_and_low_confidence() -> None:
+def test_an_air_result_still_carries_the_brick_kiln_gap_and_low_summer_confidence() -> None:
+    """The uncalibrated/unvalidated prose was removed on request; `confidence` was not.
+
+    The underlying facts (literature emission factors, no summer validation) did not
+    change, only whether the brief spells them out - so a summer air figure still reads
+    'low', it is just no longer told why in words.
+    """
     with_air = PLANTING.model_copy(
         update={
             "air": AirInputs(
@@ -101,23 +107,14 @@ def test_an_air_result_forces_the_local_increment_caveat_and_low_confidence() ->
     brief = brief_for(with_air)
     joined = " ".join(brief.uncertainties)
 
-    assert "local increment" in joined
-    assert "scale error" in joined
-    # PLANTING is a *summer* plan, and the summer spatial pattern beats no null model, so
-    # nothing carrying its air number may read as well-supported.
-    assert "unvalidated" in joined
-    assert "beats no null model" in joined
+    assert "local increment" not in joined
+    assert "unvalidated" not in joined
     assert brief.confidence == "low"
     # The missing source category is structural and belongs on every air figure.
     assert "no brick kilns" in joined
 
 
-def test_a_winter_air_result_cites_the_validation_rather_than_disclaiming_it() -> None:
-    """Winter was scored against 53 monitors and beats a null model (D21).
-
-    The caveat has to be season-specific: calling a winter figure unvalidated understates
-    it, and calling a summer figure validated is false. Neither sentence can be general.
-    """
+def test_a_winter_air_result_is_moderate_confidence_with_no_validation_prose() -> None:
     winter_air = PLANTING.model_copy(
         update={
             "window": "2025-winter",
@@ -135,11 +132,7 @@ def test_a_winter_air_result_cites_the_validation_rather_than_disclaiming_it() -
     brief = brief_for(winter_air)
     joined = " ".join(brief.uncertainties)
 
-    assert "53 OpenAQ monitors" in joined
-    assert "beats a null model" in joined
-    assert "unvalidated" not in joined, "winter is validated; do not disclaim it"
-    # Evidence for the *pattern*, never for the level.
-    assert "not evidence about the absolute level" in joined
+    assert "53 OpenAQ monitors" not in joined
     assert brief.confidence == "moderate"
 
 
@@ -319,3 +312,85 @@ def test_an_unreliable_equity_share_stays_out_of_the_headline() -> None:
     assert "densest tenth" not in headline
     # And a plan with no equity at all must not grow a sentence about it.
     assert "densest tenth" not in brief_for(PLANTING).headline
+
+
+# --- the plain summary's verdict, and the case it used to get wrong -------------------
+
+
+def test_the_verdict_is_measured_against_the_tile_not_against_a_fixed_degree() -> None:
+    """The whole reason the verdict is a share and not a threshold in degrees.
+
+    The identical cooling is a big deal under a 2.6 degC ceiling and unremarkable under an
+    8 degC one, so a fixed cut-off would have to be wrong in one of the two. If this ever
+    fails because someone swapped the share for an absolute number, that is the bug.
+    """
+    strong = PLANTING.model_copy(update={"mean_delta_inside": -2.6})
+
+    wider = strong.model_copy(update={"tree_built_contrast_c": 8.0})
+
+    assert brief_for(strong).plain.verdict == "large"
+    assert brief_for(wider).plain.verdict == "small"
+
+
+def test_winter_can_never_report_a_large_change() -> None:
+    """Winter's ceiling is a few tenths of a degree; nothing large is available in it."""
+    winter = PLANTING.model_copy(
+        update={
+            "window": "2024-winter",
+            "season": "winter",
+            "tree_built_contrast_c": 0.55,
+            "mean_delta_inside": -3.0,
+        }
+    )
+
+    assert brief_for(winter).plain.verdict in {"small", "marginal"}
+
+
+def test_a_traffic_plan_is_not_told_that_planting_had_no_room() -> None:
+    """The failure this branch exists for.
+
+    A low-emission zone changes no temperature, which used to fall into the 'nothing
+    happened' block and answer a question nobody asked - so the one screen most people read
+    reported a working plan as a dud.
+    """
+    traffic = PLANTING.model_copy(
+        update={
+            "tree_count": 0,
+            "mean_canopy_added": 0.0,
+            "mean_delta_inside": 0.0,
+            "min_delta": 0.0,
+            "emission_fraction_requested": 0.6,
+            "air": AirInputs(
+                mean_delta_inside=-4.2,
+                mean_delta_spillover=-0.9,
+                spillover_cells=1200,
+                units="ug/m3",
+                mixing_height_m=250.0,
+                emission_fraction_removed=0.6,
+            ),
+        }
+    )
+    plain = brief_for(traffic).plain
+
+    assert "planting" not in plain.headline.lower()
+    assert "4.2" in plain.headline
+    # Uncalibrated magnitudes cannot be sized, and saying so is the honest verdict.
+    assert plain.verdict == "unrated"
+
+
+def test_a_traffic_plan_with_no_inventory_says_so_rather_than_reporting_no_effect() -> None:
+    """A missing layer and a null result are opposite answers, in plain words too."""
+    plain = brief_for(
+        PLANTING.model_copy(
+            update={
+                "tree_count": 0,
+                "mean_canopy_added": 0.0,
+                "mean_delta_inside": 0.0,
+                "min_delta": 0.0,
+                "emission_fraction_requested": 0.6,
+            }
+        )
+    ).plain
+
+    assert plain.verdict == "none"
+    assert "not a finding" in " ".join(plain.points)

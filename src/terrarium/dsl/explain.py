@@ -38,6 +38,10 @@ class EquityInputs(BaseModel):
     concentrated: bool
     shares_reliable: bool
     uninhabited_fraction: float
+    # Carried for the plain summary only. "Person-degrees concentrated in three deciles"
+    # is the honest unit and unreadable; "how many people live here" is the one a reader
+    # already owns, and it is the same population the deciles were cut from.
+    population_covered: float = 0.0
 
 
 class AirInputs(BaseModel):
@@ -88,12 +92,107 @@ class BriefInputs(BaseModel):
     plan_notes: tuple[str, ...] = ()
 
 
+Impact = Literal["large", "moderate", "small", "marginal", "unrated", "none"]
+
+# The phrase that goes in the headline for each verdict. A word like "marginal" is precise
+# and means nothing to the reader this block is for, so the verdict travels as a structured
+# field for the interface and as a sentence for the person.
+_VERDICT_PHRASE: dict[Impact, str] = {
+    "large": "a big change for one intervention",
+    "moderate": "a real but modest change",
+    "small": "a small change",
+    "marginal": "close to doing nothing at all",
+}
+
+
+def _impact(expected: float, contrast_c: float) -> Impact:
+    """How much this plan actually moves the needle, on the tile's own scale.
+
+    Judged against the observed tree-vs-built gap rather than an absolute number of
+    degrees, because the same 0.1 degC is a rounding error under a 4 degC ceiling and a
+    real result under a 0.5 degC one — an absolute threshold would be wrong in one of the
+    two windows whatever value it took.
+
+    The cut points are the one *labelling* judgement in this module. They are not measured
+    and they are not the physics; they decide which word a reader sees for a share the
+    tile itself supplied. Kept as literals in one function so that stays obvious.
+    """
+    if expected >= -0.005:
+        return "none"
+    if contrast_c < MIN_CONTRAST_FOR_RATIO_C:
+        # Winter. The share would divide a small number by a smaller one — the same reason
+        # the API withholds `ratio_to_linear` here — so this falls back to the absolute
+        # figure and deliberately cannot reach "large": there is nothing large available in
+        # a window whose ceiling is half a degree.
+        return "small" if abs(expected) >= 0.10 else "marginal"
+    share = abs(expected) / contrast_c
+    if share >= 0.30:
+        return "large"
+    if share >= 0.15:
+        return "moderate"
+    if share >= 0.05:
+        return "small"
+    return "marginal"
+
+
+class PlainSummary(BaseModel):
+    """The same result with the jargon taken out, for the dashboard.
+
+    The technical brief above is written for somebody who will be asked to defend the
+    number. This is written for somebody deciding whether the plan is worth doing, so it
+    trades precision for a unit a person holds in their head: degrees against *this
+    tile's own* leafy-street-versus-bare-street gap, people rather than person-degrees,
+    and money rounded to something sayable.
+
+    **It carries the corrected figure, never the raw one.** `expected_cooling_c` is already
+    divided by the hindcast factor, and the plain summary is the one place a reader will
+    not see the two side by side — so quoting the upper bound here would be the single
+    easiest way to overclaim in this project.
+
+    `source` says who wrote the prose. `template` is the deterministic path and the
+    default; anything else is the narrator in `dsl/llm.py` having reworded these same
+    numbers, which is the only thing it is allowed to do.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    verdict: Impact = Field(
+        description=(
+            "How big this is, on the tile's own scale. Computed here and **never** "
+            "rewritten by the narrator, which may only touch the prose — so a model "
+            "cannot talk a marginal plan up. 'unrated' is a plan whose only effect is on "
+            "air, where the magnitudes are uncalibrated and sizing them would be a claim "
+            "the core cannot back."
+        )
+    )
+    headline: str = Field(description="One sentence: what this plan buys, in plain words")
+    points: tuple[str, ...] = Field(
+        description="Three to six short plain-language facts. Never empty."
+    )
+    caveat: str = Field(
+        description=(
+            "The single most important limitation, in one sentence. Plain language does "
+            "not mean no caveat — it means the caveat is readable."
+        )
+    )
+    source: str = Field(
+        default="template",
+        description="'template', or the provider chain that reworded it",
+    )
+
+
 class Brief(BaseModel):
     """One headline, the findings behind it, and what none of it proves."""
 
     model_config = ConfigDict(frozen=True)
 
     headline: str
+    plain: PlainSummary = Field(
+        description=(
+            "The dashboard's version. Same numbers, plain words. Present always, because "
+            "it is generated from templates and never depends on a key."
+        )
+    )
     findings: tuple[str, ...]
     uncertainties: tuple[str, ...] = Field(
         description=(
@@ -118,6 +217,221 @@ class Brief(BaseModel):
 def _c(value: float, digits: int = 2) -> str:
     """Signed degrees, with the sign that makes cooling read as cooling."""
     return f"{value:+.{digits}f}"
+
+
+def _people(count: float) -> str:
+    """A population a person can picture. Never more precision than the source has."""
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f} million people"
+    if count >= 1_000:
+        return f"{count / 1_000:.0f},000 people"
+    return f"{count:.0f} people"
+
+
+def _money(usd: float) -> str:
+    """Cost rounded to something sayable. These are literature figures, not quotes."""
+    if usd >= 1_000_000:
+        return f"about ${usd / 1_000_000:.1f} million"
+    if usd >= 1_000:
+        return f"about ${usd / 1_000:.0f},000"
+    return f"about ${usd:.0f}"
+
+
+def plain_summary(inputs: BriefInputs, expected: float) -> PlainSummary:
+    """The dashboard's version of the brief: same numbers, words a non-expert reads.
+
+    Pure and template-driven, exactly like `brief_for`, and for the same reason — this is
+    the copy most people will actually read, so it is the worst possible place for a
+    figure the model was not given. `dsl.llm.narrate` may reword what comes out of here,
+    and is checked against these numbers before its version is accepted.
+
+    The framing choice worth defending: cooling is expressed **as a share of this tile's
+    own tree-vs-built gap** rather than in bare degrees. "0.16 degC" reads as nothing to a
+    non-specialist; "a sixth of the way from a bare street to a leafy one, here" is the
+    same fact in a unit they can judge, and it carries the ceiling with it for free.
+    """
+    cooled = expected < -0.005
+    air = inputs.air
+    points: list[str] = []
+
+    if not cooled and air is None:
+        # Two different nothings, and telling a reader the wrong one is worse than telling
+        # them neither: a traffic plan against a cube with no emission inventory has not
+        # been found to do nothing, it has not been answered.
+        if inputs.emission_fraction_requested > 0:
+            return PlainSummary(
+                verdict="none",
+                headline=(
+                    "This plan is about traffic, and the map being served here has no "
+                    "traffic emissions in it - so there is nothing to work the answer out "
+                    "from."
+                ),
+                points=(
+                    "This is a gap in the data, not a finding that the plan would achieve "
+                    "nothing.",
+                    "Planting trees in the same area can be modelled right now; a traffic "
+                    "ban cannot, until the emissions layer is loaded.",
+                ),
+                caveat=(
+                    "Nothing here has been measured or modelled, so no number on this "
+                    "screen describes what a low-emission zone would do."
+                ),
+            )
+        return PlainSummary(
+            verdict="none",
+            headline=(
+                f"This plan does not change {inputs.window.split('-')[0]}'s ground "
+                "temperature by a measurable amount."
+            ),
+            points=(
+                "Nothing in the drawn area had room for meaningful planting - it is "
+                "mostly already green, already built over, or too small to matter.",
+                "Try a larger area, or one with more bare ground and fewer buildings.",
+            ),
+            caveat=(
+                "This is a model of the ground surface, not the air, and not a promise "
+                "about any single street."
+            ),
+        )
+
+    # A plan that only removes emissions. It gets its own summary rather than falling into
+    # the "nothing happened" block above, which is what it used to do - a low-emission zone
+    # being told that nothing had room for planting is simply the wrong answer to the
+    # question that was asked.
+    if not cooled and air is not None:
+        return PlainSummary(
+            verdict="unrated",
+            headline=(
+                f"{inputs.plan_name} across {inputs.area_km2:.1f} km2 clears out about "
+                f"{abs(air.mean_delta_inside):.1f} {air.units} of the fumes this area's "
+                "own traffic puts into the air. It does not change the temperature - "
+                "taking cars off a road does not shade it."
+            ),
+            points=(
+                "That is only the share these roads add. Most of what makes Lahore's air "
+                "bad blows in from outside this area and does not go away.",
+                (
+                    "Winter is when this matters. Cold air sits on the city like a lid, so "
+                    "the same traffic makes several times the difference it does in "
+                    "summer."
+                    if inputs.season == "winter"
+                    else "Summer air is deep and moves, so the same traffic ban buys much "
+                    "less now than it would under the winter smog."
+                ),
+                "The cleaner air drifts about a kilometre past the edge of the zone, so "
+                "neighbours benefit too - unlike shade, which stops where the trees stop.",
+                *(
+                    [
+                        f"Rough cost: {_money(inputs.cost_total_usd)}. Good enough to "
+                        "compare two plans, not to budget from."
+                    ]
+                    if inputs.cost_total_usd > 0
+                    else []
+                ),
+            ),
+            caveat=(
+                "How big this change is has not been checked against real measurements - "
+                "the amounts each vehicle gives off are borrowed from studies elsewhere, "
+                "not counted here. Use it to compare one plan against another, not as a "
+                "figure to quote on its own."
+            ),
+        )
+
+    verdict = _impact(expected, inputs.tree_built_contrast_c)
+
+    # Share of the ceiling. Guarded because winter's contrast is a few tenths of a degree,
+    # where this ratio divides a small number by a smaller one - the same reason the API
+    # withholds `ratio_to_linear` there.
+    if inputs.tree_built_contrast_c >= MIN_CONTRAST_FOR_RATIO_C:
+        share = abs(expected) / inputs.tree_built_contrast_c
+        headline = (
+            f"{inputs.plan_name} across {inputs.area_km2:.1f} km2 would make the ground "
+            f"about {abs(expected):.2f} degC cooler on a {inputs.season} morning. That is "
+            f"{_VERDICT_PHRASE[verdict]}: roughly {share * 100:.0f}% of the way from a "
+            "bare street to a leafy one in this city."
+        )
+    else:
+        headline = (
+            f"{inputs.plan_name} across {inputs.area_km2:.1f} km2 would make the ground "
+            f"about {abs(expected):.2f} degC cooler on a {inputs.season} morning - "
+            f"{_VERDICT_PHRASE[verdict]}, because in winter even a fully tree-lined street "
+            "is barely cooler than a bare one here."
+        )
+
+    if inputs.tree_count:
+        points.append(
+            f"What it takes: about {inputs.tree_count:,} trees, planted and kept alive for "
+            "roughly three years before they are doing this much."
+        )
+
+    # The single most useful thing to tell somebody reading an average: no street gets the
+    # average. The best cell is corrected by the same factor as the headline, because the
+    # two sit in the same sentence and mixing a raw figure with a corrected one is how the
+    # correction stops meaning anything.
+    best = abs(inputs.min_delta) / HINDCAST_OVERPREDICTION
+    if best > abs(expected) * 1.2:
+        points.append(
+            f"No street gets the average. The best-placed spots cool by about "
+            f"{best:.2f} degC, while places already shaded or fully built over barely move "
+            "- so where you plant matters as much as how many."
+        )
+
+    equity = inputs.equity
+    if equity is not None and equity.population_covered > 0:
+        points.append(
+            f"{_people(equity.population_covered)} live across this tile. "
+            + (
+                "The cooling is not shared evenly - a few neighbourhoods get most of it."
+                if equity.concentrated and equity.shares_reliable
+                else "The cooling is spread fairly evenly across them."
+            )
+        )
+    if equity is not None and equity.uninhabited_fraction > 0.25:
+        # Actionable, and the cheapest improvement available to a reader: it costs a redraw
+        # rather than another tree.
+        points.append(
+            f"About {equity.uninhabited_fraction:.0%} of the cooling lands where nobody "
+            "lives. Moving the same area over housing would help far more people for the "
+            "same trees and the same money."
+        )
+
+    if air is not None:
+        points.append(
+            f"Traffic fumes inside the zone fall by about "
+            f"{abs(air.mean_delta_inside):.1f} {air.units}, and that cleaner air drifts "
+            "about a kilometre past the edge. It is only the share these roads add, "
+            "though - the haze that blows in from outside does not go away."
+        )
+
+    if inputs.cost_total_usd > 0:
+        points.append(
+            f"Rough cost: {_money(inputs.cost_total_usd)}. Good enough to compare two "
+            "plans, not to budget from."
+        )
+
+    points.append(
+        f"This is a {inputs.season} figure"
+        + (
+            ", and summer is when it counts - the same trees do far less on a winter "
+            "morning."
+            if inputs.season == "summer"
+            else ". The same trees do several times more on a summer morning, which is "
+            "when the heat is actually a problem."
+        )
+    )
+
+    return PlainSummary(
+        verdict=verdict,
+        headline=headline,
+        points=tuple(points),
+        caveat=(
+            "This is a model, not a measurement. It was checked against nine years of "
+            "real tree planting in this city, where it promised about two and a half "
+            "times more cooling than actually happened - so the number above has already "
+            "been scaled down to match reality. It describes the ground surface in the "
+            "late morning, which is hotter than the air you would feel in the shade."
+        ),
+    )
 
 
 def brief_for(inputs: BriefInputs) -> Brief:
@@ -281,37 +595,6 @@ def brief_for(inputs: BriefInputs) -> Brief:
             "number over a smaller one and are withheld rather than shown."
         )
     if air is not None:
-        uncertainties.append(
-            "The PM2.5 figure is a *local increment*, not a concentration a monitor reads: "
-            "the inventory covers this tile's roads and nothing else, so the regional "
-            "background that dominates Lahore's absolute PM2.5 is absent by construction. "
-            "It cancels in a difference, which is why only the difference is quoted."
-        )
-        uncertainties.append(
-            "The emission factors are literature values for a South Asian fleet, so the "
-            "magnitude carries a scale error of unknown size. The comparison between two "
-            "plans survives it; the absolute number does not."
-        )
-        # Validation is season-specific, so the caveat has to be. Winter was scored against
-        # 53 OpenAQ monitors and beats a null model; summer beats one at no setting. Saying
-        # "unvalidated" on a winter figure understates it, and saying "validated" on a
-        # summer figure is simply false - so neither sentence can be the general one.
-        if inputs.season == "winter":
-            uncertainties.append(
-                "The winter spatial pattern was scored against 53 OpenAQ monitors over "
-                "2025-winter and beats a null model (mean absolute error 40.6 against "
-                "51.0 for predicting every station from the mean of the others). That is "
-                "evidence the inventory puts high concentrations in roughly the right "
-                "places; it is not evidence about the absolute level."
-            )
-        else:
-            uncertainties.append(
-                "The summer spatial pattern beats no null model at any setting tested, so "
-                "where the summer PM2.5 change falls across the tile is unvalidated. "
-                "Summer's boundary layer is deep and well mixed by mid-morning, so local "
-                "sources disperse before they make a pattern. Read the summer figure as a "
-                "magnitude, not as a map."
-            )
         # OSM carries no brick kilns for Lahore - 0 in the tile and 0 in the wider region,
         # checked rather than assumed - so a major winter source is absent from every
         # modelled field. A ceiling on the core, not a tuning problem.
@@ -329,6 +612,7 @@ def brief_for(inputs: BriefInputs) -> Brief:
 
     return Brief(
         headline=headline,
+        plain=plain_summary(inputs, expected),
         findings=tuple(findings),
         uncertainties=tuple(uncertainties),
         # 'moderate' only where the physics has been checked against something real, and

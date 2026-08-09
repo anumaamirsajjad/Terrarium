@@ -160,8 +160,31 @@ export interface Air {
  * The result as sentences, written deterministically on the server — no language model,
  * so it cannot restate a figure it did not receive. `uncertainties` is never empty.
  */
+/**
+ * The dashboard's version of the brief: same numbers, jargon removed.
+ *
+ * Always present, because it is generated from templates server-side and never depends on
+ * a key. `source` is `"template"` on a keyless deployment and `langchain:<model>` when the
+ * narrator reworded it — and a rewrite that introduced any figure the template did not
+ * contain is rejected server-side, so the numbers here are the template's either way.
+ */
+export interface PlainSummary {
+  /**
+   * How big this is, on the tile's own bare-street-to-leafy-street scale. Computed
+   * server-side from the numbers and **not** part of what the narrator may rewrite, so a
+   * model cannot talk a marginal plan up into a moderate one. `"unrated"` is an
+   * air-only plan, whose magnitudes are uncalibrated.
+   */
+  verdict: "large" | "moderate" | "small" | "marginal" | "unrated" | "none";
+  headline: string;
+  points: string[];
+  caveat: string;
+  source: string;
+}
+
 export interface Brief {
   headline: string;
+  plain: PlainSummary;
   findings: string[];
   uncertainties: string[];
   /** Never "high". Nothing in this project has earned that word. */

@@ -18,7 +18,7 @@ import EquityViz from "./EquityViz";
 import { useMarginNote } from "./marginNote";
 import PlumeViz from "./PlumeViz";
 import ThermalViz from "./ThermalViz";
-import { Counter, Eyebrow } from "./primitives";
+import { Counter, Eyebrow, InlineCaveat } from "./primitives";
 
 const PANES = [
   {
@@ -93,8 +93,13 @@ export default function Simulators() {
 
   return (
     <section>
-      <div ref={track} className="relative h-[320vh]">
-        <div ref={pane} className="sticky top-0 flex h-screen items-center overflow-hidden">
+      {/* Same fix as `Alignment`: the 320vh track and the `h-screen` pin it drives exist so
+          the three panes can cross-fade in one fixed spot while the reader scrolls. Below
+          `lg` a pinned full-height pane has no room left for the copy, the figures and a
+          full aspect-square visualisation at once — so below `lg` this is a normal block,
+          the pin drops, and a short viewport scrolls it instead of clipping it. */}
+      <div ref={track} className="relative lg:h-[320vh]">
+        <div ref={pane} className="flex flex-col overflow-hidden py-20 lg:sticky lg:top-0 lg:h-screen lg:flex-row lg:items-center lg:py-0">
           <div className="mx-auto grid w-full max-w-[92rem] items-center gap-12 px-8 lg:grid-cols-2">
             <div className="relative">
               {/* A continuous progress rail beside the copy: three panes, one scroll. */}
@@ -149,6 +154,8 @@ export default function Simulators() {
                         </div>
                       ))}
                     </dl>
+
+                    <InlineCaveat note={pane.margin} />
                   </motion.div>
                 ))}
               </div>

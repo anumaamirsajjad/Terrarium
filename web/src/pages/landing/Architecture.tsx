@@ -15,7 +15,7 @@ import { type MotionValue, motion, useScroll, useTransform } from "motion/react"
 import { useRef } from "react";
 
 import { useMarginNote } from "./marginNote";
-import { Eyebrow, Rule } from "./primitives";
+import { Eyebrow, InlineCaveat, Rule } from "./primitives";
 
 const LAYERS = [
   {
@@ -95,12 +95,14 @@ function Slab({
   );
 }
 
+const NOTE = {
+  subject: "Layer purity is enforced by review, not by the compiler.",
+  body: "Python has no import firewall. The rule that a core never reads a file holds because it is checked, and `cores/` importing the config module is the canary that it has stopped holding.",
+};
+
 export default function Architecture() {
   const track = useRef<HTMLDivElement>(null);
-  const section = useMarginNote("architecture", {
-    subject: "Layer purity is enforced by review, not by the compiler.",
-    body: "Python has no import firewall. The rule that a core never reads a file holds because it is checked, and `cores/` importing the config module is the canary that it has stopped holding.",
-  });
+  const section = useMarginNote("architecture", NOTE);
 
   const { scrollYProgress } = useScroll({
     target: track,
@@ -141,6 +143,8 @@ export default function Architecture() {
             simulator honest: a core cannot quietly re-read a GeoTIFF to get a number the
             cube did not give it.
           </p>
+
+          <InlineCaveat note={NOTE} />
         </div>
 
         <div ref={track} className="[perspective:1400px]">

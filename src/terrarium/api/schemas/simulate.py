@@ -19,7 +19,11 @@ from terrarium.dsl.explain import Brief
 class SimulateRequest(BaseModel):
     """Plant trees inside a drawn polygon and ask what it does to the surface."""
 
-    model_config = ConfigDict(frozen=True)
+    # `extra="forbid"` because the two fractions have defaults: a client that misspells
+    # `emission_fraction_removed` otherwise gets 200 and a thermal-only answer, which is
+    # indistinguishable from a plan that asked for no traffic change. Same drift class as
+    # A18/A24 — reject it at the boundary rather than answering a different question.
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     geometry: dict[str, Any] = Field(
         description=(
