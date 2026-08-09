@@ -11,7 +11,10 @@
  *    warms the crowded middle must not be able to render as a clean row of bars.
  */
 
+import { motion } from "motion/react";
+
 import type { Equity } from "../api/client";
+import { SETTLE } from "../motion/springs";
 import { barGeometry, densestShare, equityVerdict, evenMarkerPct } from "./equity";
 
 export interface EquityPanelProps {
@@ -31,9 +34,18 @@ export default function EquityPanel({ equity }: EquityPanelProps) {
     <section className="equity" aria-labelledby="equity-heading">
       <h2 id="equity-heading">Who gets the cooling</h2>
 
-      <p className={`equity__verdict equity__verdict--${verdict.tone}`}>
+      {/* The pulse is driven off the verdict's own tone rather than re-deriving the 20 %
+          boundary here. `equityVerdict` already owns that threshold, and a second copy of
+          it in the view is a copy that will disagree. */}
+      <motion.p
+        animate={verdict.tone === "wasted" ? { opacity: [1, 0.55, 1] } : { opacity: 1 }}
+        transition={
+          verdict.tone === "wasted" ? { duration: 2.2, repeat: Infinity } : { duration: 0.2 }
+        }
+        className={`equity__verdict equity__verdict--${verdict.tone}`}
+      >
         <strong>{verdict.headline}</strong> {verdict.detail}
-      </p>
+      </motion.p>
 
       {equity.shares_reliable && (
       <div className="equity__chart" role="img" aria-label={verdict.headline}>
@@ -47,9 +59,14 @@ export default function EquityPanel({ equity }: EquityPanelProps) {
             <div className="equity__row" key={decile.decile}>
               <span className="equity__label">{decile.decile}</span>
               <span className="equity__track">
-                <span
+                {/* `equity__bar` and `equity__bar--warming` are load-bearing names, not
+                    decoration: the panel's test counts rows and asserts that a warmed
+                    decile is drawn rather than clipped. They survive the animation. */}
+                <motion.span
                   className={`equity__bar${warming ? " equity__bar--warming" : ""}`}
-                  style={{ width: `${widthPct}%` }}
+                  initial={{ width: 0 }}
+                  animate={{ width: `${widthPct}%` }}
+                  transition={{ ...SETTLE, delay: decile.decile * 0.045 }}
                 />
               </span>
               <span className="equity__share">{(decile.share * 100).toFixed(1)}%</span>

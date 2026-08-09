@@ -1,16 +1,26 @@
 /* Map fills the viewport; controls sit in a fixed-width rail beside it. */
 
+/* Tailwind's preflight flattens every heading to inherited size and weight. This file
+   predates it and states a size but not always a weight, so the rail's headings came back
+   at body weight. One shim for the legacy tree; anything written against the new tokens
+   sets its own weight as a utility and overrides this. */
+.app :is(h1, h2, h3) {
+  font-weight: 600;
+}
+
+/* The map is the product, so it is the page. Everything else floats over it as an
+   absolutely-positioned child of this stacking context — which is also why the print rule
+   at the bottom of this file is written as "hide every child except the document" rather
+   than naming the two it used to know about. */
 .app {
-  display: grid;
-  grid-template-columns: 1fr minmax(20rem, 24rem);
+  position: relative;
   height: 100vh;
   overflow: hidden;
 }
 
 .map {
-  position: relative;
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 0;
 }
 
 /* MapLibre's own controls default to a light chrome that vanishes on the dark shell. */
@@ -23,34 +33,9 @@
   border-top-color: var(--border);
 }
 
-.sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-  padding: 1.5rem;
-  overflow-y: auto;
-  background: var(--surface);
-  border-left: 1px solid var(--border);
-}
-
-.sidebar__header h1 {
-  margin: 0;
-  font-size: 1.5rem;
-  letter-spacing: -0.02em;
-}
-
-.sidebar__header p {
-  margin: 0.25rem 0 0;
-  font-size: 0.8125rem;
-}
-
-.sidebar__footer {
-  margin-top: auto;
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--border);
-  font-size: 0.75rem;
-  line-height: 1.5;
-}
+/* The `.sidebar` rules that used to live here are gone with the element. `.control`,
+   `.equity`, `.result`, `.scenario`, `.brief` and `.legend` below all survive, because the
+   panels themselves are unchanged — only what they float in is new. */
 
 .control h2 {
   margin: 0 0 0.625rem;
@@ -588,10 +573,12 @@ code {
 }
 
 @media print {
-  /* Everything except the document: the map is a canvas that prints as a grey box, and
-     the sidebar is a scrolling column that prints as three pages of controls. */
-  .app > .map,
-  .app > .sidebar {
+  /* Everything except the document. Written as a negation rather than as a list of the
+     children to hide: the floating layout adds and removes panels as a scenario runs, and
+     a rule naming `.map` and `.sidebar` silently started printing six glass panels the
+     moment the sidebar was replaced by them. The map is a canvas that prints as a grey
+     box; the panels print as a pile of controls; neither belongs on a council's desk. */
+  .app > *:not(.doc) {
     display: none !important;
   }
 
@@ -613,6 +600,11 @@ code {
   .doc__header h1 {
     margin: 0;
     font-size: 17pt;
+    /* Tailwind's preflight sets every heading to `font-weight: inherit`, so the brief's
+       title printed at body weight until this was stated. Same for the h2 below and the
+       list markers further down: the reset is invisible on screen, because the whole
+       document is display:none there, and only shows up on paper. */
+    font-weight: 700;
   }
 
   .doc__sub {
@@ -636,6 +628,7 @@ code {
   .doc__section h2 {
     margin: 0 0 0.375rem;
     font-size: 11pt;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
@@ -643,6 +636,9 @@ code {
   .doc__section ul {
     margin: 0;
     padding-left: 1.1rem;
+    /* Findings and "what this does not prove" are both <ul>. Preflight strips the
+       markers, which would print the caveats as an unpunctuated paragraph block. */
+    list-style: disc;
   }
 
   .doc__section li {

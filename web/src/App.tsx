@@ -4,9 +4,27 @@
  * The composition root for the frontend: it owns the selected window, the drawn polygon,
  * and the simulation result, and derives every overlay from them. Nothing here does
  * physics; it decodes what the API returns and colours it.
+ *
+ * The map is the page. Everything else floats over it, which is a layout decision with one
+ * consequence worth stating: the results stack is ordered Result → Equity → Air → Brief and
+ * that order is deliberate. Equity sits above air because it is the only output here with
+ * no caveat attached — the thermal figure carries the 2.5x hindcast correction and the air
+ * figure carries a different qualification in each season. Ordering is the cheapest way to
+ * say which number the project stands behind.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import {
+  Check,
+  PenLine,
+  Play,
+  Printer,
+  Search,
+  Trash2,
+  Undo2,
+  type LucideIcon,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 
 import {
   type CubeSummaryResponse,
@@ -19,15 +37,18 @@ import {
 import { type LoadedLayer, loadLayer, useCubeLayer } from "./hooks/useCubeLayer";
 import MapView, { type RasterOverlay } from "./map/MapView";
 import { type Position, useDrawnPolygon } from "./map/useDrawnPolygon";
+import { GLIDE, SNAP } from "./motion/springs";
 import Legend from "./panels/Legend";
 import AirPanel from "./panels/AirPanel";
 import BriefDocument from "./panels/BriefDocument";
 import BriefPanel from "./panels/BriefPanel";
+import CommandPalette from "./panels/CommandPalette";
 import EquityPanel from "./panels/EquityPanel";
+import FloatingPanel from "./panels/FloatingPanel";
 import ResultPanel from "./panels/ResultPanel";
-import ScenarioPanel from "./panels/ScenarioPanel";
 import { decodeLayer } from "./raster/decode";
 import { toCanvas } from "./raster/canvas";
+import { withGlow } from "./raster/glow";
 import {
   addRasters,
   colourise,
@@ -35,12 +56,7 @@ import {
   finiteExtent,
   splitRasters,
 } from "./raster/image";
-import {
-  DIVERGING,
-  HEAT,
-  rampForVariable,
-  symmetricDomain,
-} from "./raster/ramp";
+import { DIVERGING, HEAT, rampForVariable, symmetricDomain } from "./raster/ramp";
 import { labelWithUnits } from "./units";
 import "./App.css";
 
@@ -60,10 +76,8 @@ const MAPPABLE = [
   "pm25_emission_g_s",
 ];
 
-
 const TEMPERATURE = "lst_c";
 const MIN_VERTICES = 3;
-
 
 type View = "baseline" | "delta" | "air" | "compare";
 
@@ -71,6 +85,45 @@ type Boot =
   | { kind: "loading" }
   | { kind: "error"; message: string }
   | { kind: "ready"; health: HealthResponse; summary: CubeSummaryResponse };
+
+/** One button in the floating toolbar. Icon-only unless it carries a label. */
+function ToolButton({
+  icon: Icon,
+  label,
+  primary = false,
+  disabled = false,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label?: string;
+  primary?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <motion.button
+      layout
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      whileTap={disabled ? undefined : { scale: 0.96 }}
+      transition={SNAP}
+      // `title` as well as the visible label: the icon-only variants are the undo and the
+      // clear, which are exactly the two nobody should have to guess at.
+      title={label}
+      aria-label={label}
+      className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs tracking-tight
+                  transition-colors disabled:opacity-35 ${
+                    primary
+                      ? "bg-shoal/15 text-shoal hover:bg-shoal/25 disabled:hover:bg-shoal/15"
+                      : "text-white/70 hover:bg-white/10"
+                  }`}
+    >
+      <Icon className="size-3.5 shrink-0" />
+      {label && <span className="whitespace-nowrap">{label}</span>}
+    </motion.button>
+  );
+}
 
 export default function App() {
   const [boot, setBoot] = useState<Boot>({ kind: "loading" });
@@ -92,6 +145,17 @@ export default function App() {
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [planning, setPlanning] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  /**
+   * Swapping windows refetches a 40,602-cell raster, decodes it and re-colourises it.
+   *
+   * Worth being precise about what this buys, because it is easy to oversell: it does not
+   * make the fetch faster, and `useCubeLayer` already tracks its own loading state. What it
+   * removes is the synchronous decode-and-colourise blocking the click feedback, so the
+   * control answers immediately and dims while the new field arrives.
+   */
+  const [pending, startTransition] = useTransition();
 
   const draw = useDrawnPolygon();
 
@@ -136,10 +200,7 @@ export default function App() {
     };
   }, []);
 
-
-
   const baseline = useCubeLayer(variable, selectedWindow);
-
 
   // Compare always works in temperature, whatever the base-layer picker shows, because
   // the delta the core returns is a temperature field.
@@ -221,6 +282,7 @@ export default function App() {
   const runSimulation = useCallback(async () => {
     if (!draw.geometry || !selectedWindow) return;
 
+    setPaletteOpen(false);
     setRunning(true);
     setSimulateError(null);
     try {
@@ -276,18 +338,23 @@ export default function App() {
     setPlanError(null);
   }, []);
 
+  const selectWindow = useCallback(
+    (label: string) => startTransition(() => setSelectedWindow(label)),
+    [],
+  );
+
   // -------------------------------------------------------------- overlay ---
 
   const overlay = useMemo<RasterOverlay | null>(() => {
     if (view === "baseline" || !result || !deltaRaster) {
       if (!baseline.data) return null;
       const { raster, layer } = baseline.data;
-      // Severity is a fixed 1-5 scale. Stretching it to whatever got reported would make
-      // one mild report render as the same red as a burning waste pile.
       const extent = finiteExtent(raster);
       if (!extent) return null;
       return {
         id: `baseline-${variable}-${layer.window ?? "static"}`,
+        // No glow on a baseline: it is a dense field covering the whole tile, and additive
+        // compositing over one of those just raises the exposure of everything.
         image: toCanvas(
           colourise(raster, {
             ramp: rampForVariable(variable),
@@ -306,14 +373,16 @@ export default function App() {
       if (!airRaster || !result.air) return null;
       return {
         id: `air-${result.window}-${result.air.stats.n_cells_changed}`,
-        image: toCanvas(
-          colourise(airRaster, {
-            ramp: DIVERGING,
-            domain: airDomain ?? [-1, 1],
-            transparentAtZero: true,
-            opacity,
-          }),
-          airRaster,
+        image: withGlow(
+          toCanvas(
+            colourise(airRaster, {
+              ramp: DIVERGING,
+              domain: airDomain ?? [-1, 1],
+              transparentAtZero: true,
+              opacity,
+            }),
+            airRaster,
+          ),
         ),
         bounds: result.air.delta.grid.bounds_wgs84,
       };
@@ -322,14 +391,19 @@ export default function App() {
     if (view === "delta") {
       return {
         id: `delta-${result.window}-${result.stats.n_cells_changed}`,
-        image: toCanvas(
-          colourise(deltaRaster, {
-            ramp: DIVERGING,
-            domain: deltaDomain ?? [-1, 1],
-            transparentAtZero: true,
-            opacity,
-          }),
-          deltaRaster,
+        // Glowed, because the signal is sparse: ~39,000 of 40,602 cells are exactly zero
+        // after a simulation and stay transparent, so a halo is what lets the eye find the
+        // intervention without smoothing a single measured cell.
+        image: withGlow(
+          toCanvas(
+            colourise(deltaRaster, {
+              ramp: DIVERGING,
+              domain: deltaDomain ?? [-1, 1],
+              transparentAtZero: true,
+              opacity,
+            }),
+            deltaRaster,
+          ),
         ),
         bounds: result.delta.grid.bounds_wgs84,
       };
@@ -421,6 +495,15 @@ export default function App() {
   const { health, summary } = boot;
   const remaining = MIN_VERTICES - draw.vertices.length;
 
+  const views: { key: View; label: string; show: boolean }[] = [
+    { key: "baseline", label: "Base", show: true },
+    { key: "delta", label: "ΔLST", show: true },
+    // Only when there is an air result. Offering the tab for a plan that never touched
+    // traffic would paint an empty map and read as a broken button.
+    { key: "air", label: "ΔPM2.5", show: Boolean(result?.air) },
+    { key: "compare", label: "Compare", show: true },
+  ];
+
   return (
     <div className="app">
       <MapView
@@ -430,101 +513,211 @@ export default function App() {
         polygonClosed={draw.complete}
         drawing={draw.drawing}
         dividerLongitude={dividerLongitude}
+        onSplitChange={setSplitFraction}
         onMapClick={handleMapClick}
       />
 
-      <aside className="sidebar">
-        <header className="sidebar__header">
-          <h1>Terrarium</h1>
-          <p className="muted">
-            {health.tile.name}, {health.tile.country} · {summary.shape[0]}×{summary.shape[1]} @{" "}
-            {summary.resolution_m}&nbsp;m
-          </p>
-        </header>
+      {/* ------------------------------------------------------ brand, top left --- */}
+      <div className="glass noise absolute top-5 left-5 z-10 px-4 py-3">
+        <h1 className="font-mono text-sm tracking-tight text-white">Terrarium</h1>
+        <p className="mt-0.5 font-mono text-[0.65rem] text-white/40">
+          {health.tile.name}, {health.tile.country} · {summary.shape[0]}×{summary.shape[1]} @{" "}
+          {summary.resolution_m}&nbsp;m
+        </p>
+      </div>
 
-        <section className="control">
-          <h2>Seasonal window</h2>
-          <div className="segmented segmented--wrap">
+      {/* ---------------------------------------------- window + layer, top centre --- */}
+      <motion.div
+        animate={{ opacity: pending ? 0.45 : 1 }}
+        transition={SNAP}
+        aria-busy={pending}
+        className="glass absolute top-5 left-1/2 z-10 -translate-x-1/2 px-3 py-2"
+      >
+        <div className="flex items-center gap-2">
+          <select
+            value={selectedWindow ?? ""}
+            onChange={(event) => selectWindow(event.target.value)}
+            className="bg-transparent font-mono text-xs text-white outline-none"
+            aria-label="Seasonal window"
+          >
             {summary.windows.map((label) => (
-              <button
-                key={label}
-                type="button"
-                className={label === selectedWindow ? "is-active" : ""}
-                onClick={() => setSelectedWindow(label)}
-              >
+              <option key={label} value={label} className="bg-[#0a0d12]">
                 {label}
-              </button>
+              </option>
             ))}
-          </div>
-          <p className="hint">
-            The same planting cools several times more in summer than in winter, so the
-            window is part of the answer rather than a detail.
-          </p>
-        </section>
-
-        <section className="control">
-          <h2>Base layer</h2>
-          <select value={variable} onChange={(event) => setVariable(event.target.value)}>
+          </select>
+          <span className="h-4 w-px bg-white/10" />
+          <select
+            value={variable}
+            onChange={(event) => setVariable(event.target.value)}
+            className="max-w-56 bg-transparent font-mono text-xs text-white/70 outline-none"
+            aria-label="Base layer"
+          >
             {summary.variables
               .filter((v) => MAPPABLE.includes(v.name))
               .map((v) => (
-                <option key={v.name} value={v.name}>
+                <option key={v.name} value={v.name} className="bg-[#0a0d12]">
                   {labelWithUnits(v.name, v.units)}
                 </option>
               ))}
           </select>
-          {baseline.loading && <p className="hint">Loading…</p>}
-          {(
-            baseline.data && <p className="hint">{baseline.data.layer.description}</p>
+        </div>
+        {/* The window is part of the answer, not a detail: the same planting cools about
+            four times more in summer than in winter. */}
+        <p className="mt-1 max-w-md text-[0.62rem] leading-snug text-white/35">
+          {baseline.loading || pending
+            ? "Loading…"
+            : (baseline.error ?? baseline.data?.layer.description ?? "")}
+        </p>
+      </motion.div>
+
+      {/* view switcher, under the pill, once there is something to switch between */}
+      <AnimatePresence>
+        {result && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={GLIDE}
+            className="glass absolute top-[6.2rem] left-1/2 z-10 flex -translate-x-1/2
+                       items-center gap-1 p-1"
+          >
+            {views
+              .filter((entry) => entry.show)
+              .map((entry) => (
+                <button
+                  key={entry.key}
+                  type="button"
+                  onClick={() => setView(entry.key)}
+                  className={`rounded-md px-3 py-1.5 font-mono text-[0.68rem] transition-colors ${
+                    view === entry.key
+                      ? "bg-white/12 text-white"
+                      : "text-white/45 hover:text-white/80"
+                  }`}
+                >
+                  {entry.label}
+                </button>
+              ))}
+
+            {view === "compare" && (
+              <label className="ml-2 flex items-center gap-2 pr-2">
+                {/* Kept and focusable rather than deleted: the grip on the map is a mouse
+                    affordance, and the split has to stay keyboard-operable without it. */}
+                <span className="sr-only">Split position</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={splitFraction}
+                  onChange={(event) => setSplitFraction(Number(event.target.value))}
+                  className="w-28 accent-white/70"
+                />
+              </label>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* --------------------------------------------------- results, right rail --- */}
+      <div
+        className="absolute top-5 right-5 z-10 flex max-h-[calc(100vh-2.5rem)] w-96
+                   flex-col gap-3 overflow-x-hidden overflow-y-auto"
+      >
+        <AnimatePresence mode="popLayout">
+          {result && (
+            <FloatingPanel key="result">
+              <ResultPanel result={result} />
+            </FloatingPanel>
           )}
-          {baseline.error && <p className="error-text">{baseline.error}</p>}
-        </section>
-
-        <section className="control">
-          <h2>Intervention</h2>
-
-          {!draw.complete && !draw.drawing && (
-            <button type="button" className="primary" onClick={draw.startDrawing}>
-              Draw a polygon
-            </button>
+          {result && (
+            <FloatingPanel key="equity">
+              <EquityPanel equity={result.equity} />
+            </FloatingPanel>
           )}
-
-          {!draw.complete && draw.drawing && (
-            <div className="stack">
-              <p className="hint">
-                Click the map to place corners. {draw.vertices.length} placed
-                {remaining > 0 ? ` — ${remaining} more needed` : ""}.
+          {result?.air && (
+            <FloatingPanel key="air">
+              <AirPanel air={result.air} window={result.window} season={result.season} />
+            </FloatingPanel>
+          )}
+          {result && (
+            <FloatingPanel key="brief">
+              <BriefPanel brief={result.brief} />
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg
+                           border border-white/12 py-2 text-xs text-white/70
+                           hover:bg-white/10"
+              >
+                <Printer className="size-3.5" />
+                Save the council brief as PDF
+              </button>
+              <p className="mt-2 text-[0.62rem] leading-relaxed text-white/35">
+                The browser&rsquo;s own print dialog — no rendering service and no extra
+                dependency. The numbers, the findings and every caveat, on one sheet.
               </p>
-              <div className="row">
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={!draw.canComplete}
-                  onClick={draw.completePolygon}
-                >
-                  Close polygon
-                </button>
-                <button
-                  type="button"
-                  disabled={draw.vertices.length === 0}
-                  onClick={draw.undoVertex}
-                >
-                  Undo
-                </button>
-                <button type="button" onClick={resetScenario}>
-                  Cancel
-                </button>
-              </div>
-            </div>
+            </FloatingPanel>
           )}
+        </AnimatePresence>
+      </div>
 
-          {draw.complete && (
-            <div className="stack">
-              <label className="field">
-                <span>
-                  Canopy added: <strong>{(canopy * 100).toFixed(0)}%</strong>
+      {/* ------------------------------------------------ legend + opacity, bottom left --- */}
+      <div className="glass noise absolute bottom-6 left-5 z-10 w-80 p-4">
+        {legend ? (
+          <Legend
+            ramp={legend.ramp}
+            domain={legend.domain}
+            units={legend.units}
+            diverging={legend.diverging}
+          />
+        ) : (
+          <p className="text-xs text-white/40">No layer loaded.</p>
+        )}
+
+        <label className="mt-3 flex items-center gap-3">
+          <span className="font-mono text-[0.62rem] whitespace-nowrap text-white/40">
+            opacity
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={opacity}
+            onChange={(event) => setOpacity(Number(event.target.value))}
+            className="w-full accent-white/70"
+          />
+        </label>
+
+        {/* D9: this label must appear wherever the temperature does. Worded as a statement
+            about lst_c and ΔLST specifically, because it sits under a layer picker that
+            can be showing NDVI. */}
+        <p className="mt-3 border-t border-white/10 pt-3 text-[0.62rem] leading-relaxed text-white/35">
+          <strong className="text-white/55">lst_c</strong> and{" "}
+          <strong className="text-white/55">ΔLST</strong> are mid-morning land surface
+          temperature (~10:30 local, Landsat ST_B10) — the radiating surface, not air
+          temperature, and not the afternoon peak.
+        </p>
+      </div>
+
+      {/* ------------------------------------------------------- levers, above toolbar --- */}
+      <AnimatePresence>
+        {draw.complete && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            transition={GLIDE}
+            className="glass noise absolute bottom-24 left-1/2 z-10 w-[min(36rem,calc(100vw-3rem))]
+                       -translate-x-1/2 p-4"
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="block">
+                <span className="font-mono text-[0.65rem] text-white/55">
+                  Canopy added <strong className="text-white">{(canopy * 100).toFixed(0)}%</strong>
                   {plan && plan.canopy_fraction_added !== canopy && (
-                    <span className="muted"> · edited since the plan was checked</span>
+                    <span className="text-white/35"> · edited since the plan was checked</span>
                   )}
                 </span>
                 <input
@@ -534,18 +727,20 @@ export default function App() {
                   step={0.05}
                   value={canopy}
                   onChange={(event) => setCanopy(Number(event.target.value))}
+                  className="mt-1.5 w-full accent-emerald-400"
                 />
+                <span className="mt-1 block text-[0.6rem] leading-snug text-white/35">
+                  A ceiling, not a promise — each cell is capped at what is still plantable
+                  there, and water is never planted.
+                </span>
               </label>
-              <p className="hint">
-                A ceiling, not a promise — each cell is capped at what is still plantable
-                there, and water is never planted.
-              </p>
 
-              <label className="field">
-                <span>
-                  Vehicle emissions removed: <strong>{(emissions * 100).toFixed(0)}%</strong>
+              <label className="block">
+                <span className="font-mono text-[0.65rem] text-white/55">
+                  Vehicle emissions removed{" "}
+                  <strong className="text-white">{(emissions * 100).toFixed(0)}%</strong>
                   {plan && plan.emission_fraction_removed !== emissions && (
-                    <span className="muted"> · edited since the plan was checked</span>
+                    <span className="text-white/35"> · edited since the plan was checked</span>
                   )}
                 </span>
                 <input
@@ -555,165 +750,120 @@ export default function App() {
                   step={0.05}
                   value={emissions}
                   onChange={(event) => setEmissions(Number(event.target.value))}
+                  className="mt-1.5 w-full accent-violet-400"
                 />
-              </label>
-              <p className="hint">
-                1.0 means the traffic is gone, not electrified — brake, tyre and road wear
-                are roughly half of road PM2.5 and stay until the vehicles do. At 0 the plan
-                says nothing about traffic and no air result comes back.
-              </p>
-
-              <div className="row">
-                <button
-                  type="button"
-                  className="primary"
-                  onClick={() => void runSimulation()}
-                  disabled={running}
-                >
-                  {running ? "Simulating…" : "Run simulation"}
-                </button>
-                <button type="button" onClick={resetScenario}>
-                  Clear
-                </button>
-              </div>
-            </div>
-          )}
-
-          {simulateError && <p className="error-text">{simulateError}</p>}
-        </section>
-
-        {presets.length > 0 && (
-          <ScenarioPanel
-            presets={presets}
-            planner={planner}
-            hasPolygon={draw.complete}
-            plan={plan}
-            error={planError}
-            busy={planning}
-            onPreset={(slug) => void buildPlan({ preset: slug })}
-            onText={(text) => void buildPlan({ text })}
-            onClear={clearPlan}
-          />
-        )}
-
-        {result && (
-          <section className="control">
-            <h2>View</h2>
-            <div className="segmented">
-              <button
-                type="button"
-                className={view === "baseline" ? "is-active" : ""}
-                onClick={() => setView("baseline")}
-              >
-                Base
-              </button>
-              <button
-                type="button"
-                className={view === "delta" ? "is-active" : ""}
-                onClick={() => setView("delta")}
-              >
-                ΔLST
-              </button>
-              {/* Only when there is an air result. Offering the tab for a plan that never
-                  touched traffic would paint an empty map and read as a broken button. */}
-              {result.air && (
-                <button
-                  type="button"
-                  className={view === "air" ? "is-active" : ""}
-                  onClick={() => setView("air")}
-                >
-                  ΔPM2.5
-                </button>
-              )}
-              <button
-                type="button"
-                className={view === "compare" ? "is-active" : ""}
-                onClick={() => setView("compare")}
-              >
-                Compare
-              </button>
-            </div>
-
-            {view === "compare" && (
-              <label className="field">
-                <span>Split position</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={splitFraction}
-                  onChange={(event) => setSplitFraction(Number(event.target.value))}
-                />
-                <span className="hint">
-                  West of the line: today. East: after planting. The divider is a fixed
-                  line of longitude, so both halves always describe the same places.
+                <span className="mt-1 block text-[0.6rem] leading-snug text-white/35">
+                  1.0 means the traffic is gone, not electrified — brake, tyre and road wear
+                  are roughly half of road PM2.5 and stay until the vehicles do. At 0 the
+                  plan says nothing about traffic and no air result comes back.
                 </span>
               </label>
+            </div>
+
+            {simulateError && (
+              <p className="mt-3 text-xs text-red-400">{simulateError}</p>
             )}
-          </section>
+          </motion.div>
         )}
+      </AnimatePresence>
 
-        <section className="control">
-          <h2>Overlay opacity</h2>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={opacity}
-            onChange={(event) => setOpacity(Number(event.target.value))}
-          />
-        </section>
-
-        {legend && (
-          <section className="control">
-            <h2>Legend</h2>
-            <Legend
-              ramp={legend.ramp}
-              domain={legend.domain}
-              units={legend.units}
-              diverging={legend.diverging}
+      {/* ------------------------------------------------------ toolbar, bottom centre --- */}
+      <motion.div
+        layout
+        transition={GLIDE}
+        className="glass absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center
+                   gap-1 p-1.5"
+      >
+        {/* `popLayout` matters: without it the exiting button holds its slot while the
+            entering one appears beside it, and the pill visibly stutters. */}
+        <AnimatePresence mode="popLayout" initial={false}>
+          {!draw.complete && !draw.drawing && (
+            <ToolButton
+              key="draw"
+              icon={PenLine}
+              label="Draw zone"
+              primary
+              onClick={draw.startDrawing}
             />
-          </section>
-        )}
+          )}
 
-        {result && <ResultPanel result={result} />}
-        {/* Equity above air, deliberately. It is the only output here with no caveat
-            attached to it: the thermal figure carries a 2.5x hindcast correction and the
-            air figure carries a different qualification in each season. It is also the
-            only one of the three nobody else shows. Ordering is the cheapest way to say
-            which number we stand behind. */}
-        {result && <EquityPanel equity={result.equity} />}
-        {result?.air && (
-          <AirPanel air={result.air} window={result.window} season={result.season} />
-        )}
-        {result && <BriefPanel brief={result.brief} />}
+          {draw.drawing && (
+            <motion.span
+              key="count"
+              layout
+              className="px-3 font-mono text-[0.68rem] whitespace-nowrap text-white/45"
+            >
+              {draw.vertices.length} pt{draw.vertices.length === 1 ? "" : "s"}
+              {remaining > 0 ? ` · ${remaining} more` : ""}
+            </motion.span>
+          )}
+          {draw.drawing && (
+            <ToolButton
+              key="close"
+              icon={Check}
+              label="Close"
+              primary
+              disabled={!draw.canComplete}
+              onClick={draw.completePolygon}
+            />
+          )}
+          {draw.drawing && (
+            <ToolButton
+              key="undo"
+              icon={Undo2}
+              label="Undo"
+              disabled={draw.vertices.length === 0}
+              onClick={draw.undoVertex}
+            />
+          )}
 
-        {result && (
-          <section className="control">
-            <h2>Council brief</h2>
-            <button type="button" onClick={() => window.print()}>
-              Save as PDF
-            </button>
-            <p className="hint">
-              Opens the browser&rsquo;s print dialog — choose &ldquo;Save as PDF&rdquo;. No
-              rendering service and no extra dependency: the numbers, the findings and every
-              caveat, on one sheet.
-            </p>
-          </section>
-        )}
+          {draw.complete && (
+            <ToolButton
+              key="plan"
+              icon={Search}
+              label={plan ? plan.plan.name : "Plan…"}
+              onClick={() => setPaletteOpen(true)}
+            />
+          )}
+          {draw.complete && (
+            <ToolButton
+              key="run"
+              icon={Play}
+              label={running ? "Simulating…" : "Run simulation"}
+              primary
+              disabled={running}
+              onClick={() => void runSimulation()}
+            />
+          )}
+          {(draw.complete || draw.drawing) && (
+            <ToolButton key="clear" icon={Trash2} label="Clear" onClick={resetScenario} />
+          )}
+        </AnimatePresence>
+      </motion.div>
 
+      {!draw.complete && !draw.drawing && (
+        <p
+          className="pointer-events-none absolute bottom-2 left-1/2 z-10 -translate-x-1/2
+                     font-mono text-[0.6rem] tracking-[0.18em] text-white/25 uppercase"
+        >
+          press / for the plan palette
+        </p>
+      )}
 
-        <footer className="sidebar__footer muted">
-          {/* D9: this label must appear wherever the temperature does. Worded as a
-              statement about lst_c and ΔLST specifically, because it sits below a layer
-              picker that can be showing NDVI. */}
-          <strong>lst_c</strong> and <strong>ΔLST</strong> are mid-morning land surface
-          temperature (~10:30 local, Landsat ST_B10) — the radiating surface, not air
-          temperature, and not the afternoon peak.
-        </footer>
-      </aside>
+      {/* The palette owns its own shortcut, so it is mounted whether or not it is open. */}
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        presets={presets}
+        planner={planner}
+        hasPolygon={draw.complete}
+        plan={plan}
+        error={planError}
+        busy={planning}
+        onPreset={(slug) => void buildPlan({ preset: slug })}
+        onText={(text) => void buildPlan({ text })}
+        onClear={clearPlan}
+      />
 
       {/* Hidden on screen, and the only thing on the page when printed. Rendered here
           rather than in a new window so it always describes the result currently loaded. */}

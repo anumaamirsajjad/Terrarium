@@ -8,21 +8,36 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test": "vitest run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "bake:lahore": "node scripts/bake-lahore.mjs",
+    "shots": "node scripts/shoot.mjs"
   },
   "dependencies": {
     "@deck.gl/react": "^9.3.7",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@react-three/drei": "^10.7.8",
+    "@react-three/fiber": "^9.7.0",
+    "@react-three/postprocessing": "^3.0.4",
+    "@tailwindcss/vite": "^4.3.3",
     "deck.gl": "^9.3.7",
+    "lucide-react": "^1.30.0",
     "maplibre-gl": "^6.0.0",
+    "motion": "^13.0.0",
+    "postprocessing": "^6.39.4",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "tailwindcss": "^4.3.3",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.185.4",
     "@vitejs/plugin-react": "^6.0.3",
     "oxlint": "^1.71.0",
+    "puppeteer-core": "^25.5.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
     "vitest": "^3.2.7"

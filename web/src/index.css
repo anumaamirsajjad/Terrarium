@@ -1,29 +1,76 @@
-:root {
-  --bg: #0f1210;
-  --surface: #161a18;
-  --border: #262b28;
-  --fg: #e8ece9;
-  --fg-muted: #8b948f;
-  --badge-bg: #212623;
-  --ok: #4ade80;
-  --error: #f87171;
+/**
+ * Design tokens: "Solarpunk Data Science".
+ *
+ * Two palettes live in this project and they must not be confused. The one below is
+ * *chrome* — panels, borders, buttons, landing-page accents. The one that means something
+ * is in `src/raster/ramp.ts`, where a colour encodes a measured quantity and the diverging
+ * ramp's transparent zero is the single most important property on the map. Nothing here
+ * may be used to colour a raster, and no accent here overrides a legend swatch, which is
+ * generated from the ramp's own stops.
+ *
+ * Fonts are self-hosted rather than pulled from Google Fonts. Google's CDN is free and
+ * keyless, so it does not break the budget rule, but it is a network dependency at demo
+ * time and D13 exists so that a live pitch has none.
+ */
 
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  line-height: 1.6;
-  color-scheme: dark light;
+@import "tailwindcss";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+@theme {
+  --font-sans: "Geist Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "Cascadia Code", monospace;
+
+  /* Substrate */
+  --color-void: #05070a;
+  --color-shell: #0a0d12;
+  --color-hair: rgba(255, 255, 255, 0.1);
+
+  /**
+   * The accents are the HEAT ramp's own stops, transcribed from raster/ramp.ts.
+   *
+   * Picking a fashionable neon here and a measured ramp there would give the product two
+   * palettes that disagree — the page would promise one temperature and the map would
+   * draw another. Taking the chrome from the instrument means the landing page and the
+   * overlay are the same colour system, and every hue on the page is one a pixel can
+   * actually be.
+   */
+  --color-abyss: #0c2c5c;
+  --color-tide: #1e78aa;
+  --color-shoal: #6ebeaf;
+  --color-straw: #f0d26e;
+  --color-ember: #d66e32;
+  --color-scar: #961a1e;
+
+  --blur-glass: 16px;
+
+  /* The analysis grid, as a layout module. 100 m in the cube; 100 px on the page. */
+  --spacing-cell: 100px;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #fbfcfb;
-    --surface: #ffffff;
-    --border: #e3e7e4;
-    --fg: #141816;
-    --fg-muted: #6b736e;
-    --badge-bg: #f1f4f2;
-    --ok: #16a34a;
-    --error: #dc2626;
-  }
+/**
+ * Dark only. The light scheme this file used to carry is dropped rather than forgotten:
+ * a frosted-glass shell over a pale Positron basemap is one design, and supporting both
+ * is two. The map is the product and it wants a dark chrome around it.
+ *
+ * The custom properties below are aliases the pre-existing App.css reads in ~90 places.
+ * Keeping the names is what lets the revamp land incrementally instead of as one commit
+ * that also rewrites the print stylesheet.
+ */
+:root {
+  color-scheme: dark;
+
+  --bg: var(--color-void);
+  --surface: var(--color-shell);
+  --border: var(--color-hair);
+  --fg: #e8ece9;
+  --fg-muted: #8b948f;
+  --badge-bg: rgba(255, 255, 255, 0.04);
+  --ok: var(--color-shoal);
+  --error: #f87171;
+
+  font-family: var(--font-sans);
+  line-height: 1.6;
 }
 
 body {
@@ -32,4 +79,75 @@ body {
   background: var(--bg);
   color: var(--fg);
   -webkit-font-smoothing: antialiased;
+}
+
+/**
+ * The frosted panel, as one utility rather than six classes repeated at every call site.
+ *
+ * `backdrop-filter` over a moving MapLibre canvas is the most expensive thing in this
+ * design. If panning stutters on integrated graphics, lower --blur-glass before changing
+ * anything else — 10px is visually near-identical and materially cheaper.
+ */
+@utility glass {
+  background: color-mix(in oklab, var(--color-shell) 72%, transparent);
+  backdrop-filter: blur(var(--blur-glass)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(140%);
+  border: 1px solid var(--color-hair);
+  border-radius: 0.875rem;
+}
+
+/**
+ * Film grain over a panel. An inline feTurbulence data URI: no image asset to fetch, no
+ * licence to check, ~200 bytes, and it keeps the zero-dependency claim intact.
+ */
+@utility noise {
+  position: relative;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+}
+
+/**
+ * The raster, as a page substrate.
+ *
+ * Two hairline sets on a 100 px module — the same number the cube uses in metres. It is
+ * the ruled paper this instrument writes on, and it makes the page's alignment visible
+ * rather than implied.
+ */
+@utility raster {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+  background-size: var(--spacing-cell) var(--spacing-cell);
+}
+
+/** A rule that draws itself in as the section arrives. Paired with a whileInView. */
+@utility hairline {
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    var(--color-hair) 0%,
+    var(--color-hair) 60%,
+    transparent 100%
+  );
+}
+
+/* Motion is decoration here; every animation in this app is safe to not play. The WebGL
+   hero cannot be stopped by this rule and gates itself in JS — see RasterCity. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
