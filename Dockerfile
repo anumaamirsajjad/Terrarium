@@ -29,13 +29,11 @@ COPY . .
 RUN uv sync --frozen --no-dev
 
 # ---------------------------------------------------------
-# Build the State Cube and Train the Thermal Model
+# The State Cube and Thermal Model are built locally and
+# copied into the image via the COPY . . command above.
 # ---------------------------------------------------------
-# This generates data/processed/cube.zarr and data/processed/thermal.txt
-RUN uv run python scripts/build_tile.py
-RUN uv run python scripts/train_thermal.py
 
-# Point the API to the cube we just built, and listen on all interfaces
+# Point the API to the cube, and listen on all interfaces
 ENV TERRARIUM_SERVE_ZARR_STORE=data/processed/cube.zarr
 ENV TERRARIUM_API_HOST=0.0.0.0
 ENV TERRARIUM_API_PORT=8000
