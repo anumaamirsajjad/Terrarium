@@ -11,6 +11,15 @@
  * no caveat attached — the thermal figure carries the 2.5x hindcast correction and the air
  * figure carries a different qualification in each season. Ordering is the cheapest way to
  * say which number the project stands behind.
+ *
+ * **Floating over the map costs the map.** At `lg` and up there is room either side of it
+ * for that to be free. On a phone there is not: the chrome that reads as a light dusting on
+ * a 1440 px desktop covered the top half of a 390 px viewport, and the top half of the map
+ * is where a user taps to draw. Every polygon drawn on a phone came out with two of its
+ * four vertices missing, because two of the four taps landed on a glass panel. So the
+ * narrow layout is not the wide one reflowed — it is a different arrangement with the same
+ * parts: one merged bar at the top, a compact legend under it, the levers and the toolbar
+ * at the bottom, and the results in a sheet that is summoned rather than always present.
  */
 
 import { AnimatePresence, motion } from "motion/react";
@@ -151,6 +160,16 @@ export default function App() {
   const [planError, setPlanError] = useState<string | null>(null);
   const [planning, setPlanning] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /**
+   * Is the results sheet up? Narrow layout only — at `lg` and up the results are a rail
+   * beside the map and there is nothing to open or shut.
+   *
+   * A sheet rather than a permanent panel because on a phone the two cannot both win: a
+   * panel tall enough to hold the brief is a panel that hides the field it describes. It
+   * opens itself when a run lands, since that is what the user just asked for, and the
+   * chip in the top cluster puts it back.
+   */
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   /**
    * Swapping windows refetches a 40,602-cell raster, decodes it and re-colourises it.
@@ -306,6 +325,7 @@ export default function App() {
             },
       );
       setResult(response);
+      setSheetOpen(true);
       // Land on whichever result the plan actually produced. A traffic-only plan changes
       // no temperature, so opening on ΔLST would show an empty map for a run that worked.
       setView(response.air && response.stats.n_cells_changed === 0 ? "air" : "delta");
@@ -334,6 +354,7 @@ export default function App() {
     setPlan(null);
     setPlanError(null);
     setView("baseline");
+    setSheetOpen(false);
   }, [draw]);
 
   const clearPlan = useCallback(() => {
@@ -526,17 +547,23 @@ export default function App() {
       />
 
       {/* ------------------------------------------------------------ top cluster --- */}
-      {/* Below `sm` these four stack in normal flow instead of floating independently:
-          brand (top-left), the window/layer pill (top-centre) and the results rail
-          (top-right) are all wide enough, and close enough together, that a phone-width
-          viewport had nowhere to put all three without overlap. `sm:contents` drops this
-          wrapper from the box model at the desktop breakpoint, so each child's own
-          `sm:absolute` positions it exactly where it always sat, pixel for pixel. */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col gap-3 p-4 sm:contents">
-        {/* brand, top left */}
-        <div className="glass noise pointer-events-auto z-10 self-start px-4 py-3 sm:absolute sm:top-5 sm:left-5">
-          <h1 className="font-mono text-sm tracking-tight text-white">Terrarium</h1>
-          <p className="mt-0.5 font-mono text-[0.65rem] text-white/40">
+      {/* Below `lg` the brand, the pickers, the view switcher and the legend are one
+          column pinned to the top edge; `lg:contents` drops this wrapper from the box model
+          at the desktop breakpoint so each child's own `lg:absolute` puts it back exactly
+          where it always sat. The wrapper takes no pointer events, so only the cards
+          themselves are ever between a tap and the map — which is why the legend below is
+          as short as it is, and why the results are not in here at all. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col gap-2 p-3 lg:contents">
+        {/* brand + pickers. One card on a phone, two on a desktop: at `lg` the brand
+            detaches to the top-left corner and the pickers to the top centre, which is
+            what `lg:absolute` on each of them does. Merged, because two cards stacked with
+            a gap cost 40 px of map for one line of text. */}
+        <div className="glass noise pointer-events-auto z-10 flex items-center gap-3 px-3 py-2
+                        lg:absolute lg:top-5 lg:left-5 lg:block lg:px-4 lg:py-3">
+          <h1 className="font-mono text-sm tracking-tight whitespace-nowrap text-white">
+            Terrarium
+          </h1>
+          <p className="truncate font-mono text-[0.6rem] text-white/40 lg:mt-0.5 lg:text-[0.65rem]">
             {health.tile.name}, {health.tile.country} · {summary.shape[0]}×{summary.shape[1]} @{" "}
             {summary.resolution_m}&nbsp;m
           </p>
@@ -547,13 +574,17 @@ export default function App() {
           animate={{ opacity: pending ? 0.45 : 1 }}
           transition={SNAP}
           aria-busy={pending}
-          className="glass pointer-events-auto z-10 px-3 py-2 sm:absolute sm:top-5 sm:left-1/2 sm:-translate-x-1/2"
+          className="glass pointer-events-auto z-10 px-3 py-2 lg:absolute lg:top-5 lg:left-1/2 lg:-translate-x-1/2"
         >
-          <div className="flex flex-wrap items-center gap-2">
+          {/* `w-auto` on both, and no wrap. App.css gives every `select` `width: 100%`,
+              which is invisible while this card is shrink-to-fit at `lg` and up — and made
+              each picker claim a full row the moment the card went full-width on a phone,
+              turning a 40 px bar into a 100 px one. */}
+          <div className="flex items-center gap-2">
             <select
               value={selectedWindow ?? ""}
               onChange={(event) => selectWindow(event.target.value)}
-              className="bg-transparent font-mono text-xs text-white outline-none"
+              className="w-auto shrink-0 bg-transparent font-mono text-xs text-white outline-none"
               aria-label="Seasonal window"
             >
               {summary.windows.map((label) => (
@@ -562,11 +593,11 @@ export default function App() {
                 </option>
               ))}
             </select>
-            <span className="h-4 w-px bg-white/10" />
+            <span className="h-4 w-px shrink-0 bg-white/10" />
             <select
               value={variable}
               onChange={(event) => setVariable(event.target.value)}
-              className="max-w-56 bg-transparent font-mono text-xs text-white/70 outline-none"
+              className="w-auto min-w-0 flex-1 bg-transparent font-mono text-xs text-white/70 outline-none lg:max-w-56 lg:flex-none"
               aria-label="Base layer"
             >
               {summary.variables
@@ -579,15 +610,23 @@ export default function App() {
             </select>
           </div>
           {/* The window is part of the answer, not a detail: the same planting cools about
-              four times more in summer than in winter. */}
-          <p className="mt-1 max-w-md text-[0.62rem] leading-snug text-white/35">
+              four times more in summer than in winter. Two lines of prose about the layer
+              is a desktop luxury; on a phone the error still shows, because an error is
+              not a blurb. */}
+          <p
+            className={`mt-1 max-w-md text-[0.62rem] leading-snug text-white/35 ${
+              baseline.error ? "" : "hidden lg:block"
+            }`}
+          >
             {baseline.loading || pending
               ? "Loading…"
               : (baseline.error ?? plainVariableBlurb(variable))}
           </p>
         </motion.div>
 
-        {/* view switcher, under the pill, once there is something to switch between */}
+        {/* view switcher, under the pill, once there is something to switch between.
+            `overflow-x-auto` on a phone: four labels plus a split slider is wider than
+            390 px, and a switcher that clips its last tab has lost a view. */}
         <AnimatePresence>
           {result && (
             <motion.div
@@ -595,9 +634,29 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={GLIDE}
-              className="glass pointer-events-auto z-10 flex flex-wrap items-center gap-1
-                         self-start p-1 sm:absolute sm:top-[6.2rem] sm:left-1/2 sm:-translate-x-1/2"
+              className="glass pointer-events-auto z-10 flex items-center gap-1 overflow-x-auto p-1
+                         lg:absolute lg:top-[6.4rem] lg:left-1/2 lg:flex-wrap lg:overflow-visible
+                         lg:-translate-x-1/2"
             >
+              {/* Phone only, and first in the row rather than last: this is what puts the
+                  results sheet back after it has been shut, and the row scrolls
+                  horizontally — an `ml-auto` chip at the end of it is a control nobody can
+                  see. There is no room for a permanent rail at this width, so the result
+                  needs a door rather than a wall. */}
+              <button
+                type="button"
+                onClick={() => setSheetOpen((open) => !open)}
+                aria-expanded={sheetOpen}
+                className="mr-1 flex shrink-0 items-center gap-1 rounded-md bg-emerald-400/10
+                           px-2.5 py-1.5 font-mono text-[0.68rem] text-emerald-200 lg:hidden"
+              >
+                Brief
+                <ChevronDown
+                  aria-hidden="true"
+                  className={`size-3 transition-transform ${sheetOpen ? "" : "rotate-180"}`}
+                />
+              </button>
+
               {views
                 .filter((entry) => entry.show)
                 .map((entry) => (
@@ -605,7 +664,7 @@ export default function App() {
                     key={entry.key}
                     type="button"
                     onClick={() => setView(entry.key)}
-                    className={`rounded-md px-3 py-1.5 font-mono text-[0.68rem] transition-colors ${
+                    className={`shrink-0 rounded-md px-3 py-1.5 font-mono text-[0.68rem] whitespace-nowrap transition-colors ${
                       view === entry.key
                         ? "bg-white/12 text-white"
                         : "text-white/45 hover:text-white/80"
@@ -616,7 +675,7 @@ export default function App() {
                 ))}
 
               {view === "compare" && (
-                <label className="ml-2 flex items-center gap-2 pr-2">
+                <label className="ml-2 flex shrink-0 items-center gap-2 pr-2">
                   {/* Kept and focusable rather than deleted: the grip on the map is a mouse
                       affordance, and the split has to stay keyboard-operable without it. */}
                   <span className="sr-only">Split position</span>
@@ -627,83 +686,22 @@ export default function App() {
                     step={0.01}
                     value={splitFraction}
                     onChange={(event) => setSplitFraction(Number(event.target.value))}
-                    className="w-28 accent-white/70"
+                    className="w-24 accent-white/70 lg:w-28"
                   />
                 </label>
               )}
+
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* results, right rail. Capped to 50vh in the stacked mobile flow so it can never
-            push the toolbar and legend off screen; the full-height scroll returns once it
-            is its own floating rail at `sm` and up. */}
-        <div
-          className="pointer-events-auto z-10 flex max-h-[50vh] flex-col gap-3
-                     overflow-x-hidden overflow-y-auto sm:absolute sm:top-5 sm:right-5
-                     sm:max-h-[calc(100vh-2.5rem)] sm:w-96"
-        >
-          <AnimatePresence mode="popLayout">
-            {result && (
-              <FloatingPanel key="plain">
-                <PlainPanel brief={result.brief} />
-
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg
-                             border border-white/12 py-2 text-xs text-white/70
-                             hover:bg-white/10"
-                >
-                  <Printer className="size-3.5" />
-                  Save the full brief as PDF
-                </button>
-              </FloatingPanel>
-            )}
-
-            {/* Everything below is the technical read, collapsed by default.
-                `<details>` rather than a `useState` toggle: the browser already ships the
-                open/closed state, the keyboard handling, the ARIA expanded semantics and
-                find-in-page opening the section to reveal a match. None of that is worth
-                re-implementing, and the print stylesheet can force it open with one rule. */}
-            {result && (
-              <FloatingPanel key="detail">
-                <details className="group">
-                  <summary
-                    className="flex cursor-pointer list-none items-center justify-between
-                               text-xs text-white/55 hover:text-white/80"
-                  >
-                    <span>Show the technical detail</span>
-                    <ChevronDown
-                      aria-hidden="true"
-                      className="size-3.5 transition-transform group-open:rotate-180"
-                    />
-                  </summary>
-
-                  <div className="mt-4 space-y-5 border-t border-white/8 pt-4">
-                    <ResultPanel result={result} />
-                    <EquityPanel equity={result.equity} />
-                    {result.air && (
-                      <AirPanel
-                        air={result.air}
-                        window={result.window}
-                        season={result.season}
-                      />
-                    )}
-                    <BriefPanel brief={result.brief} />
-                  </div>
-                </details>
-              </FloatingPanel>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* legend + opacity. In the mobile stack it flows below the results rail; at `sm`
-            and up it pops back out to its usual floating spot, bottom left. It used to be
-            pinned there unconditionally, which put it directly under the toolbar pill on
-            any narrow screen — same bottom offset, overlapping horizontal range, so the
-            draw/run/clear buttons rendered half-hidden behind it. */}
-        <div className="glass noise pointer-events-auto z-10 p-4 sm:absolute sm:bottom-6 sm:left-5 sm:w-80">
+        {/* legend + opacity. Bottom left at `lg` and up; in the narrow column it follows
+            the pickers, because the bottom edge of a phone already carries the levers, the
+            toolbar and the basemap's own attribution and controls. Compact there: the ramp
+            and the opacity slider share a row, and the D9 sentence — which must appear
+            wherever the temperature does, so it is never the thing that gets dropped —
+            sits under them at the smallest size this design uses. */}
+        <div className="glass noise pointer-events-auto z-10 px-3 py-2.5 lg:absolute lg:bottom-6 lg:left-5 lg:w-80 lg:p-4">
           {legend ? (
             <Legend
               ramp={legend.ramp}
@@ -715,7 +713,7 @@ export default function App() {
             <p className="text-xs text-white/40">No layer loaded.</p>
           )}
 
-          <label className="mt-3 flex items-center gap-3">
+          <label className="mt-2 flex items-center gap-3 lg:mt-3">
             <span className="font-mono text-[0.62rem] whitespace-nowrap text-white/40">
               opacity
             </span>
@@ -733,13 +731,93 @@ export default function App() {
           {/* D9: this label must appear wherever the temperature does. Worded as a
               statement about lst_c and ΔLST specifically, because it sits under a layer
               picker that can be showing NDVI. */}
-          <p className="mt-3 border-t border-white/10 pt-3 text-[0.62rem] leading-relaxed text-white/35">
+          <p className="mt-2 border-t border-white/10 pt-2 text-[0.58rem] leading-relaxed text-white/35 lg:mt-3 lg:pt-3 lg:text-[0.62rem]">
             <strong className="text-white/55">lst_c</strong> and{" "}
             <strong className="text-white/55">ΔLST</strong> are mid-morning land surface
             temperature (~10:30 local, Landsat ST_B10) — the radiating surface, not air
             temperature, and not the afternoon peak.
           </p>
         </div>
+      </div>
+
+      {/* ------------------------------------------------------ results, rail or sheet --- */}
+      {/* One tree, two placements. At `lg` and up it is the floating rail down the right
+          hand side it has always been. Below that it is a sheet against the bottom edge,
+          over everything, dismissible — because a phone cannot show a brief and the field
+          the brief is about at the same time, and pretending otherwise is what produced a
+          results column with 50vh of scroll inside a 100vh viewport. */}
+      <div
+        className={`pointer-events-auto z-30 flex flex-col gap-3 overflow-x-hidden
+                    overflow-y-auto lg:absolute lg:inset-x-auto lg:top-5 lg:right-5 lg:bottom-auto
+                    lg:z-10 lg:max-h-[calc(100dvh-2.5rem)] lg:w-96 ${
+                      result && sheetOpen
+                        ? "absolute inset-x-0 bottom-0 max-h-[78dvh] rounded-t-2xl bg-[#0a0d12]/80 p-3 backdrop-blur-xl lg:rounded-none lg:bg-transparent lg:p-0 lg:backdrop-blur-none"
+                        : "max-lg:hidden"
+                    }`}
+      >
+        {/* The sheet's own handle. `lg:hidden` because the rail is never in the way. */}
+        <button
+          type="button"
+          onClick={() => setSheetOpen(false)}
+          className="sticky top-0 -mt-1 flex w-full shrink-0 justify-center py-1 lg:hidden"
+          aria-label="Hide the brief"
+        >
+          <span className="h-1 w-10 rounded-full bg-white/25" />
+        </button>
+
+        <AnimatePresence mode="popLayout">
+          {result && (
+            <FloatingPanel key="plain">
+              <PlainPanel brief={result.brief} />
+
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg
+                           border border-white/12 py-2 text-xs text-white/70
+                           hover:bg-white/10"
+              >
+                <Printer className="size-3.5" />
+                Save the full brief as PDF
+              </button>
+            </FloatingPanel>
+          )}
+
+          {/* Everything below is the technical read, collapsed by default.
+              `<details>` rather than a `useState` toggle: the browser already ships the
+              open/closed state, the keyboard handling, the ARIA expanded semantics and
+              find-in-page opening the section to reveal a match. None of that is worth
+              re-implementing, and the print stylesheet can force it open with one rule. */}
+          {result && (
+            <FloatingPanel key="detail">
+              <details className="group">
+                <summary
+                  className="flex cursor-pointer list-none items-center justify-between
+                             text-xs text-white/55 hover:text-white/80"
+                >
+                  <span>Show the technical detail</span>
+                  <ChevronDown
+                    aria-hidden="true"
+                    className="size-3.5 transition-transform group-open:rotate-180"
+                  />
+                </summary>
+
+                <div className="mt-4 space-y-5 border-t border-white/8 pt-4">
+                  <ResultPanel result={result} />
+                  <EquityPanel equity={result.equity} />
+                  {result.air && (
+                    <AirPanel
+                      air={result.air}
+                      window={result.window}
+                      season={result.season}
+                    />
+                  )}
+                  <BriefPanel brief={result.brief} />
+                </div>
+              </details>
+            </FloatingPanel>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* ------------------------------------------------------- levers, above toolbar --- */}
@@ -750,10 +828,11 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 12 }}
             transition={GLIDE}
-            className="glass noise absolute bottom-24 left-1/2 z-10 w-[min(36rem,calc(100vw-3rem))]
-                       -translate-x-1/2 p-4"
+            className="glass noise absolute bottom-[4.75rem] left-1/2 z-10 max-h-[38dvh]
+                       w-[min(36rem,calc(100vw-1.5rem))] -translate-x-1/2 overflow-y-auto p-3
+                       lg:bottom-60 lg:max-h-none lg:w-[min(36rem,calc(100vw-3rem))] lg:p-4 xl:bottom-24"
           >
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-3 lg:grid-cols-2 lg:gap-4">
               <label className="block">
                 <span className="font-mono text-[0.65rem] text-white/55">
                   Canopy added <strong className="text-white">{(canopy * 100).toFixed(0)}%</strong>
@@ -809,11 +888,14 @@ export default function App() {
       </AnimatePresence>
 
       {/* ------------------------------------------------------ toolbar, bottom centre --- */}
+      {/* MapLibre puts its attribution across the bottom edge and its zoom puck and scale
+          bar in the bottom-right corner. At `lg` the toolbar is centred and clears both;
+          at 390 px it sat directly on the attribution line, so it is lifted clear here. */}
       <motion.div
         layout
         transition={GLIDE}
-        className="glass absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center
-                   gap-1 p-1.5"
+        className="glass absolute bottom-9 left-1/2 z-20 flex -translate-x-1/2 items-center
+                   gap-1 p-1.5 lg:bottom-6"
       >
         {/* `popLayout` matters: without it the exiting button holds its slot while the
             entering one appears beside it, and the pill visibly stutters. */}
@@ -882,10 +964,13 @@ export default function App() {
         </AnimatePresence>
       </motion.div>
 
+      {/* Hidden below `sm`: a keyboard shortcut is not an affordance on a phone, and
+          this line sat on top of the basemap attribution there. The palette is still one
+          tap away from the toolbar's own Plan button. */}
       {!draw.complete && !draw.drawing && (
         <p
-          className="pointer-events-none absolute bottom-2 left-1/2 z-10 -translate-x-1/2
-                     font-mono text-[0.6rem] tracking-[0.18em] text-white/25 uppercase"
+          className="pointer-events-none absolute bottom-2 left-1/2 z-10 hidden -translate-x-1/2
+                     font-mono text-[0.6rem] tracking-[0.18em] text-white/25 uppercase lg:block"
         >
           press / for the plan palette
         </p>

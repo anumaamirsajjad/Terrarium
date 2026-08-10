@@ -206,8 +206,8 @@ function Slice({ season, active }: { season: Season; active: boolean }) {
 
 export default function PlumeViz({ active }: { active: boolean }) {
   return (
-    <div className="flex size-full flex-col gap-3 p-6">
-      <div className="flex items-baseline justify-between font-mono text-[0.62rem] text-white/35">
+    <div className="flex size-full flex-col gap-3 p-4 sm:p-6">
+      <div className="flex items-baseline justify-between gap-2 font-mono text-[0.52rem] text-white/35 sm:text-[0.62rem]">
         <span>LOCALLY-GENERATED PM2.5</span>
         <span>× VS SUMMER, AT THE TILE&rsquo;S EDGE</span>
       </div>

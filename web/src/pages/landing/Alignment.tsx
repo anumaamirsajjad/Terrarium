@@ -24,6 +24,7 @@ import { useRef } from "react";
 
 import { useMarginNote } from "./marginNote";
 import { Eyebrow, InlineCaveat, Rule } from "./primitives";
+import { useIsWide } from "./useIsWide";
 
 /** The analysis grid, as pixels on this stage. One cell is 100 m in the cube. */
 const LOCKED_CELL = 32;
@@ -289,8 +290,23 @@ export default function Alignment() {
   // The ref goes on the sticky pane, never on the tall track: `useInView` wants a fraction
   // of the *element* on screen, and 40 % of two and a half viewports never is.
   const pane = useMarginNote<HTMLDivElement>("alignment", NOTE);
+  const stageTrack = useRef<HTMLDivElement>(null);
+  const wide = useIsWide();
 
-  const { scrollYProgress } = useScroll({ target: track, offset: ["start start", "end end"] });
+  /**
+   * Two tracks, because the pin moves.
+   *
+   * At `lg` the whole pane is pinned against 260vh of section and the section's own
+   * progress is the scrub. Below `lg` the pane is normal flow — so that same progress ran
+   * out over the couple of hundred pixels by which the section exceeds a phone viewport,
+   * and the six sheets had landed, closed and drained before the stage scrolled into view
+   * at all. Everything the section is about happened off screen. The narrow layout gives
+   * the stage its own runway and pins only that, so the animation plays where somebody is
+   * looking. Both hooks always run: they are cheap, and a conditional hook is not a hook.
+   */
+  const section = useScroll({ target: track, offset: ["start start", "end end"] });
+  const stage = useScroll({ target: stageTrack, offset: ["start start", "end end"] });
+  const scrollYProgress = wide ? section.scrollYProgress : stage.scrollYProgress;
 
   // Three beats, and they do not overlap: the sheets land, the deck closes into one cube,
   // then the population drains. Overlapping the last two put the wrong number on screen
@@ -306,17 +322,60 @@ export default function Alignment() {
   const bilinearLabel = useRamp(drain, 0.3, 0.7);
   const lossOpacity = useRamp(drain, 0.5, 0.85);
 
+  /**
+   * The number the method costs. Scrubbed rather than triggered: the reader scrolls the
+   * residents out of existence, which is what a wrong resampling verb does silently.
+   *
+   * Held in a variable because the two layouts put it in different places — see where it
+   * is rendered. One instance either way, so the two can never show different figures.
+   */
+  const population = (
+    <div className="mt-10 border-t border-white/10 pt-6">
+      <p className="font-mono text-[0.62rem] tracking-[0.18em] text-white/30 uppercase">
+        WorldPop · this tile
+      </p>
+      <motion.p
+        style={{ color: headColour }}
+        className="mt-2 font-mono text-3xl tracking-tight tabular-nums"
+      >
+        {headText}
+      </motion.p>
+      <div className="relative mt-1 h-4">
+        <motion.span
+          style={{ opacity: sumLabel }}
+          className="absolute inset-0 font-mono text-[0.65rem] text-white/40"
+        >
+          residents, resampled by <span className="text-shoal">sum</span>
+        </motion.span>
+        <motion.span
+          style={{ opacity: bilinearLabel }}
+          className="absolute inset-0 font-mono text-[0.65rem] text-white/40"
+        >
+          the same tile, resampled <span className="text-red-400">bilinear</span>
+        </motion.span>
+      </div>
+      <motion.p
+        style={{ opacity: lossOpacity }}
+        className="mt-3 max-w-md text-[0.72rem] leading-relaxed text-white/45"
+      >
+        <span className="text-red-400">−26 %.</span> 1.7 million people deleted by
+        interpolating a head count. Every equity figure divides by this number, and nothing
+        in the shapes, the coordinates or the cube summary would have said so.
+      </motion.p>
+    </div>
+  );
+
   return (
-    <section className="mx-auto max-w-[92rem] px-8">
+    <section className="mx-auto max-w-[92rem] px-5 sm:px-8">
       {/* The scroll-scrubbed reveal below needs runway: 260vh of track for a pane pinned at
           `h-screen`. Below `lg` that same runway is where it broke — the text block and a
           full aspect-square visualisation cannot both fit inside one short phone viewport,
           and a `sticky`/`h-screen` pane has nowhere to put what overflows but clip it. Below
-          `lg` this is a plain block instead: normal height, normal flow, no pin, so a short
-          viewport just scrolls it like any other section rather than cropping it. */}
+          `lg` this is a plain block instead: normal height, normal flow, no pin. What moves
+          with it is the runway, not the animation — the stage below carries its own. */}
       <div ref={track} className="relative lg:h-[260vh]">
-        <div ref={pane} className="flex flex-col py-20 lg:sticky lg:top-0 lg:h-screen lg:flex-row lg:items-center lg:py-0">
-          <div className="grid w-full items-center gap-16 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
+        <div ref={pane} className="flex flex-col py-16 sm:py-20 lg:sticky lg:top-0 lg:h-screen lg:flex-row lg:items-center lg:py-0">
+          <div className="grid w-full items-center gap-10 sm:gap-14 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
             <div>
               <Eyebrow>ingest/ · state/</Eyebrow>
               <h2 className="mt-6 font-mono text-4xl leading-[0.95] tracking-tight text-white md:text-5xl">
@@ -356,74 +415,55 @@ export default function Alignment() {
                 </div>
               </dl>
 
-              {/* The number the method costs. It is scrubbed rather than triggered: the
-                  reader scrolls the residents out of existence, which is what a wrong
-                  resampling verb does silently. */}
-              <div className="mt-10 border-t border-white/10 pt-6">
-                <p className="font-mono text-[0.62rem] tracking-[0.18em] text-white/30 uppercase">
-                  WorldPop · this tile
-                </p>
-                <motion.p
-                  style={{ color: headColour }}
-                  className="mt-2 font-mono text-3xl tracking-tight tabular-nums"
-                >
-                  {headText}
-                </motion.p>
-                <div className="relative mt-1 h-4">
-                  <motion.span
-                    style={{ opacity: sumLabel }}
-                    className="absolute inset-0 font-mono text-[0.65rem] text-white/40"
-                  >
-                    residents, resampled by <span className="text-shoal">sum</span>
-                  </motion.span>
-                  <motion.span
-                    style={{ opacity: bilinearLabel }}
-                    className="absolute inset-0 font-mono text-[0.65rem] text-white/40"
-                  >
-                    the same tile, resampled <span className="text-red-400">bilinear</span>
-                  </motion.span>
-                </div>
-                <motion.p
-                  style={{ opacity: lossOpacity }}
-                  className="mt-3 max-w-md text-[0.72rem] leading-relaxed text-white/45"
-                >
-                  <span className="text-red-400">−26 %.</span> 1.7 million people deleted by
-                  interpolating a head count. Every equity figure divides by this number,
-                  and nothing in the shapes, the coordinates or the cube summary would have
-                  said so.
-                </motion.p>
-              </div>
+              {/* The counter belongs beside the stage it is scrubbed by. Wide, that is the
+                  column on the left; narrow, the stage has its own runway further down and
+                  this block would have scrolled past long before the drain fires — the
+                  residents would come and go on a figure nobody could still see. */}
+              {wide && population}
 
               <InlineCaveat note={NOTE} />
             </div>
 
-            <div className="relative mx-auto aspect-square w-full max-w-[34rem]">
-              {SOURCES.map((source, index) => (
-                <Sheet
-                  key={source.id}
-                  source={source}
-                  index={index}
-                  progress={scrollYProgress}
-                  collapse={collapse}
-                />
-              ))}
-
-              {/* What the deck became. Fades in under the closing sheets rather than
-                  replacing them, so the cube is visibly the same rectangle. */}
-              <motion.div
-                style={{ opacity: cubeOpacity }}
-                className="pointer-events-none absolute inset-[19%] flex flex-col justify-end
-                           rounded-sm p-3"
+            {/* Below `lg` the stage owns 200vh of runway and pins itself inside it, which
+                is exactly what the section's own track does for the pane at `lg` and up.
+                `lg:h-auto` / `lg:static` hand the job back, so the wide layout is
+                untouched — the stage is a plain grid cell there, as it always was. */}
+            <div ref={stageTrack} className="relative h-[170vh] lg:h-auto">
+              <div
+                className="sticky top-0 flex h-screen flex-col justify-center lg:static
+                           lg:block lg:h-auto"
               >
-                <div className="flex items-baseline justify-between font-mono text-[0.6rem]">
-                  <span className="text-white/80">cube.zarr</span>
-                  <span className="text-shoal">201 × 202 · 100 m</span>
+                <div className="relative mx-auto aspect-square w-full max-w-[34rem]">
+                  {SOURCES.map((source, index) => (
+                    <Sheet
+                      key={source.id}
+                      source={source}
+                      index={index}
+                      progress={scrollYProgress}
+                      collapse={collapse}
+                    />
+                  ))}
+
+                  {/* What the deck became. Fades in under the closing sheets rather than
+                      replacing them, so the cube is visibly the same rectangle. */}
+                  <motion.div
+                    style={{ opacity: cubeOpacity }}
+                    className="pointer-events-none absolute inset-[19%] flex flex-col justify-end
+                               rounded-sm p-3"
+                  >
+                    <div className="flex items-baseline justify-between font-mono text-[0.6rem]">
+                      <span className="text-white/80">cube.zarr</span>
+                      <span className="text-shoal">201 × 202 · 100 m</span>
+                    </div>
+                    <div className="mt-1 h-px w-full bg-white/15" />
+                    <p className="mt-1.5 font-mono text-[0.55rem] text-white/35">
+                      EPSG:32643 · one bounding box · one set of coordinates
+                    </p>
+                  </motion.div>
                 </div>
-                <div className="mt-1 h-px w-full bg-white/15" />
-                <p className="mt-1.5 font-mono text-[0.55rem] text-white/35">
-                  EPSG:32643 · one bounding box · one set of coordinates
-                </p>
-              </motion.div>
+
+                {!wide && population}
+              </div>
             </div>
           </div>
         </div>

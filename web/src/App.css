@@ -12,9 +12,13 @@
    absolutely-positioned child of this stacking context — which is also why the print rule
    at the bottom of this file is written as "hide every child except the document" rather
    than naming the two it used to know about. */
+/* `dvh`, not `vh`. On a phone `100vh` is the viewport with the browser's own chrome
+   retracted, which it is not when the page loads — so the toolbar pinned to the bottom
+   edge started life underneath the address bar, and the map was a scroll's worth taller
+   than the screen it was told to fill. */
 .app {
   position: relative;
-  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -129,20 +133,12 @@ button.primary {
   font-size: 0.8125rem;
 }
 
-select,
-input[type="range"] {
-  font: inherit;
-  width: 100%;
-}
-
-select {
-  font-size: 0.8125rem;
-  padding: 0.4375rem 0.5rem;
-  border-radius: 0.375rem;
-  border: 1px solid var(--border);
-  background: var(--badge-bg);
-  color: var(--fg);
-}
+/* The element selectors that used to live here — `select`, `input[type="range"]` — are
+   gone with the sidebar they were written for. Both survivors are in `App.tsx` and carry
+   their own utilities, and an unlayered `select { width: 100% }` beats every one of them:
+   cascade layers put Tailwind's utilities *below* plain CSS, so `w-auto` on the window
+   picker silently did nothing and each picker claimed a full row on a phone. A bare
+   element selector in this file is a trap for anything written against the tokens. */
 
 /* --------------------------------------------------------------- legend --- */
 

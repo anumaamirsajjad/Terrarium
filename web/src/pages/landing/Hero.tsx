@@ -142,15 +142,20 @@ export default function Hero() {
         <Suspense fallback={null}>
           <LahoreCity plant={plant} animate={!reduced} flying={flying} inView={inView} />
         </Suspense>
-        {/* Two scrims. The vertical one lifts the headline off the city; the corner one
-            darkens behind the eyebrow, which sat unreadable on a block of red roofs. */}
-        <div className="from-void via-void/55 absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t to-transparent" />
+        {/* Three scrims. The vertical one lifts the headline off the city; the corner one
+            darkens behind the eyebrow, which sat unreadable on a block of red roofs; the
+            top one carries the attribution line, which on a portrait frame no longer has a
+            band of empty sky to sit in — the camera stands higher there so the city fills
+            the frame, and the licence text landed on lit rooftops. */}
+        <div className="from-void via-void/65 absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t to-transparent" />
         <div className="from-void/75 absolute inset-0 bg-gradient-to-tr via-transparent to-transparent" />
+        <div className="from-void/80 absolute inset-x-0 top-0 h-28 bg-gradient-to-b to-transparent" />
       </div>
 
       {/* ODbL requires attribution wherever the geometry is shown. This is a licence
           condition, not a courtesy — it stays. */}
-      <p className="absolute top-6 right-8 z-10 font-mono text-[0.6rem] tracking-wider text-white/25">
+      <p className="absolute top-5 right-5 left-5 z-10 text-right font-mono text-[0.55rem]
+                    tracking-wider text-white/30 sm:top-6 sm:right-8 sm:left-auto sm:text-[0.6rem]">
         street geometry © OpenStreetMap contributors
       </p>
 
@@ -166,15 +171,18 @@ export default function Hero() {
           style={{ y: typeY, opacity: typeOpacity }}
           className="relative flex h-full flex-col justify-end"
         >
-        <div className="mx-auto w-full max-w-[92rem] px-8 pb-16">
+        <div className="mx-auto w-full max-w-[92rem] px-5 pb-14 sm:px-8 sm:pb-16">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3, duration: 1 }}
-            className="mb-8 flex flex-wrap items-center gap-x-6 gap-y-2"
+            className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-1 sm:mb-8 sm:gap-y-2"
           >
             <Eyebrow>Lahore · EPSG:32643</Eyebrow>
-            <span className="font-mono text-[0.7rem] text-white/25">{BBOX}</span>
+            {/* /45, not /25. On a portrait frame the camera stands higher and the city
+                fills the shot, so this line lands on lit rooftops rather than on the band
+                of dark sky it used to have behind it. */}
+            <span className="font-mono text-[0.65rem] text-white/45 sm:text-[0.7rem]">{BBOX}</span>
           </motion.div>
 
           <motion.h1
@@ -191,10 +199,10 @@ export default function Hero() {
             initial={{ opacity: 0, y: 28 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ ...SETTLE, delay: 0.14 }}
-            className="mt-10 flex flex-col gap-8 border-t border-white/10 pt-8 md:flex-row
-                       md:items-start md:justify-between"
+            className="mt-7 flex flex-col gap-6 border-t border-white/10 pt-6 sm:mt-10 sm:gap-8
+                       sm:pt-8 md:flex-row md:items-start md:justify-between"
           >
-            <p className="max-w-lg text-lg leading-relaxed text-white/55">
+            <p className="max-w-lg text-base leading-relaxed text-white/60 sm:text-lg">
               A neighbourhood-scale digital twin for climate intervention. Draw a plan on a
               real street; get the modelled change in surface temperature, in the air, and
               in who receives it.

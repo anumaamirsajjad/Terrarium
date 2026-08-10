@@ -65,7 +65,7 @@ export default function CommandDemo() {
   const shown = reduced ? full.text : full.text.slice(0, count);
 
   return (
-    <section ref={section} className="mx-auto max-w-4xl px-8 py-32">
+    <section ref={section} className="mx-auto max-w-4xl px-5 py-20 sm:px-8 sm:py-32">
       <Eyebrow>dsl/planner.py</Eyebrow>
       <h2 className="mt-6 font-mono text-4xl tracking-tight text-white md:text-5xl">
         Say what you want to build.

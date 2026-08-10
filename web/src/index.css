@@ -89,7 +89,11 @@ body {
  * anything else — 10px is visually near-identical and materially cheaper.
  */
 @utility glass {
-  background: color-mix(in oklab, var(--color-shell) 72%, transparent);
+  /* 82 %, not 72 %. On the landing page these panels sit on the page's own black and the
+     difference is invisible; on the dashboard they sit on a *pale* Positron basemap, and
+     at 72 % enough of it came through that `text-white/40` on a panel over a white street
+     was barely there. The number is set by the harder of the two backgrounds. */
+  background: color-mix(in oklab, var(--color-shell) 82%, transparent);
   backdrop-filter: blur(var(--blur-glass)) saturate(140%);
   -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(140%);
   border: 1px solid var(--color-hair);
