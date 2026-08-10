@@ -38,7 +38,7 @@ export default function Outro() {
         initial="hidden"
         whileInView="show"
         viewport={{ once: true, amount: 0.25 }}
-        className="mx-auto grid max-w-[92rem] items-center gap-16 px-8 py-32 lg:grid-cols-2"
+        className="mx-auto grid max-w-[92rem] items-center gap-10 px-5 py-20 sm:gap-16 sm:px-8 sm:py-32 lg:grid-cols-2"
       >
         <motion.div variants={RISE}>
           <Eyebrow>dsl/explain.py</Eyebrow>

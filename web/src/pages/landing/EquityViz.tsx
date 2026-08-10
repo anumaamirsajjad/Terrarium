@@ -130,10 +130,10 @@ export default function EquityViz({ active }: { active: boolean }) {
   const evenLeft = useMemo(() => `calc(2rem + (100% - 2rem) * ${EVEN_SHARE / WIDEST})`, []);
 
   return (
-    <div className="flex size-full flex-col p-7">
-      <div className="mb-1 flex items-baseline justify-between font-mono text-[0.62rem] text-white/35">
+    <div className="flex size-full flex-col p-4 sm:p-7">
+      <div className="mb-1 flex items-baseline justify-between gap-2 font-mono text-[0.52rem] text-white/35 sm:text-[0.62rem]">
         <span>PERSON-DEGREES DELIVERED</span>
-        <span>EVEN SPLIT = 10%</span>
+        <span className="whitespace-nowrap">EVEN SPLIT = 10%</span>
       </div>
 
       <div className="h-[34%] min-h-[5rem]">
