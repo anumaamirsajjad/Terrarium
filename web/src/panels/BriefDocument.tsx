@@ -143,7 +143,7 @@ export default function BriefDocument({ result, plan, tile, producedAt }: BriefD
             </tbody>
           </table>
           <p className="doc__note">
-            Stratified by {equity.stratified_by}, not by deprivation — no free, keyless
+            Stratified by {equity.stratified_by}, not by deprivation: no free, keyless
             deprivation layer exists for this city.
           </p>
         </section>
@@ -158,7 +158,7 @@ export default function BriefDocument({ result, plan, tile, producedAt }: BriefD
         </ul>
         <p className="doc__note">
           Confidence: <strong>{brief.confidence}</strong>. Terrarium never reports high
-          confidence — the thermal emulator is hindcast-corrected and the air core has never
+          confidence: the thermal emulator is hindcast-corrected and the air core has never
           been calibrated against a monitoring station.
         </p>
       </section>

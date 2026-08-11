@@ -49,7 +49,7 @@ export default function AirPanel({ air, window, season }: AirPanelProps) {
 
         <p className="result__ceiling">
           from removing <strong>{(air.emission_fraction_removed * 100).toFixed(0)}%</strong>{" "}
-          of vehicle emissions there. Removed, not electrified — brake, tyre and road wear
+          of vehicle emissions there. Removed, not electrified: brake, tyre and road wear
           are roughly half of road PM2.5 and go away only when the traffic does.
         </p>
 

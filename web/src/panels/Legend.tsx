@@ -39,7 +39,7 @@ export default function Legend({ ramp, domain, units, diverging = false }: Legen
       <div className="legend__bar" style={{ background: gradient(ramp) }} />
       <div className="legend__ticks">
         <span>{withUnits(format(low), units)}</span>
-        {diverging && <span className="legend__zero">0 — no change</span>}
+        {diverging && <span className="legend__zero">0, no change</span>}
         <span>{withUnits(format(high), units)}</span>
       </div>
     </div>

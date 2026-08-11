@@ -387,7 +387,7 @@ export default function Alignment() {
               <p className="mt-8 max-w-md text-sm leading-relaxed text-white/50">
                 Each arrives on its own grid, in its own projection, with its own idea of
                 where a pixel starts. What a simulator reads is what is left after that is
-                resolved — one CRS, one resolution, one bounding box, one set of
+                resolved: one CRS, one resolution, one bounding box, one set of
                 coordinates, on a 100 m cell.
               </p>
 
@@ -401,14 +401,14 @@ export default function Alignment() {
                       {rule.method}
                     </dt>
                     <dd className="text-[0.72rem] leading-relaxed text-white/40">
-                      <span className="text-white/70">{rule.kind}</span> — {rule.why}
+                      <span className="text-white/70">{rule.kind}</span>: {rule.why}
                     </dd>
                   </div>
                 ))}
                 <div className="flex gap-3">
                   <dt className="w-16 shrink-0 font-mono text-[0.7rem] text-white/25">none</dt>
                   <dd className="text-[0.72rem] leading-relaxed text-white/40">
-                    <span className="text-white/70">the reanalysis</span> — the seventh
+                    <span className="text-white/70">the reanalysis</span>: the seventh
                     source has no spatial dimension, and nothing is resampled onto a
                     dimension that does not exist.
                   </dd>

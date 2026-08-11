@@ -743,7 +743,7 @@ export default function App() {
         <p>{boot.message}</p>
         <p className="muted">
           Start it with <code>uv run terrarium-api</code>, then reload. If it is running
-          but has no cube, it serves <code>/health</code> only — check its startup log.
+          but has no cube, it serves <code>/health</code> only: check its startup log.
         </p>
       </main>
     );
@@ -1111,7 +1111,7 @@ export default function App() {
                   className="mt-1.5 w-full accent-emerald-400"
                 />
                 <span className="mt-1 block text-[0.6rem] leading-snug text-white/35">
-                  A ceiling, not a promise — each cell is capped at what is still plantable
+                  A ceiling, not a promise: each cell is capped at what is still plantable
                   there, and water is never planted.
                 </span>
               </label>
@@ -1134,7 +1134,7 @@ export default function App() {
                   className="mt-1.5 w-full accent-violet-400"
                 />
                 <span className="mt-1 block text-[0.6rem] leading-snug text-white/35">
-                  1.0 means the traffic is gone, not electrified — brake, tyre and road wear
+                  1.0 means the traffic is gone, not electrified: brake, tyre and road wear
                   are roughly half of road PM2.5 and stay until the vehicles do. At 0 the
                   plan says nothing about traffic and no air result comes back.
                 </span>

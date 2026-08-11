@@ -186,7 +186,7 @@ function Slice({ season, active }: { season: Season; active: boolean }) {
             {season.windMs} m/s · lid {season.lidM} m
           </span>
           <span className="font-mono text-xl leading-none text-violet-200 tabular-nums">
-            {active ? <Counter to={factor} decimals={1} suffix="×" /> : "—"}
+            {active ? <Counter to={factor} decimals={1} suffix="×" /> : "-"}
           </span>
         </div>
       </div>
@@ -224,7 +224,7 @@ export default function PlumeViz({ active }: { active: boolean }) {
       <p className="mt-1 text-[0.68rem] leading-relaxed text-white/45">
         The same road, the same emission rate. Winter holds it in a layer a third as deep
         under half the wind, so the identical source reads{" "}
-        <span className="text-violet-200">6.3–8.9×</span> higher — measured across 2023,
+        <span className="text-violet-200">6.3–8.9×</span> higher, measured across 2023,
         2024 and 2025.
       </p>
       <p className="text-[0.62rem] leading-relaxed text-white/30">

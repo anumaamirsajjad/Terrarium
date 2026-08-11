@@ -36,7 +36,7 @@ export default function ResultPanel({ result }: ResultPanelProps) {
       </div>
 
       <p className="result__ceiling">
-        against a <strong>{context.tree_built_contrast_c.toFixed(2)} °C</strong> ceiling —
+        against a <strong>{context.tree_built_contrast_c.toFixed(2)} °C</strong> ceiling:
         this window&rsquo;s own observed gap between built-up and tree-cover pixels. No
         planting on this tile can beat that.
       </p>
@@ -79,7 +79,7 @@ export default function ResultPanel({ result }: ResultPanelProps) {
             {context.ratio_to_linear !== null ? (
               <span className="muted"> · ratio {context.ratio_to_linear.toFixed(2)}</span>
             ) : (
-              <span className="muted"> · ratio not shown — contrast too small</span>
+              <span className="muted"> · ratio not shown, contrast too small</span>
             )}
           </dd>
         </div>

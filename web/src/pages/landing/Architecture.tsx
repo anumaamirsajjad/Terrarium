@@ -30,7 +30,7 @@ const LAYERS = [
     tier: "2",
     name: "Physics core",
     modules: "cores/",
-    body: "Pure functions. No file reads, no network, no global state — everything a simulator needs arrives as an argument, including its trained model. Given the same inputs it returns the same outputs, always.",
+    body: "Pure functions. No file reads, no network, no global state: everything a simulator needs arrives as an argument, including its trained model. Given the same inputs it returns the same outputs, always.",
     tint: "from-shoal/18",
     edge: "border-shoal/25",
   },

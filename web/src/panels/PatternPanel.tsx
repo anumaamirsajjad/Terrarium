@@ -120,7 +120,7 @@ export default function PatternPanel({
             2 km squares of the analysis grid.{" "}
             {explanation.source === "table"
               ? "No model was reached, so this is the measured table with no prose over it."
-              : `Described by ${explanation.source}, which may only reword these figures — a description carrying a number the table does not is rejected.`}
+              : `Described by ${explanation.source}, which may only reword these figures: a description carrying a number the table does not is rejected.`}
           </p>
         </>
       )}

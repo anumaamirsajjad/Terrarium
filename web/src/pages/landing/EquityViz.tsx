@@ -185,7 +185,7 @@ export default function EquityViz({ active }: { active: boolean }) {
         plan&rsquo;s cooling.
       </motion.p>
       <p className="mt-1.5 text-[0.66rem] leading-relaxed text-white/35">
-        Canal-side planting, 2024-summer, measured. Ordered by population density — not by
+        Canal-side planting, 2024-summer, measured. Ordered by population density, not by
         deprivation, because no free, keyless deprivation layer exists.
       </p>
     </div>

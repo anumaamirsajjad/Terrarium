@@ -28,7 +28,7 @@ const HOLD_MS = 2200;
 
 const NOTE = {
   subject: "The parser is a front door, not a safety mechanism.",
-  body: "Nothing about reading a sentence makes a plan safe. What makes it safe is that whatever produces one — a model, a preset button, a regex — it is re-validated as a plan and then against the tile before a core sees a number.",
+  body: "Nothing about reading a sentence makes a plan safe. What makes it safe is that whatever produces one, a model, a preset button, a regex, it is re-validated as a plan and then against the tile before a core sees a number.",
 };
 
 export default function CommandDemo() {
@@ -105,7 +105,7 @@ export default function CommandDemo() {
 
         <div className="grid gap-px border-t border-white/10 bg-white/5 sm:grid-cols-3">
           {[
-            ["Parsed by", "rules (no model configured)"],
+            ["Parsed by", "a language model (dsl/llm.py)"],
             ["Resolved to", "canopy + emission fractions"],
             ["Checked against", "the polygon you drew"],
           ].map(([label, value]) => (
@@ -126,10 +126,10 @@ export default function CommandDemo() {
           text.
         </p>
         <p>
-          A language model is optional and lives in exactly one file. With no key set, the
-          same sentence is read by a deterministic rule parser and the panel says which one
-          ran. Either way the plan is re-validated against the polygon before a simulator
-          sees a number.
+          A language model reads the sentence first, and lives in exactly one file. Without a
+          key configured, the same sentence falls back to a deterministic rule parser, and
+          the panel says which one ran. Either way the plan is re-validated against the
+          polygon before a simulator sees a number.
         </p>
       </div>
 
@@ -147,7 +147,7 @@ export default function CommandDemo() {
         </p>
         <footer className="mt-3 text-xs text-white/40">
           The refusal is the product. A plan that cannot fit arrives as an error with the
-          arithmetic attached, before any core runs — silently trimming it would return a
+          arithmetic attached, before any core runs: silently trimming it would return a
           small delta, which is indistinguishable from a plan that merely worked badly.
         </footer>
       </motion.blockquote>

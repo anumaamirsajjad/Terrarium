@@ -35,7 +35,7 @@ const PANES = [
     Viz: ThermalViz,
     margin: {
       subject: "Blocked cross-validation proves generalisation across space, not across change.",
-      body: "It says the emulator predicts an unseen part of the tile. It says nothing about whether it predicts the effect of an intervention — which is what the hindcast was built to answer, and the hindcast says it over-predicts.",
+      body: "It says the emulator predicts an unseen part of the tile. It says nothing about whether it predicts the effect of an intervention, which is what the hindcast was built to answer, and the hindcast says it over-predicts.",
     },
   },
   {
@@ -43,7 +43,7 @@ const PANES = [
     module: "cores/air.py",
     title: "Air dispersion",
     body: "Simulates locally-generated PM2.5 via OSM and seasonal FFT dispersion. Winter inversion captures 6–9× the concentration of identical summer sources.",
-    note: "A uniform wind across a 20 km tile makes superposition a convolution, so the whole tile resolves in one FFT. Scored against 53 OpenAQ monitors it beats the null model in winter — MAE 40.6 against 51.0, correlation +0.53.",
+    note: "A uniform wind across a 20 km tile makes superposition a convolution, so the whole tile resolves in one FFT. Scored against 53 OpenAQ monitors it beats the null model in winter: MAE 40.6 against 51.0, correlation +0.53.",
     figures: [
       { value: 40.6, decimals: 1, suffix: "", label: "winter MAE vs null 51.0" },
       { value: 53, decimals: 0, suffix: "", label: "monitors, leave-one-out" },
@@ -59,7 +59,7 @@ const PANES = [
     module: "cores/equity.py",
     title: "Equity core",
     body: "Measures person-degrees, not just pixels. Because a plan that cools an empty riverbank fails the city.",
-    note: "Population is resampled by sum and never interpolated — on the real WorldPop raster, bilinear loses 26 % of this tile's residents, and every figure this core produces divides by that number.",
+    note: "Population is resampled by sum and never interpolated: on the real WorldPop raster, bilinear loses 26 % of this tile's residents, and every figure this core produces divides by that number.",
     figures: [
       { value: 66, decimals: 0, suffix: " %", label: "to three deciles, canal plan" },
       { value: 0, decimals: 1, suffix: " %", label: "to the most crowded decile" },
@@ -172,7 +172,7 @@ export default function Simulators() {
                                 suffix={figure.suffix}
                               />
                             ) : (
-                              "—"
+                              "-"
                             )}
                           </dd>
                           <dt className="mt-2 max-w-[9rem] text-[0.7rem] leading-snug text-white/35">

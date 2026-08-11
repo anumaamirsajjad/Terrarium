@@ -54,7 +54,7 @@ function AttemptRow({ attempt }: { attempt: Attempt }) {
       <span className="agent__regions">{attempt.region_ids.join(", ")}</span>
       <span className="agent__proposer">{attempt.proposer}</span>
       <p className="agent__reason">
-        {refused ? "refused — " : ""}
+        {refused ? "refused: " : ""}
         {attempt.reason}
       </p>
     </li>
@@ -138,7 +138,7 @@ export default function AgentPanel({
           {best?.outcome ? (
             <>
               <p className="agent__headline">
-                <strong>{best.plan.name}</strong> over {best.region_ids.join(", ")} —{" "}
+                <strong>{best.plan.name}</strong> over {best.region_ids.join(", ")}:{" "}
                 {best.outcome.expected_cooling_c.toFixed(2)} °C across{" "}
                 {best.outcome.area_km2.toFixed(1)} km²
               </p>
@@ -187,7 +187,7 @@ export default function AgentPanel({
 
               {appliedPartial && (
                 <p className="result__note">
-                  Applied region {appliedPartial.region_ids[0]} only — the winning plan merged{" "}
+                  Applied region {appliedPartial.region_ids[0]} only; the winning plan merged{" "}
                   {appliedPartial.region_ids.length} regions ({appliedPartial.region_ids.join(", ")}
                   ), but the drawn area can hold one shape at a time. Redraw around the others to
                   include them.
@@ -208,7 +208,7 @@ export default function AgentPanel({
 
           <p className="result__caveat">
             {result.simulations_used} simulations, {result.llm_calls_used} model calls,{" "}
-            {result.elapsed_s.toFixed(0)}s — {result.stopped_because}.
+            {result.elapsed_s.toFixed(0)}s: {result.stopped_because}.
           </p>
         </div>
       )}
