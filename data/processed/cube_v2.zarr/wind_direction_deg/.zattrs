@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "time"
+    ],
+    "coordinates": "season window",
+    "description": "10 m wind direction at the ~10:30 local overpass hour, window vector mean (Open-Meteo ERA5 archive). Meteorological convention: the direction the wind comes from, degrees clockwise from north.",
+    "resampling": "none",
+    "source_collection": "open-meteo",
+    "units": "deg"
+}

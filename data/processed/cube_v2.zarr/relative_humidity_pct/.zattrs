@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "time"
+    ],
+    "coordinates": "season window",
+    "description": "2 m relative humidity at the ~10:30 local overpass hour, window median (Open-Meteo ERA5 archive)",
+    "resampling": "none",
+    "source_collection": "open-meteo",
+    "units": "%"
+}

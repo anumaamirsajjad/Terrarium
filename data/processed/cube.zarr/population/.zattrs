@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "y",
+        "x"
+    ],
+    "description": "Residents per 100 m cell, WorldPop 2020 constrained (BSGM)",
+    "resampling": "sum",
+    "source_collection": "worldpop",
+    "units": "people"
+}

@@ -1,0 +1,12 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "time",
+        "y",
+        "x"
+    ],
+    "coordinates": "season window",
+    "description": "Mid-morning land surface temperature (~10:30 local) from Landsat ST_B10, clear-sky median. Surface, not air temperature.",
+    "resampling": "bilinear",
+    "source_collection": "landsat-c2-l2",
+    "units": "degC"
+}

@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "y",
+        "x"
+    ],
+    "description": "Surface elevation (DSM, incl. buildings) above EGM2008, Copernicus DEM GLO-30",
+    "resampling": "bilinear",
+    "source_collection": "cop-dem-glo-30",
+    "units": "m"
+}

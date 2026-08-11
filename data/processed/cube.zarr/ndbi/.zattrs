@@ -1,0 +1,12 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "time",
+        "y",
+        "x"
+    ],
+    "coordinates": "season window",
+    "description": "Normalised difference built-up index from Sentinel-2 B11/B08",
+    "resampling": "bilinear",
+    "source_collection": "sentinel-2-l2a",
+    "units": "1"
+}

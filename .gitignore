@@ -1,7 +1,4 @@
-# Ingested and derived data. Rebuildable via scripts/build_tile.py; never committed.
-data/
-*.zarr/
-*.duckdb
+
 
 # Build logs
 *.log
