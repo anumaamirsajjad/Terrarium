@@ -102,7 +102,11 @@ def load_runtime(settings: Settings) -> Runtime:
             f"no thermal model at {model_path}. Train one with scripts/train_thermal.py."
         )
 
-    cube = open_cube(cube_path)
+    # `open_cube` returns dask-backed arrays: opening the store reads only metadata, not
+    # pixels. Without `.load()` every request that touches data (thermal predict, air FFT,
+    # equity) re-reads its chunks from disk through dask, which is the *< 3s warm target*
+    # docstring above being false in practice. The cube is a few dozen MB - load it once.
+    cube = open_cube(cube_path).load()
     try:
         validate_windows(cube, minimum_valid_fraction=MINIMUM_WINDOW_VALID_FRACTION)
     except ValueError as exc:
