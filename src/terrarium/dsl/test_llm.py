@@ -148,9 +148,9 @@ def test_groq_sends_a_user_agent_and_a_bearer_token(monkeypatch: pytest.MonkeyPa
     headers = {k.lower(): v for k, v in captured["headers"].items()}
     assert headers["authorization"] == "Bearer secret"
     assert "python-urllib" not in headers["user-agent"].lower()
-    # Reasoning off, or Groq's own json_object validator rejects the <think> prefix and
-    # returns an empty completion.
-    assert captured["body"]["reasoning_effort"] == "none"
+    # No reasoning_effort: Groq now 400s on the field for a non-reasoning model, and
+    # `content` comes back clean JSON on a reasoning model without it too.
+    assert "reasoning_effort" not in captured["body"]
     assert captured["body"]["response_format"] == {"type": "json_object"}
 
 

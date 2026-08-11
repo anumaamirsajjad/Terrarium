@@ -187,11 +187,13 @@ class GroqAdapter:
 
     Two provider-specific details, both discovered by running it rather than reading docs:
 
-    - **`reasoning_effort="none"`.** Groq's reasoning models prefix their answer with a
-      `<think>` block, and with that block present Groq's own `json_object` validator
-      rejects the generation and returns `json_validate_failed` with an empty body. So
-      structured output and reasoning are mutually exclusive here, and schema-filling is
-      what this seam is for.
+    - **No `reasoning_effort` is sent.** It used to be pinned to `"none"` to keep a
+      reasoning model's `<think>` block out of `content`, which broke Groq's `json_object`
+      validator. Groq has since split reasoning into its own `reasoning` field and stopped
+      accepting `"none"` as a value at all — `llama-3.3-70b-versatile` now 400s on the field
+      being present regardless of value, and `openai/gpt-oss-120b` only accepts
+      `low`/`medium`/`high`. `content` comes back clean JSON on both without the field, so
+      the simplest fix is to stop sending it.
     - **The key travels in a header**, not the URL as Gemini's does. That makes provider
       error text safe to log, though it is still not returned to a client.
     - **An explicit `User-Agent` is required.** Groq sits behind Cloudflare, which rejects
@@ -222,7 +224,6 @@ class GroqAdapter:
         payload: dict[str, Any] = {
             "model": self.model,
             "temperature": 0.0,
-            "reasoning_effort": "none",
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": system},
