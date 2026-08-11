@@ -27,6 +27,7 @@ import {
   BookOpen,
   Check,
   ChevronDown,
+  Landmark,
   PenLine,
   Play,
   Printer,
@@ -44,7 +45,10 @@ import {
   type Candidate,
   type CubeSummaryResponse,
   type HealthResponse,
+  type MappedPlan,
+  type Plan,
   type PlanResponse,
+  type PolicyMeasureItem,
   type Preset,
   type SearchResult,
   type SimulateResponse,
@@ -61,6 +65,7 @@ import AgentPanel from "./panels/AgentPanel";
 import AirPanel from "./panels/AirPanel";
 import EvidencePanel from "./panels/EvidencePanel";
 import PatternPanel from "./panels/PatternPanel";
+import PolicyPanel from "./panels/PolicyPanel";
 import BriefDocument from "./panels/BriefDocument";
 import BriefPanel from "./panels/BriefPanel";
 import CommandPalette from "./panels/CommandPalette";
@@ -218,6 +223,14 @@ export default function App() {
   const [evidenceBusy, setEvidenceBusy] = useState(false);
   const [evidenceError, setEvidenceError] = useState<string | null>(null);
 
+  // --- published policy (Phase D). A read of what a build step already extracted, so it
+  //     is fetched once on open rather than on every run, like the presets library. ---
+  const [policyOpen, setPolicyOpen] = useState(false);
+  const [policyMeasures, setPolicyMeasures] = useState<PolicyMeasureItem[]>([]);
+  const [policyLoaded, setPolicyLoaded] = useState(false);
+  const [policyLoading, setPolicyLoading] = useState(false);
+  const [policyError, setPolicyError] = useState<string | null>(null);
+
   /**
    * Swapping windows refetches a 40,602-cell raster, decodes it and re-colourises it.
    *
@@ -325,7 +338,7 @@ export default function App() {
    * is adopted rather than the picker's — and the picker moves to show it.
    */
   const buildPlan = useCallback(
-    async (body: { preset?: string; text?: string }) => {
+    async (body: { preset?: string; text?: string; plan?: Plan }) => {
       if (!draw.geometry) return;
 
       setPlanning(true);
@@ -544,6 +557,43 @@ export default function App() {
       setEvidenceBusy(false);
     }
   }, []);
+
+  // ------------------------------------------------------ published policy (Phase D) ---
+
+  /**
+   * Fetched once, on first open — not eagerly on mount like presets, because unlike the
+   * preset library this can be empty on a fresh checkout (nobody has run the extraction
+   * yet) and there is no point paying a request for a panel most sessions never open.
+   */
+  const openPolicy = useCallback(() => {
+    setPolicyOpen((open) => !open);
+    setSheetOpen(true);
+    if (policyLoaded) return;
+
+    setPolicyLoading(true);
+    setPolicyError(null);
+    api
+      .policyMeasures()
+      .then((response) => {
+        setPolicyMeasures(response.measures);
+        setPolicyLoaded(true);
+      })
+      .catch((error: Error) => setPolicyError(error.message))
+      .finally(() => setPolicyLoading(false));
+  }, [policyLoaded]);
+
+  /**
+   * A policy measure's plan is an explicit `Plan`, checked against the drawn polygon the
+   * same way a preset is — `/plan` re-validates it and hands back what `/simulate` takes,
+   * so a measure that does not fit refuses with the arithmetic rather than quietly running.
+   */
+  const applyPolicyPlan = useCallback(
+    (mapped: MappedPlan) => {
+      setPolicyOpen(false);
+      void buildPlan({ plan: mapped.plan });
+    },
+    [buildPlan],
+  );
 
   /**
    * "Explain this" on a figure that is already on screen.
@@ -988,7 +1038,7 @@ export default function App() {
         className={`pointer-events-auto z-30 flex flex-col gap-3 overflow-x-hidden
                     overflow-y-auto lg:absolute lg:inset-x-auto lg:top-5 lg:right-5 lg:bottom-auto
                     lg:z-10 lg:max-h-[calc(100dvh-2.5rem)] lg:w-96 ${
-                      (result || agentOpen || evidenceOpen) && sheetOpen
+                      (result || agentOpen || evidenceOpen || policyOpen) && sheetOpen
                         ? "absolute inset-x-0 bottom-0 max-h-[78dvh] rounded-t-2xl bg-[#0a0d12]/80 p-3 backdrop-blur-xl lg:rounded-none lg:bg-transparent lg:p-0 lg:backdrop-blur-none"
                         : "max-lg:hidden"
                     }`}
@@ -1031,6 +1081,18 @@ export default function App() {
                 error={evidenceError}
                 onAsk={(question) => void askEvidence(question)}
                 initialQuestion={evidenceQuestion}
+              />
+            </FloatingPanel>
+          )}
+
+          {policyOpen && (
+            <FloatingPanel key="policy">
+              <PolicyPanel
+                measures={policyMeasures}
+                loading={policyLoading}
+                error={policyError}
+                onApply={applyPolicyPlan}
+                hasPolygon={!!draw.geometry}
               />
             </FloatingPanel>
           )}
@@ -1278,6 +1340,15 @@ export default function App() {
                 setEvidenceOpen((open) => !open);
                 setSheetOpen(true);
               }}
+            />
+          )}
+          {/* A read of a DuckDB table, same as the presets library — no cube needed. */}
+          {!draw.drawing && (
+            <ToolButton
+              key="policy"
+              icon={Landmark}
+              label={policyOpen ? "Hide policy" : "Published policy"}
+              onClick={openPolicy}
             />
           )}
 

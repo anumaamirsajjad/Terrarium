@@ -287,6 +287,51 @@ export interface PlanRequest {
   window?: string | null;
 }
 
+// ------------------------------------------------------- policy documents (Phase D) ---
+
+/** The sectors Phase D's extraction sorts a measure into. `other` is most of a document. */
+export type PolicySector =
+  | "transport"
+  | "urban_greening"
+  | "industry"
+  | "waste"
+  | "agriculture"
+  | "other";
+
+/** One quantified commitment out of a published policy document, verbatim quote included. */
+export interface PolicyMeasure {
+  title: string;
+  sector: PolicySector;
+  /** The quantified target as stated, e.g. "35% reduction in PM2.5". Empty for most measures. */
+  target: string;
+  target_year: number | null;
+  source_page: number | null;
+  /** Verbatim from the document — checked against it server-side before this ever exists. */
+  quote: string;
+  document: string;
+  document_sha256: string;
+}
+
+/** A measure turned into a runnable `Plan`, and the sentence tracing the number back. */
+export interface MappedPlan {
+  measure: PolicyMeasure;
+  plan: Plan;
+  basis: string;
+  /** True when the document named no figure and this project's own default stands in. */
+  assumed: boolean;
+}
+
+export interface PolicyMeasureItem {
+  measure: PolicyMeasure;
+  /** Null when neither lever — a canopy fraction, an emission fraction — can say this. */
+  mapped: MappedPlan | null;
+}
+
+export interface PolicyMeasuresResponse {
+  measures: PolicyMeasureItem[];
+  expressible: number;
+}
+
 export interface GeoJsonPolygon {
   type: "Polygon";
   /** Rings of [longitude, latitude]. The first ring is the exterior. */
@@ -589,6 +634,13 @@ export const api = {
 
   /** The costed intervention library. Answers even when the cube failed to load. */
   presets: () => request<PresetsResponse>("/plan/presets"),
+
+  /**
+   * What `scripts/extract_policy.py` has extracted so far (Phase D). `measures: []` before
+   * it has ever run — that is the honest answer, not an error. Answers even when the cube
+   * failed to load, and needs no key: the extraction spent it once, offline.
+   */
+  policyMeasures: () => request<PolicyMeasuresResponse>("/policy/measures"),
 
   /**
    * Validate and cost a plan *before* running it. A refusal here — 422 with the

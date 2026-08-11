@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from terrarium import __version__
 from terrarium.api.deps import RUNTIME_ATTR, STARTUP_ERROR_ATTR
-from terrarium.api.routes import agent, cube, evidence, explain, health, plan, simulate
+from terrarium.api.routes import agent, cube, evidence, explain, health, plan, policy, simulate
 from terrarium.api.runtime import Runtime, StartupError, load_runtime
 from terrarium.config import Settings, get_settings
 
@@ -88,6 +88,9 @@ def create_app(
     # answers on a deployment whose Zarr store failed to load — which is precisely the
     # deployment where somebody most wants to ask the docs what went wrong.
     app.include_router(evidence.router)
+    # `/policy/measures` (Phase D) reads the DuckDB catalogue `scripts/extract_policy.py`
+    # already wrote. No cube and no key needed to serve it — those were spent once, offline.
+    app.include_router(policy.router)
 
     if loaded is not None:
         setattr(app.state, RUNTIME_ATTR, loaded)
