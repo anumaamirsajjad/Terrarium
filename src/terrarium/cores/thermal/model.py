@@ -104,8 +104,18 @@ def train(
 
 
 def predict(model: lgb.Booster, features: pd.DataFrame) -> np.ndarray:
-    """Predict LST for every row. Column order is pinned to `FEATURE_NAMES`."""
-    return np.asarray(model.predict(features[list(FEATURE_NAMES)]), dtype="float64")
+    """Predict LST for every row. Column order is pinned to `FEATURE_NAMES`.
+
+    `num_threads=1`: left at LightGBM's default, it spawns one thread per CPU core
+    `os.cpu_count()` reports - which on a cgroup-limited container (Render's free tier
+    included) is routinely the *host's* core count, not the container's actual quota.
+    Oversubscribing a fractional-vCPU container turns a sub-second prediction into
+    several seconds of context-switching. 40,602 rows is nowhere near where
+    multithreading would have paid for itself anyway.
+    """
+    return np.asarray(
+        model.predict(features[list(FEATURE_NAMES)], num_threads=1), dtype="float64"
+    )
 
 
 def spatial_folds(
