@@ -78,7 +78,6 @@ function markup(props: Partial<AgentPanelProps> = {}): string {
       result={null}
       running={false}
       error={null}
-      planner="rules (no model configured)"
       onSearch={noop}
       onStop={noop}
       onApply={noop}
@@ -88,14 +87,6 @@ function markup(props: Partial<AgentPanelProps> = {}): string {
 }
 
 describe("AgentPanel", () => {
-  it("says it needs no polygon", () => {
-    expect(markup()).toContain("No polygon needed");
-  });
-
-  it("attributes the proposer, including the keyless one", () => {
-    expect(markup()).toContain("rules (no model configured)");
-  });
-
   it("reports beating the control", () => {
     const html = markup({ result: result() });
     expect(html).toContain("Beat the greedy control");
@@ -154,20 +145,14 @@ describe("AgentPanel", () => {
     expect(html).not.toContain("1.02 °C");
   });
 
-  it("attributes the report to whoever wrote it", () => {
+  it("shows the search's own stats", () => {
     const html = markup({ result: result() });
-    expect(html).toContain("Written by groq:test");
-    expect(html).toContain("6 simulations and 0 model calls");
+    expect(html).toContain("6 simulations, 0 model calls, 12s");
   });
 
-  it("says plainly when no account was written, and keeps the numbers", () => {
-    // There is no template report any more, so an unwritten one is a real gap — but the
-    // figures came from the cores and are unaffected, which is what the copy has to say.
+  it("still renders the result in full when there is no written report", () => {
     const html = markup({ result: result({ report: [], report_source: "unavailable" }) });
 
-    expect(html).toContain("No account was written");
-    expect(html).toContain("came from the cores");
-    // The result itself still renders in full.
     expect(html).toContain("Apply this plan");
     expect(html).toContain("0.41");
   });

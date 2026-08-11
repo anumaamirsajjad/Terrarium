@@ -62,7 +62,6 @@ import AgentPanel from "./panels/AgentPanel";
 import AirPanel from "./panels/AirPanel";
 import PatternPanel from "./panels/PatternPanel";
 import BriefDocument from "./panels/BriefDocument";
-import BriefPanel from "./panels/BriefPanel";
 import CommandPalette from "./panels/CommandPalette";
 import EquityPanel from "./panels/EquityPanel";
 import FloatingPanel from "./panels/FloatingPanel";
@@ -80,7 +79,7 @@ import {
   splitRasters,
 } from "./raster/image";
 import { DIVERGING, HEAT, rampForVariable, symmetricDomain } from "./raster/ramp";
-import { plainVariableBlurb, plainVariableLabel } from "./units";
+import { plainVariableLabel } from "./units";
 import "./App.css";
 
 /**
@@ -167,7 +166,6 @@ export default function App() {
   const [splitFraction, setSplitFraction] = useState(0.5);
   const [scenarioBase, setScenarioBase] = useState<LoadedLayer | null>(null);
   const [presets, setPresets] = useState<Preset[]>([]);
-  const [planner, setPlanner] = useState("rules");
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [planning, setPlanning] = useState(false);
@@ -205,7 +203,6 @@ export default function App() {
   // --- ask about this result. Grounded in the current brief, not the repository, so the
   //     conversation resets the moment a new /simulate result replaces it. ---
   const [chatOpen, setChatOpen] = useState(false);
-  const [chatQuestion, setChatQuestion] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatTurn[]>([]);
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
@@ -253,7 +250,6 @@ export default function App() {
       .then((response) => {
         if (cancelled) return;
         setPresets(response.presets);
-        setPlanner(response.planner);
       })
       .catch(() => {
         if (!cancelled) setPresets([]);
@@ -446,6 +442,22 @@ export default function App() {
   const stopSearch = useCallback(() => searchAbort.current?.abort(), []);
 
   /**
+   * Hide the search panel and drop its run, rather than leaving a stale trace behind a
+   * closed door. `runSearch` already clears these at the *start* of the next search, but
+   * that left a hidden-then-reopened panel still showing the previous run for as long as
+   * nobody searched again.
+   */
+  const hideSearch = useCallback(() => {
+    stopSearch();
+    setAgentOpen(false);
+    setTrace([]);
+    setSearchResult(null);
+    setSearchStatus(null);
+    setSearchError(null);
+    setLitRegions([]);
+  }, [stopSearch]);
+
+  /**
    * Take the search's winner into the ordinary flow: its polygon becomes the drawn one and
    * its levers become the sliders.
    *
@@ -561,23 +573,6 @@ export default function App() {
       }
     },
     [result, plan, chatMessages],
-  );
-
-  /**
-   * "Explain this" on a figure that is already on screen.
-   *
-   * The one worth wiring is the figure a reader most often disbelieves: the 2.5x hindcast
-   * correction. Opening the chat with the question already asked is the difference between
-   * an answer and a search box.
-   */
-  const explainFigure = useCallback(
-    (question: string) => {
-      setChatQuestion(question);
-      setChatOpen(true);
-      setSheetOpen(true);
-      void askResultChat(question);
-    },
-    [askResultChat],
   );
 
   const resetScenario = useCallback(() => {
@@ -850,19 +845,11 @@ export default function App() {
                 ))}
             </select>
           </div>
-          {/* The window is part of the answer, not a detail: the same planting cools about
-              four times more in summer than in winter. Two lines of prose about the layer
-              is a desktop luxury; on a phone the error still shows, because an error is
-              not a blurb. */}
-          <p
-            className={`mt-1 max-w-md text-[0.62rem] leading-snug text-white/35 ${
-              baseline.error ? "" : "hidden lg:block"
-            }`}
-          >
-            {baseline.loading || pending
-              ? "Loading…"
-              : (baseline.error ?? plainVariableBlurb(variable))}
-          </p>
+          {baseline.error && (
+            <p className="mt-1 max-w-md text-[0.62rem] leading-snug text-white/35">
+              {baseline.error}
+            </p>
+          )}
         </motion.div>
 
         {/* view switcher, under the pill, once there is something to switch between.
@@ -968,16 +955,6 @@ export default function App() {
               className="w-full accent-white/70"
             />
           </label>
-
-          {/* D9: this label must appear wherever the temperature does. Worded as a
-              statement about lst_c and ΔLST specifically, because it sits under a layer
-              picker that can be showing NDVI. */}
-          <p className="mt-2 border-t border-white/10 pt-2 text-[0.58rem] leading-relaxed text-white/35 lg:mt-3 lg:pt-3 lg:text-[0.62rem]">
-            <strong className="text-white/55">lst_c</strong> and{" "}
-            <strong className="text-white/55">ΔLST</strong> are mid-morning land surface
-            temperature (~10:30 local, Landsat ST_B10) — the radiating surface, not air
-            temperature, and not the afternoon peak.
-          </p>
         </div>
       </div>
 
@@ -1018,7 +995,6 @@ export default function App() {
                 result={searchResult}
                 running={searching}
                 error={searchError}
-                planner={planner}
                 onSearch={(goal) => void runSearch(goal)}
                 onStop={stopSearch}
                 onApply={applySearchPlan}
@@ -1033,7 +1009,6 @@ export default function App() {
                 busy={chatBusy}
                 error={chatError}
                 onAsk={(question) => void askResultChat(question)}
-                initialQuestion={chatQuestion}
               />
             </FloatingPanel>
           )}
@@ -1042,24 +1017,6 @@ export default function App() {
           {result && (
             <FloatingPanel key="plain">
               <PlainPanel brief={result.brief} />
-
-              {/* "Explain this" on the figure a reader most often disbelieves. The 2.5x
-                  correction is stated in every brief and justified in the plan; this is
-                  the shortest path between the two. */}
-              <button
-                type="button"
-                onClick={() =>
-                  explainFigure(
-                    "Why is the modelled cooling divided by 2.5 before it is quoted?",
-                  )
-                }
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg
-                           border border-white/8 py-1.5 text-[0.68rem] text-white/50
-                           hover:bg-white/8"
-              >
-                <BookOpen className="size-3" />
-                Why is this corrected by 2.5×?
-              </button>
 
               <button
                 type="button"
@@ -1095,13 +1052,20 @@ export default function App() {
 
                 <div className="mt-4 space-y-5 border-t border-white/8 pt-4">
                   <ResultPanel result={result} />
-                  <PatternPanel
-                    explanation={pattern}
-                    busy={patternBusy}
-                    error={patternError}
-                    onExplain={() => void explainPattern()}
-                    onHighlight={setLitRegions}
-                  />
+                  {/* Offered only where there is a cooling pattern to explain. "none" and
+                      "marginal" mean the tile barely moved; "unrated" is an air-only plan,
+                      which changes no temperature at all — the panel breaks the result down
+                      by *cooling*, so all three would send someone to click a button that
+                      comes back with nothing, which reads as broken rather than quiet. */}
+                  {!["none", "marginal", "unrated"].includes(result.brief.plain.verdict) && (
+                    <PatternPanel
+                      explanation={pattern}
+                      busy={patternBusy}
+                      error={patternError}
+                      onExplain={() => void explainPattern()}
+                      onHighlight={setLitRegions}
+                    />
+                  )}
                   <EquityPanel equity={result.equity} />
                   {result.air && (
                     <AirPanel
@@ -1110,7 +1074,6 @@ export default function App() {
                       season={result.season}
                     />
                   )}
-                  <BriefPanel brief={result.brief} />
                 </div>
               </details>
             </FloatingPanel>
@@ -1217,7 +1180,11 @@ export default function App() {
               icon={Sparkles}
               label={agentOpen ? "Hide search" : "Search the tile"}
               onClick={() => {
-                setAgentOpen((open) => !open);
+                if (agentOpen) {
+                  hideSearch();
+                  return;
+                }
+                setAgentOpen(true);
                 setSheetOpen(true);
               }}
             />
@@ -1291,24 +1258,11 @@ export default function App() {
         </AnimatePresence>
       </motion.div>
 
-      {/* Hidden below `sm`: a keyboard shortcut is not an affordance on a phone, and
-          this line sat on top of the basemap attribution there. The palette is still one
-          tap away from the toolbar's own Plan button. */}
-      {!draw.complete && !draw.drawing && (
-        <p
-          className="pointer-events-none absolute bottom-2 left-1/2 z-10 hidden -translate-x-1/2
-                     font-mono text-[0.6rem] tracking-[0.18em] text-white/25 uppercase lg:block"
-        >
-          press / for the plan palette
-        </p>
-      )}
-
       {/* The palette owns its own shortcut, so it is mounted whether or not it is open. */}
       <CommandPalette
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
         presets={presets}
-        planner={planner}
         hasPolygon={draw.complete}
         plan={plan}
         error={planError}

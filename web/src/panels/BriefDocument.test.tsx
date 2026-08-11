@@ -67,6 +67,8 @@ const RESULT = {
     ],
     confidence: "moderate",
     expected_cooling_c: -0.106,
+    expected_pm25_delta: null,
+    pm25_units: null,
     // The plain-language block the printed brief now carries as its own section, so a
     // resident gets the half they can read.
     plain: {

@@ -235,6 +235,24 @@ def test_gemini_answers_when_only_it_has_a_key() -> None:
     assert resolved is not None and resolved.name == "gemini:gemini-3.6-flash"
 
 
+def test_chat_gets_the_reasoning_model_not_the_planner_s() -> None:
+    """A follow-up question is the other place working out the answer is the whole job,
+    same as the search agent's proposal step - so it gets the same Groq model, not the
+    instruction-tuned default every other caller of `chat_model` gets."""
+
+    class _Settings:
+        groq_api_key = "g"
+        groq_model = "llama-3.3-70b-versatile"
+        groq_agent_model = "openai/gpt-oss-120b"
+        gemini_api_key = None
+
+    chat = llm.chat_model(_Settings(), task="chat")
+    plain = llm.chat_model(_Settings(), task=None)
+
+    assert llm._model_name(chat) == "openai/gpt-oss-120b"
+    assert llm._model_name(plain) == "llama-3.3-70b-versatile"
+
+
 def test_no_keys_at_all_resolves_to_nothing() -> None:
     class _Settings:
         groq_api_key = None

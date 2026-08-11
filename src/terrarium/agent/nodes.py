@@ -39,7 +39,7 @@ from typing import Any, TypedDict
 import xarray as xr
 from pydantic import ValidationError
 
-from terrarium.agent.baseline import greedy_best, rank
+from terrarium.agent.baseline import greedy_best, rank, rank_by_emission
 from terrarium.agent.evaluate import evaluate, summarise
 from terrarium.agent.objective import better, satisfies, score, units_for
 from terrarium.agent.state import (
@@ -184,8 +184,17 @@ class SearchContext:
             candidates=self.candidates,
             objective=objective,
         )
+        # Ranked the same way the control ranked them, so the candidates offered to
+        # `propose` (`CANDIDATES_SHOWN` of them, top-first) are the ones actually relevant
+        # to the goal — an air objective needs the high-emission blocks surfaced, not the
+        # leafiest ones.
+        ordered = (
+            rank_by_emission(self.candidates)
+            if objective.metric == "pm25_reduction"
+            else rank(self.candidates)
+        )
         return {
-            "candidates": rank(self.candidates),
+            "candidates": ordered,
             "baseline": baseline,
             # The control is a real attempt and belongs in the trace. It is also the
             # incumbent the model has to beat, which is what makes `beat_baseline`
@@ -629,7 +638,7 @@ GOAL_SYSTEM = """You convert a city planner's goal into one JSON object. Output 
 
 Schema:
 {
-  "metric": "cooling" | "person_degrees",
+  "metric": "cooling" | "person_degrees" | "pm25_reduction",
   "target_cooling_c": number > 0, or null,
   "window": string like "2024-winter", or null,
   "description": the goal restated in under 200 characters
@@ -637,9 +646,11 @@ Schema:
 
 Rules:
 - "metric" is what to MAXIMISE. "cooling" = coldest result. "person_degrees" = reach the
-  most residents.
+  most residents. "pm25_reduction" = cut the most locally-generated traffic PM2.5 - use
+  this whenever the goal is about air quality, fumes, pollution, smog or traffic emissions
+  rather than temperature.
 - "target_cooling_c" is a HARD CONSTRAINT, not a preference. Set it only when the text
-  states a figure. "1 degree" -> 1.0.
+  states a temperature figure. "1 degree" -> 1.0. Never set it for an air-quality goal.
 - Never invent a constraint the text does not state. null is the correct answer far more
   often than a number is.
 """

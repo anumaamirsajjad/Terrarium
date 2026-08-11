@@ -50,12 +50,6 @@ describe("EquityPanel", () => {
     expect(html.match(/equity__row/g)).toHaveLength(10);
   });
 
-  it("names its stratifier so nobody reads it as deprivation", () => {
-    const html = renderToStaticMarkup(<EquityPanel equity={CANAL} />);
-    expect(html).toContain("population density");
-    expect(html).toContain("not by deprivation");
-  });
-
   it("marks a warmed decile as warming rather than dropping it", () => {
     const warmed: Equity = {
       ...CANAL,

@@ -29,18 +29,17 @@ export interface AgentPanelProps {
   result: SearchResult | null;
   running: boolean;
   error: string | null;
-  /** What the search will be scored against. Shown so the model's reach is visible. */
-  planner: string;
   onSearch: (goal: string) => void;
   onStop: () => void;
   /** Writes the winning region into the drawn polygon and the levers. */
   onApply: (attempt: Attempt) => void;
 }
 
-const EXAMPLE = "get 1 degC off somewhere, reaching as many people as possible";
+const EXAMPLE = "get 1 degC off, reaching the most people";
 
 function scoreLabel(metric: string): string {
   if (metric === "cooling") return "°C expected cooling";
+  if (metric === "pm25_reduction") return "µg/m³ PM2.5 removed";
   return "person-degrees";
 }
 
@@ -68,7 +67,6 @@ export default function AgentPanel({
   result,
   running,
   error,
-  planner,
   onSearch,
   onStop,
   onApply,
@@ -121,19 +119,6 @@ export default function AgentPanel({
             </button>
           )}
         </div>
-
-        <p className="hint">
-          No polygon needed — the agent picks from a fixed 2 km lattice the grid layer
-          generated, so it never invents coordinates. Proposals come from{" "}
-          <code>{planner}</code>, and every one is checked against what the tile can
-          actually hold before a core runs. A model is required: there is no deterministic
-          search behind this, because a lattice sweep would be a different, worse procedure
-          returning the same shape.
-        </p>
-        <p className="hint">
-          Already know where? Draw a zone and press <code>/</code> to describe a plan for it
-          instead — this panel finds a place, that one checks a place you picked.
-        </p>
       </form>
 
       {error && <p className="error-text">{error}</p>}
@@ -222,11 +207,8 @@ export default function AgentPanel({
           ))}
 
           <p className="result__caveat">
-            {result.simulations_used} simulations and {result.llm_calls_used} model calls in{" "}
-            {result.elapsed_s.toFixed(0)} s — {result.stopped_because}.{" "}
-            {result.report_source === "unavailable"
-              ? "No account was written: the model either could not answer or produced a figure the cores did not, and there is no template behind it. The numbers above are unaffected — they came from the cores."
-              : `Written by ${result.report_source}, which may only reword the figures the cores produced; one it invented would have been rejected.`}
+            {result.simulations_used} simulations, {result.llm_calls_used} model calls,{" "}
+            {result.elapsed_s.toFixed(0)}s — {result.stopped_because}.
           </p>
         </div>
       )}

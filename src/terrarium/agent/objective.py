@@ -19,11 +19,19 @@ from terrarium.agent.state import Attempt, Objective, Outcome
 def score(objective: Objective, outcome: Outcome) -> float:
     """Higher is better, always. `-inf` when a hard constraint is broken.
 
-    The two metrics answer two genuinely different questions and routinely pick two
-    different plans on this tile — the coldest block is rarely the most populated one.
+    The three metrics answer three genuinely different questions and routinely pick three
+    different plans on this tile — the coldest block is rarely the most populated one, and
+    neither is usually the one with the most road traffic to remove.
     """
     if objective.metric == "cooling":
         return outcome.expected_cooling_c
+    if objective.metric == "pm25_reduction":
+        # `delta_pm25` is negative when air improved (it is a change, not a level — see
+        # `cores/air.py`), and `None` when the plan touched no emissions at all. Both cases
+        # want a low score: a `plant_trees`-only proposal scores exactly 0 here, so it can
+        # still be compared against a `restrict_vehicles` one without a `None` special case
+        # leaking into `better()`.
+        return -outcome.delta_pm25 if outcome.delta_pm25 is not None else 0.0
     return outcome.person_degrees
 
 
@@ -64,4 +72,5 @@ def units_for(objective: Objective) -> str:
     return {
         "cooling": "degC of expected cooling inside the region",
         "person_degrees": "person-degrees (residents x degC of cooling)",
+        "pm25_reduction": "ug/m3 of locally-generated PM2.5 removed inside the region",
     }[objective.metric]

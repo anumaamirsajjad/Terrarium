@@ -191,6 +191,11 @@ export interface Brief {
   confidence: "low" | "moderate";
   /** Modelled cooling after the 2.5x hindcast correction — the number to quote. */
   expected_cooling_c: number;
+  /** Mean local PM2.5 change inside the polygon, negative for an improvement. `null`
+   * unless the plan removed emissions and the cube could answer it. */
+  expected_pm25_delta: number | null;
+  /** Units for `expected_pm25_delta`, carried alongside it rather than assumed. */
+  pm25_units: string | null;
 }
 
 export interface SimulateResponse {
@@ -325,7 +330,7 @@ export interface CandidatesResponse {
 }
 
 export interface Objective {
-  metric: "cooling" | "person_degrees";
+  metric: "cooling" | "person_degrees" | "pm25_reduction";
   /** Compared against the hindcast-**corrected** figure, never the raw model output. */
   target_cooling_c: number | null;
   window: string | null;

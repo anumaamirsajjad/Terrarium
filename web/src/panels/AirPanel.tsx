@@ -100,21 +100,8 @@ export default function AirPanel({ air, window, season }: AirPanelProps) {
         </dl>
 
         <p className="result__note">
-          {winter ? (
-            <>
-              Winter is not a scale factor on summer. The inversion drops the mixing height
-              to roughly a third of its summer value and slows lateral spread, so identical
-              emissions produce <strong>6–9&times;</strong> the concentration. The same
-              restriction therefore buys far more now than it would in June.
-            </>
-          ) : (
-            <>
-              Summer mixes deeply, so the same restriction buys a fraction of what it would
-              under the winter inversion — where identical emissions produce{" "}
-              <strong>6–9&times;</strong> the concentration. Run this window in winter
-              before deciding the effect is small.
-            </>
-          )}
+          Identical emissions produce <strong>6–9&times;</strong> the concentration in
+          winter than in summer.
         </p>
 
       </div>

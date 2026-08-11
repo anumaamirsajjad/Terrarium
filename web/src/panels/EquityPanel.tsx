@@ -101,13 +101,6 @@ export default function EquityPanel({ equity }: EquityPanelProps) {
           </dd>
         </div>
       </dl>
-
-      <p className="equity__caveat">
-        Ordered by <strong>{equity.stratified_by}</strong>, not by deprivation — no free,
-        keyless deprivation layer exists, and substituting built-up density for it would be
-        a claim the data cannot support. This answers a narrower question: does the cooling
-        reach the crowded places, where heat stress is worst?
-      </p>
     </section>
   );
 }

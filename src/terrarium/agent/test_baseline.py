@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import xarray as xr
 
-from terrarium.agent.baseline import BASELINE_SIMULATIONS, greedy_best, rank
+from terrarium.agent.baseline import BASELINE_SIMULATIONS, greedy_best, rank, rank_by_emission
 from terrarium.agent.state import Candidate, Objective
 from terrarium.api.candidates import build_lattice
 from terrarium.api.runtime import Runtime
@@ -49,6 +49,35 @@ def test_the_control_produces_a_runnable_plan(synthetic_runtime: Runtime) -> Non
     # has an answer — and on a tile with headroom that answer is a negative delta.
     assert best.outcome.mean_delta_inside_c < 0
     assert best.outcome.expected_cooling_c > 0
+
+
+def test_the_control_proposes_a_restriction_for_a_pm25_objective(
+    synthetic_runtime: Runtime,
+) -> None:
+    """A `pm25_reduction` control that still planted trees would score 0 by construction
+    (`objective.score`) and never be a real control — it has to actually restrict traffic."""
+    window, candidates = _setup(synthetic_runtime)
+
+    best, used = greedy_best(
+        runtime=synthetic_runtime,
+        window=window,
+        candidates=candidates,
+        objective=Objective(metric="pm25_reduction"),
+    )
+
+    assert used == BASELINE_SIMULATIONS
+    assert best is not None
+    assert best.plan.actions[0].kind == "restrict_vehicles"
+    assert best.score is not None and best.score >= 0.0
+
+
+def test_emission_ranking_prefers_the_highest_emitting_block(
+    synthetic_runtime: Runtime,
+) -> None:
+    _, candidates = _setup(synthetic_runtime)
+
+    ordered = rank_by_emission(candidates)
+    assert ordered[0].emission_g_s >= ordered[-1].emission_g_s
 
 
 def test_the_metric_changes_which_plan_wins(synthetic_runtime: Runtime) -> None:

@@ -60,7 +60,6 @@ function render(overrides: Partial<Parameters<typeof ScenarioPanel>[0]> = {}) {
   return renderToStaticMarkup(
     <ScenarioPanel
       presets={PRESETS}
-      planner="rules (no model configured)"
       hasPolygon
       plan={null}
       error={null}
@@ -79,12 +78,6 @@ describe("ScenarioPanel", () => {
     expect(html).toContain("Street trees");
     expect(html).toContain("Low-emission zone");
     expect(html).toContain("Remove all vehicle PM2.5.");
-  });
-
-  it("names the parser, including when there is no model", () => {
-    // A deployment with no key is a working deployment, and saying so beats implying a
-    // model read the sentence when a regex did.
-    expect(render()).toContain("rules (no model configured)");
   });
 
   it("disables the buttons until a polygon exists", () => {

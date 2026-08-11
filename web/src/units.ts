@@ -50,25 +50,6 @@ const PLAIN_VARIABLE_LABEL: Record<string, string> = {
   pm25_emission_g_s: "Traffic pollution source",
 };
 
-/** One plain sentence for the caption under the picker. Falls back to nothing rather
- * than the server's `description`, which is written for someone checking provenance
- * (band math, DEM source) and not for the dashboard. */
-const PLAIN_VARIABLE_BLURB: Record<string, string> = {
-  lst_c:
-    "How hot the ground surface is around 10:30 in the morning - not the air " +
-    "temperature you would feel.",
-  ndvi: "How much healthy plant cover is on the ground, from satellite imagery.",
-  ndbi: "How much of the ground is built over with concrete, roads and buildings.",
-  albedo: "How much sunlight the ground bounces back rather than absorbs.",
-  elevation_m: "Height of the ground, including rooftops and tree canopy.",
-  population: "Roughly how many people live in each small area.",
-  pm25_emission_g_s: "Where this area's own traffic gives off fine particle pollution.",
-};
-
 export function plainVariableLabel(name: string): string {
   return PLAIN_VARIABLE_LABEL[name] ?? name;
-}
-
-export function plainVariableBlurb(name: string): string {
-  return PLAIN_VARIABLE_BLURB[name] ?? "";
 }

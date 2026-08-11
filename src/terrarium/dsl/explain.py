@@ -211,6 +211,19 @@ class Brief(BaseModel):
             "The number to quote; the modelled figure is the upper bound next to it."
         )
     )
+    expected_pm25_delta: float | None = Field(
+        default=None,
+        description=(
+            "Mean local PM2.5 change inside the polygon, negative for an improvement. "
+            "`None` unless the plan removed emissions and the cube could answer it — the "
+            "same structured-number treatment `expected_cooling_c` gets, so the dashboard "
+            "can show an air result at the same prominence as a cooling one without "
+            "parsing a number back out of prose."
+        ),
+    )
+    pm25_units: str | None = Field(
+        default=None, description="Units for `expected_pm25_delta`, carried alongside it."
+    )
 
 
 def _c(value: float, digits: int = 2) -> str:
@@ -298,6 +311,8 @@ def plain_summary(inputs: BriefInputs, expected: float) -> PlainSummary:
                 "taking cars off a road does not shade it."
             ),
             points=(
+                "Unlike planting trees, this takes effect as soon as the restriction is "
+                "enforced - there is nothing that needs time to grow.",
                 "That is only the share these roads add. Most of what makes Lahore's air "
                 "bad blows in from outside this area and does not go away.",
                 (
@@ -382,7 +397,8 @@ def plain_summary(inputs: BriefInputs, expected: float) -> PlainSummary:
             f"Traffic fumes inside the zone fall by about "
             f"{abs(air.mean_delta_inside):.1f} {air.units}, and that cleaner air drifts "
             "about a kilometre past the edge. It is only the share these roads add, "
-            "though - the haze that blows in from outside does not go away."
+            "though - the haze that blows in from outside does not go away. Unlike the "
+            "tree cooling above, this happens as soon as the restriction is enforced."
         )
 
     points.append(
@@ -458,6 +474,12 @@ def brief_for(inputs: BriefInputs) -> Brief:
             f"after each cell was capped at the room it still had"
             + (f" — about {inputs.tree_count:,} trees." if inputs.tree_count else ".")
         )
+        if inputs.tree_count:
+            findings.append(
+                f"This is the canopy at maturity: the {inputs.tree_count:,} trees need "
+                "roughly three years in the ground to reach the crown size this figure "
+                "assumes, not a change visible on planting day."
+            )
         findings.append(
             f"The ceiling on this window is {inputs.tree_built_contrast_c:.2f} degC — the "
             "tile's own observed gap between built-up and tree-cover pixels. No planting "
@@ -520,6 +542,11 @@ def brief_for(inputs: BriefInputs) -> Brief:
             f"Mixing height this window: {air.mixing_height_m:.0f} m. The same removal "
             "buys several times more under the winter inversion than in summer, because "
             "the same emissions are trapped in a third of the depth."
+        )
+        findings.append(
+            "This is a steady-state figure for a typical mid-morning under this window's "
+            "meteorology — it applies as soon as the restriction is enforced, with no "
+            "multi-year lag like tree cover."
         )
 
     if air is None and inputs.emission_fraction_requested > 0:
@@ -594,4 +621,6 @@ def brief_for(inputs: BriefInputs) -> Brief:
             else "moderate"
         ),
         expected_cooling_c=expected,
+        expected_pm25_delta=air.mean_delta_inside if air is not None else None,
+        pm25_units=air.units if air is not None else None,
     )

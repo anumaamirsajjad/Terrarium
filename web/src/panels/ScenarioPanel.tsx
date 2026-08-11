@@ -18,8 +18,6 @@ import type { PlanResponse, Preset } from "../api/client";
 
 export interface ScenarioPanelProps {
   presets: Preset[];
-  /** What free text will be parsed with: a model, or the deterministic rule parser. */
-  planner: string;
   /** Null until a polygon is closed — a plan cannot be checked without one. */
   hasPolygon: boolean;
   plan: PlanResponse | null;
@@ -34,7 +32,6 @@ export interface ScenarioPanelProps {
 
 export default function ScenarioPanel({
   presets,
-  planner,
   hasPolygon,
   plan,
   error,
@@ -96,16 +93,11 @@ export default function ScenarioPanel({
             </button>
           )}
         </div>
-        <p className="hint">
-          Parsed by <code>{planner}</code>. Whatever reads it, the result is checked against
-          the tile before anything runs — the model is a front door, not the arbiter.
-        </p>
       </form>
 
       {!hasPolygon && (
         <p className="hint">
-          Draw a polygon first. Whether 5,000 trees fit is a question about a place, and
-          there is no answer without one. Don't know where yet?{" "}
+          Draw a polygon first.{" "}
           {onOpenSearch ? (
             <button type="button" className="scenario__link" onClick={onOpenSearch}>
               Search the tile instead

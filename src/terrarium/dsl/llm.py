@@ -475,7 +475,11 @@ def chat_model(settings: Any, *, task: Task | None = None) -> Any:
 
     Groq first by default, matching `resolve_adapter` - same reasoning, and having the two
     disagree about provider order would be a confusing thing to debug at a demo. `task`
-    reorders it the same way, for callers that need Gemini's long context.
+    reorders it the same way, for callers that need Gemini's long context, and for Groq
+    specifically also swaps *which model*: `task="chat"` gets `groq_agent_model`, the same
+    reasoning model the search agent's proposal step uses, rather than `groq_model`'s
+    instruction-tuned default - a follow-up question about a result is the other place in
+    the project where working out the answer is the whole job.
 
     Imported lazily because these packages pull a non-trivial import tree, and the API
     loads this module at startup on deployments that have no key at all - where every one
@@ -501,7 +505,14 @@ def chat_model(settings: Any, *, task: Task | None = None) -> Any:
 
         return ChatGroq(
             api_key=groq_key,
-            model=getattr(settings, "groq_model", DEFAULT_GROQ_MODEL),
+            # A follow-up question is the other place in the project where thinking about
+            # the answer is the whole job, same as the search agent's proposal step - so it
+            # gets the same reasoning model rather than the planner's instruction-tuned one.
+            model=(
+                getattr(settings, "groq_agent_model", DEFAULT_GROQ_MODEL)
+                if task == "chat"
+                else getattr(settings, "groq_model", DEFAULT_GROQ_MODEL)
+            ),
             temperature=0.0,
             timeout=NARRATOR_TIMEOUT_S,
             max_retries=0,

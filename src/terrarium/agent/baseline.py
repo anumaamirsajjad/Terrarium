@@ -24,7 +24,7 @@ from terrarium.agent.objective import better, score, units_for
 from terrarium.agent.state import Attempt, Candidate, Objective
 from terrarium.api.candidates import region_measurement
 from terrarium.api.runtime import Runtime
-from terrarium.dsl.schema import Plan, PlantTrees
+from terrarium.dsl.schema import Plan, PlantTrees, RestrictVehicles
 from terrarium.dsl.validate import PlanError, resolve
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,12 @@ BASELINE_SIMULATIONS = 3
 # retrofit rather than a park, which is what the lattice's 2 km blocks mostly contain.
 BASELINE_CANOPY_FRACTION = 0.30
 
+# The control's traffic lever, for a `pm25_reduction` objective. 1.0 — a full restriction —
+# matches the "ban combustion vehicles" preset in `dsl/library.py`, for the same reason
+# `BASELINE_CANOPY_FRACTION` matches a preset: the control has to be a plan somebody could
+# actually propose, not a synthetic fraction chosen to make the comparison easy.
+BASELINE_EMISSION_FRACTION = 1.0
+
 
 def rank(candidates: Sequence[Candidate]) -> list[Candidate]:
     """Best-looking first, by `Candidate.opportunity` — plantable canopy x residents.
@@ -53,6 +59,17 @@ def rank(candidates: Sequence[Candidate]) -> list[Candidate]:
     happened to emit, and a control that reorders between runs is not a control.
     """
     return sorted(candidates, key=lambda c: (-c.opportunity, c.region_id))
+
+
+def rank_by_emission(candidates: Sequence[Candidate]) -> list[Candidate]:
+    """Best-looking first for a `pm25_reduction` objective, by road emissions alone.
+
+    `opportunity` (canopy x population) ranks a block by how much *cooling* it could be
+    worth, which has no relationship to how much traffic PM2.5 it emits — the two rankings
+    routinely disagree, and using the thermal one here would hand the air control a set of
+    leafy, quiet blocks to restrict traffic on instead of the busy ones.
+    """
+    return sorted(candidates, key=lambda c: (-c.emission_g_s, c.region_id))
 
 
 def greedy_best(
@@ -74,10 +91,20 @@ def greedy_best(
     best: Attempt | None = None
     used = 0
 
-    for step, candidate in enumerate(rank(candidates)[:simulations]):
-        plan = Plan(
-            name=f"Greedy planting in {candidate.region_id}",
-            actions=(PlantTrees(canopy_fraction_added=BASELINE_CANOPY_FRACTION),),
+    air = objective.metric == "pm25_reduction"
+    ordered = rank_by_emission(candidates) if air else rank(candidates)
+
+    for step, candidate in enumerate(ordered[:simulations]):
+        plan = (
+            Plan(
+                name=f"Greedy restriction in {candidate.region_id}",
+                actions=(RestrictVehicles(emission_fraction_removed=BASELINE_EMISSION_FRACTION),),
+            )
+            if air
+            else Plan(
+                name=f"Greedy planting in {candidate.region_id}",
+                actions=(PlantTrees(canopy_fraction_added=BASELINE_CANOPY_FRACTION),),
+            )
         )
         try:
             resolved = resolve(plan, region_measurement([candidate]))
@@ -99,7 +126,11 @@ def greedy_best(
             proposer="greedy",
             score=score(objective, outcome),
             outcome=outcome,
-            reason=f"greedy control, ranked #{step + 1} by plantable canopy x residents",
+            reason=(
+                f"greedy control, ranked #{step + 1} by road emissions"
+                if air
+                else f"greedy control, ranked #{step + 1} by plantable canopy x residents"
+            ),
         )
         if better(attempt, best):
             best = attempt

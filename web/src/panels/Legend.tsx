@@ -42,12 +42,6 @@ export default function Legend({ ramp, domain, units, diverging = false }: Legen
         {diverging && <span className="legend__zero">0 — no change</span>}
         <span>{withUnits(format(high), units)}</span>
       </div>
-      {diverging && (
-        <p className="legend__note">
-          Cells outside the 500&nbsp;m feature neighbourhood are unchanged to the last bit,
-          so they stay transparent rather than taking a colour.
-        </p>
-      )}
     </div>
   );
 }

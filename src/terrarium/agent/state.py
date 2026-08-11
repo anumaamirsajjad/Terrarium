@@ -19,10 +19,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from terrarium.dsl.schema import Plan
 
-# What the search maximises. Two metrics rather than one because "best" is genuinely
-# ambiguous here and the ambiguity is the user's to resolve: the coldest plan and the plan
-# that reaches the most people are routinely two different plans on this tile.
-Metric = Literal["cooling", "person_degrees"]
+# What the search maximises. Three metrics rather than one because "best" is genuinely
+# ambiguous here and the ambiguity is the user's to resolve: the coldest plan, the plan
+# that reaches the most people, and the plan that cuts the most traffic PM2.5 are routinely
+# three different plans on this tile. `pm25_reduction` exists because a `restrict_vehicles`
+# plan changes no temperature — scored against either thermal metric it is always zero and
+# can never win a search, however much air it cleans.
+Metric = Literal["cooling", "person_degrees", "pm25_reduction"]
 
 
 class Objective(BaseModel):
