@@ -191,13 +191,12 @@ def test_an_unknown_window_is_a_404_listing_what_exists(client: TestClient) -> N
 # ------------------------------------------------------------------ end to end ---
 
 
-def test_the_returned_body_runs_and_the_costed_trees_survive_the_round_trip(
+def test_the_returned_body_runs_and_the_trees_survive_the_round_trip(
     client: TestClient,
 ) -> None:
     plan = build_plan(client, text="plant 4,000 trees and remove 50% of traffic")
 
-    assert plan["cost"]["total_usd"] > 0
-    assert plan["cost"]["calibrated"] is False
+    assert plan["tree_count"] > 0
 
     response = client.post("/simulate", json=plan["simulate_request"])
     assert response.status_code == 200, response.text

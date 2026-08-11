@@ -1,4 +1,4 @@
-"""Presets and costs.
+"""Presets.
 
 The preset library is the fallback path the roadmap names, so its job is to be *runnable*:
 every entry must be a plan the validator accepts and the API can turn into a `/simulate`
@@ -9,14 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from terrarium.dsl.library import (
-    COST_PER_KM2_RESTRICTION_USD,
-    COST_PER_TREE_USD,
-    PRESETS,
-    estimate_cost,
-    preset,
-    trees_for_canopy,
-)
+from terrarium.dsl.library import PRESETS, preset, trees_for_canopy
 from terrarium.dsl.schema import TREE_CANOPY_M2
 from terrarium.dsl.validate import PolygonMeasurement, resolve
 
@@ -50,21 +43,6 @@ def test_the_winter_preset_carries_its_season() -> None:
 def test_an_unknown_slug_names_the_ones_that_exist() -> None:
     with pytest.raises(KeyError, match="street-trees"):
         preset("plant-everything")
-
-
-def test_costs_are_linear_in_what_they_price() -> None:
-    cost = estimate_cost(tree_count=1_000, restricted_area_km2=2.0)
-    assert cost.planting_usd == pytest.approx(1_000 * COST_PER_TREE_USD)
-    assert cost.restriction_usd == pytest.approx(2.0 * COST_PER_KM2_RESTRICTION_USD)
-    assert cost.total_usd == pytest.approx(cost.planting_usd + cost.restriction_usd)
-
-
-def test_no_cost_claims_to_be_calibrated() -> None:
-    # Same rule as the air core's emission factors: literature figures, labelled as such
-    # everywhere they are quoted.
-    cost = estimate_cost(tree_count=10, restricted_area_km2=1.0)
-    assert cost.calibrated is False
-    assert "not a quote for Lahore" in cost.basis
 
 
 def test_canopy_converts_back_to_a_tree_count() -> None:

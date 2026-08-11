@@ -72,7 +72,6 @@ class BriefInputs(BaseModel):
     season: str
     area_km2: float
     tree_count: int = 0
-    cost_total_usd: float = 0.0
 
     mean_delta_inside: float
     mean_delta_spillover: float
@@ -228,15 +227,6 @@ def _people(count: float) -> str:
     return f"{count:.0f} people"
 
 
-def _money(usd: float) -> str:
-    """Cost rounded to something sayable. These are literature figures, not quotes."""
-    if usd >= 1_000_000:
-        return f"about ${usd / 1_000_000:.1f} million"
-    if usd >= 1_000:
-        return f"about ${usd / 1_000:.0f},000"
-    return f"about ${usd:.0f}"
-
-
 def plain_summary(inputs: BriefInputs, expected: float) -> PlainSummary:
     """The dashboard's version of the brief: same numbers, words a non-expert reads.
 
@@ -320,14 +310,6 @@ def plain_summary(inputs: BriefInputs, expected: float) -> PlainSummary:
                 ),
                 "The cleaner air drifts about a kilometre past the edge of the zone, so "
                 "neighbours benefit too - unlike shade, which stops where the trees stop.",
-                *(
-                    [
-                        f"Rough cost: {_money(inputs.cost_total_usd)}. Good enough to "
-                        "compare two plans, not to budget from."
-                    ]
-                    if inputs.cost_total_usd > 0
-                    else []
-                ),
             ),
             caveat=(
                 "How big this change is has not been checked against real measurements - "
@@ -401,12 +383,6 @@ def plain_summary(inputs: BriefInputs, expected: float) -> PlainSummary:
             f"{abs(air.mean_delta_inside):.1f} {air.units}, and that cleaner air drifts "
             "about a kilometre past the edge. It is only the share these roads add, "
             "though - the haze that blows in from outside does not go away."
-        )
-
-    if inputs.cost_total_usd > 0:
-        points.append(
-            f"Rough cost: {_money(inputs.cost_total_usd)}. Good enough to compare two "
-            "plans, not to budget from."
         )
 
     points.append(
@@ -554,12 +530,6 @@ def brief_for(inputs: BriefInputs) -> Brief:
         )
 
     findings.extend(inputs.plan_notes)
-
-    if inputs.cost_total_usd > 0:
-        findings.append(
-            f"Indicative cost: {inputs.cost_total_usd:,.0f} USD, from literature unit "
-            "costs. Good for ranking two plans against each other; not a budget."
-        )
 
     # --- uncertainties. Never conditional on the result being flattering, but a caveat is
     # attached to a figure, not to a plan: a plan that quotes no temperature does not carry

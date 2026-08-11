@@ -191,11 +191,9 @@ class ScriptedAdapter:
     how many times to ask, and a test that ran dry would fail with a `StopIteration`
     describing the fixture instead of the behaviour under test.
 
-    A reply may be a **callable taking the prompt**, which is what makes the evidence
-    tests possible at all: the citation guard now accepts only anchors the model was
-    actually shown, and which sections BM25 retrieves for a given question is not
-    something a test should be hardcoding. A reply computed from the prompt cites whatever
-    was really handed over.
+    A reply may be a **callable taking the prompt**, which lets a test's script react to
+    what the prompt actually contains rather than hardcoding an answer that has to stay in
+    sync with it by hand.
     """
 
     name = "scripted:test"
@@ -223,7 +221,7 @@ def with_model(
 
     def configure(replies: Sequence[str | Callable[[str], str]]) -> ScriptedAdapter:
         adapter = ScriptedAdapter(replies)
-        for module in ("terrarium.api.deps", "terrarium.agent.nodes", "terrarium.evidence.answer"):
+        for module in ("terrarium.api.deps", "terrarium.agent.nodes"):
             monkeypatch.setattr(
                 importlib.import_module(module), "resolve_adapter", lambda *_a, **_k: adapter
             )

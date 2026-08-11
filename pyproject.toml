@@ -54,13 +54,6 @@ dependencies = [
     # propose when the validator refuses. `langgraph.graph` is imported directly by
     # `agent/graph.py`. Nothing else in the tree uses it.
     "langgraph>=0.2",
-    # --- Intelligence: policy document extraction (Phase D) ---
-    # Pure Python, no transitive dependencies. Used for exactly one thing: pulling the
-    # document's own text back out so an extracted quote can be checked against it. The
-    # *extraction* is the model reading the PDF natively - naive pypdf text on the Punjab
-    # Clean Air Action Plan comes out as "The P unja b Clea n A ir Act ion P la n", which
-    # is why `policy/extract.py` de-spaces before it compares and never parses meaning.
-    "pypdf>=5.0",
 ]
     
 [project.optional-dependencies]

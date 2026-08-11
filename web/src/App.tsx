@@ -27,7 +27,6 @@ import {
   BookOpen,
   Check,
   ChevronDown,
-  Landmark,
   PenLine,
   Play,
   Printer,
@@ -40,15 +39,13 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import {
-  type Answer,
   type Attempt,
   type Candidate,
+  type ChatTurn,
   type CubeSummaryResponse,
   type HealthResponse,
-  type MappedPlan,
   type Plan,
   type PlanResponse,
-  type PolicyMeasureItem,
   type Preset,
   type SearchResult,
   type SimulateResponse,
@@ -63,15 +60,14 @@ import { GLIDE, SNAP } from "./motion/springs";
 import Legend from "./panels/Legend";
 import AgentPanel from "./panels/AgentPanel";
 import AirPanel from "./panels/AirPanel";
-import EvidencePanel from "./panels/EvidencePanel";
 import PatternPanel from "./panels/PatternPanel";
-import PolicyPanel from "./panels/PolicyPanel";
 import BriefDocument from "./panels/BriefDocument";
 import BriefPanel from "./panels/BriefPanel";
 import CommandPalette from "./panels/CommandPalette";
 import EquityPanel from "./panels/EquityPanel";
 import FloatingPanel from "./panels/FloatingPanel";
 import PlainPanel from "./panels/PlainPanel";
+import ResultChatPanel from "./panels/ResultChatPanel";
 import ResultPanel from "./panels/ResultPanel";
 import { decodeLayer } from "./raster/decode";
 import { toCanvas } from "./raster/canvas";
@@ -199,16 +195,6 @@ export default function App() {
   const [litRegions, setLitRegions] = useState<string[]>([]);
   const searchAbort = useRef<AbortController | null>(null);
 
-  /**
-   * Which language the brief comes back in (Phase C).
-   *
-   * The rule parser already reads Urdu, so a resident who typed Urdu was being answered
-   * only in English. This is a *request*, not a guarantee: the server returns the English
-   * template whenever no key is configured or the translation drifts, and the panel reads
-   * `brief.plain.source` rather than this to decide whether to set `dir="rtl"`.
-   */
-  const [lang, setLang] = useState<"en" | "ur">("en");
-
   // --- where it landed (Phase E). Re-runs the core, so it is opt-in rather than on
   //     every /simulate: a second model call on the main endpoint would cost every user
   //     latency for a panel most of them never open. ---
@@ -216,20 +202,13 @@ export default function App() {
   const [patternBusy, setPatternBusy] = useState(false);
   const [patternError, setPatternError] = useState<string | null>(null);
 
-  // --- ask the record (Phase B). Needs no cube, so it works on a broken deployment. ---
-  const [evidenceOpen, setEvidenceOpen] = useState(false);
-  const [evidenceQuestion, setEvidenceQuestion] = useState("");
-  const [evidenceAnswer, setEvidenceAnswer] = useState<Answer | null>(null);
-  const [evidenceBusy, setEvidenceBusy] = useState(false);
-  const [evidenceError, setEvidenceError] = useState<string | null>(null);
-
-  // --- published policy (Phase D). A read of what a build step already extracted, so it
-  //     is fetched once on open rather than on every run, like the presets library. ---
-  const [policyOpen, setPolicyOpen] = useState(false);
-  const [policyMeasures, setPolicyMeasures] = useState<PolicyMeasureItem[]>([]);
-  const [policyLoaded, setPolicyLoaded] = useState(false);
-  const [policyLoading, setPolicyLoading] = useState(false);
-  const [policyError, setPolicyError] = useState<string | null>(null);
+  // --- ask about this result. Grounded in the current brief, not the repository, so the
+  //     conversation resets the moment a new /simulate result replaces it. ---
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatQuestion, setChatQuestion] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatTurn[]>([]);
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   /**
    * Swapping windows refetches a 40,602-cell raster, decodes it and re-colourises it.
@@ -344,7 +323,7 @@ export default function App() {
       setPlanning(true);
       setPlanError(null);
       try {
-        const response = await api.plan({ geometry: draw.geometry, ...body }, lang);
+        const response = await api.plan({ geometry: draw.geometry, ...body });
         setPlan(response);
         setCanopy(response.canopy_fraction_added);
         // Both levers, not just canopy. Adopting only the canopy left the emission slider
@@ -360,7 +339,7 @@ export default function App() {
         setPlanning(false);
       }
     },
-    [draw.geometry, lang],
+    [draw.geometry],
   );
 
   const runSimulation = useCallback(async () => {
@@ -383,10 +362,13 @@ export default function App() {
               emission_fraction_removed: emissions,
               window: selectedWindow,
             },
-        lang,
       );
       setResult(response);
       setSheetOpen(true);
+      // A new result is a new conversation. A question answered from the run this replaces
+      // would be a stale answer wearing a fresh one's shape.
+      setChatMessages([]);
+      setChatError(null);
       // Land on whichever result the plan actually produced. A traffic-only plan changes
       // no temperature, so opening on ΔLST would show an empty map for a run that worked.
       setView(response.air && response.stats.n_cells_changed === 0 ? "air" : "delta");
@@ -396,7 +378,7 @@ export default function App() {
     } finally {
       setRunning(false);
     }
-  }, [draw.geometry, selectedWindow, canopy, emissions, plan, lang]);
+  }, [draw.geometry, selectedWindow, canopy, emissions, plan]);
 
   const handleMapClick = useCallback(
     (position: Position) => {
@@ -540,76 +522,62 @@ export default function App() {
     }
   }, [draw.geometry, result, plan, canopy, emissions, candidates.length]);
 
-  // ------------------------------------------------------------ ask the record ---
-
-  const askEvidence = useCallback(async (question: string) => {
-    setEvidenceBusy(true);
-    setEvidenceError(null);
-    try {
-      setEvidenceAnswer(await api.ask(question));
-    } catch (error) {
-      // The message already carries the server's own reason, including the anchors a
-      // rejected answer invented. Showing it verbatim is the point: a guard that fired
-      // silently is indistinguishable from a feature that never worked.
-      setEvidenceError((error as Error).message);
-      setEvidenceAnswer(null);
-    } finally {
-      setEvidenceBusy(false);
-    }
-  }, []);
-
-  // ------------------------------------------------------ published policy (Phase D) ---
+  // ------------------------------------------------------ ask about this result ---
 
   /**
-   * Fetched once, on first open — not eagerly on mount like presets, because unlike the
-   * preset library this can be empty on a fresh checkout (nobody has run the extraction
-   * yet) and there is no point paying a request for a panel most sessions never open.
+   * Send one question, with every earlier turn of this conversation riding along.
+   *
+   * The user's turn is appended before the request goes out, not after it comes back, so a
+   * slow or failed answer still leaves the question visible in the transcript rather than
+   * looking like it was never asked.
    */
-  const openPolicy = useCallback(() => {
-    setPolicyOpen((open) => !open);
-    setSheetOpen(true);
-    if (policyLoaded) return;
-
-    setPolicyLoading(true);
-    setPolicyError(null);
-    api
-      .policyMeasures()
-      .then((response) => {
-        setPolicyMeasures(response.measures);
-        setPolicyLoaded(true);
-      })
-      .catch((error: Error) => setPolicyError(error.message))
-      .finally(() => setPolicyLoading(false));
-  }, [policyLoaded]);
-
-  /**
-   * A policy measure's plan is an explicit `Plan`, checked against the drawn polygon the
-   * same way a preset is — `/plan` re-validates it and hands back what `/simulate` takes,
-   * so a measure that does not fit refuses with the arithmetic rather than quietly running.
-   */
-  const applyPolicyPlan = useCallback(
-    (mapped: MappedPlan) => {
-      setPolicyOpen(false);
-      void buildPlan({ plan: mapped.plan });
+  const askResultChat = useCallback(
+    async (question: string) => {
+      if (!result) return;
+      const asked: ChatTurn = { role: "user", content: question };
+      const history = chatMessages;
+      setChatMessages((current) => [...current, asked]);
+      setChatBusy(true);
+      setChatError(null);
+      try {
+        const response = await api.chat({
+          brief: result.brief,
+          window: result.window,
+          season: result.season,
+          plan_name: plan?.plan.name,
+          history,
+          question,
+        });
+        setChatMessages((current) => [
+          ...current,
+          { role: "assistant", content: response.answer },
+        ]);
+      } catch (error) {
+        // The message already carries the server's own reason, including when it refused
+        // rather than invent a figure the brief did not contain.
+        setChatError((error as Error).message);
+      } finally {
+        setChatBusy(false);
+      }
     },
-    [buildPlan],
+    [result, plan, chatMessages],
   );
 
   /**
    * "Explain this" on a figure that is already on screen.
    *
-   * The two worth wiring are the ones a reader most often disbelieves: the 2.5x hindcast
-   * correction, and the air validation. Opening the drawer with the question already asked
-   * is the difference between an answer and a search box.
+   * The one worth wiring is the figure a reader most often disbelieves: the 2.5x hindcast
+   * correction. Opening the chat with the question already asked is the difference between
+   * an answer and a search box.
    */
   const explainFigure = useCallback(
     (question: string) => {
-      setEvidenceQuestion(question);
-      setEvidenceOpen(true);
+      setChatQuestion(question);
+      setChatOpen(true);
       setSheetOpen(true);
-      void askEvidence(question);
+      void askResultChat(question);
     },
-    [askEvidence],
+    [askResultChat],
   );
 
   const resetScenario = useCallback(() => {
@@ -620,6 +588,9 @@ export default function App() {
     setPlanError(null);
     setView("baseline");
     setSheetOpen(false);
+    setChatOpen(false);
+    setChatMessages([]);
+    setChatError(null);
   }, [draw]);
 
   const clearPlan = useCallback(() => {
@@ -878,24 +849,6 @@ export default function App() {
                   </option>
                 ))}
             </select>
-            <span className="h-4 w-px shrink-0 bg-white/10" />
-            {/* Urdu (Phase C). The rule parser has read Urdu since Phase 11, so a Lahore
-                resident could type a plan in Urdu and be answered only in English. It sits
-                in the top cluster rather than in a settings menu because it changes what
-                the next run comes back as, not a preference. */}
-            <select
-              value={lang}
-              onChange={(event) => setLang(event.target.value as "en" | "ur")}
-              className="w-auto shrink-0 bg-transparent font-mono text-xs text-white/70 outline-none"
-              aria-label="Brief language"
-            >
-              <option value="en" className="bg-[#0a0d12]">
-                EN
-              </option>
-              <option value="ur" className="bg-[#0a0d12]">
-                اردو
-              </option>
-            </select>
           </div>
           {/* The window is part of the answer, not a detail: the same planting cools about
               four times more in summer than in winter. Two lines of prose about the layer
@@ -1038,7 +991,7 @@ export default function App() {
         className={`pointer-events-auto z-30 flex flex-col gap-3 overflow-x-hidden
                     overflow-y-auto lg:absolute lg:inset-x-auto lg:top-5 lg:right-5 lg:bottom-auto
                     lg:z-10 lg:max-h-[calc(100dvh-2.5rem)] lg:w-96 ${
-                      (result || agentOpen || evidenceOpen || policyOpen) && sheetOpen
+                      (result || agentOpen || chatOpen) && sheetOpen
                         ? "absolute inset-x-0 bottom-0 max-h-[78dvh] rounded-t-2xl bg-[#0a0d12]/80 p-3 backdrop-blur-xl lg:rounded-none lg:bg-transparent lg:p-0 lg:backdrop-blur-none"
                         : "max-lg:hidden"
                     }`}
@@ -1073,29 +1026,18 @@ export default function App() {
             </FloatingPanel>
           )}
 
-          {evidenceOpen && (
-            <FloatingPanel key="evidence">
-              <EvidencePanel
-                answer={evidenceAnswer}
-                busy={evidenceBusy}
-                error={evidenceError}
-                onAsk={(question) => void askEvidence(question)}
-                initialQuestion={evidenceQuestion}
+          {chatOpen && result && (
+            <FloatingPanel key="chat">
+              <ResultChatPanel
+                messages={chatMessages}
+                busy={chatBusy}
+                error={chatError}
+                onAsk={(question) => void askResultChat(question)}
+                initialQuestion={chatQuestion}
               />
             </FloatingPanel>
           )}
 
-          {policyOpen && (
-            <FloatingPanel key="policy">
-              <PolicyPanel
-                measures={policyMeasures}
-                loading={policyLoading}
-                error={policyError}
-                onApply={applyPolicyPlan}
-                hasPolygon={!!draw.geometry}
-              />
-            </FloatingPanel>
-          )}
 
           {result && (
             <FloatingPanel key="plain">
@@ -1329,26 +1271,17 @@ export default function App() {
               onClick={() => void runSimulation()}
             />
           )}
-          {/* Needs neither a cube nor a polygon — the corpus is markdown in the repo — so
-              it is always available, including on a deployment whose Zarr store failed. */}
-          {!draw.drawing && (
+          {/* Only once there is a result to talk about — the chat is grounded in its
+              brief, so there is nothing for it to answer before one exists. */}
+          {!draw.drawing && result && (
             <ToolButton
-              key="evidence"
+              key="chat"
               icon={BookOpen}
-              label={evidenceOpen ? "Hide record" : "Ask the record"}
+              label={chatOpen ? "Hide chat" : "Ask about this result"}
               onClick={() => {
-                setEvidenceOpen((open) => !open);
+                setChatOpen((open) => !open);
                 setSheetOpen(true);
               }}
-            />
-          )}
-          {/* A read of a DuckDB table, same as the presets library — no cube needed. */}
-          {!draw.drawing && (
-            <ToolButton
-              key="policy"
-              icon={Landmark}
-              label={policyOpen ? "Hide policy" : "Published policy"}
-              onClick={openPolicy}
             />
           )}
 
@@ -1383,6 +1316,11 @@ export default function App() {
         onPreset={(slug) => void buildPlan({ preset: slug })}
         onText={(text) => void buildPlan({ text })}
         onClear={clearPlan}
+        onOpenSearch={() => {
+          setPaletteOpen(false);
+          setAgentOpen(true);
+          setSheetOpen(true);
+        }}
       />
 
       {/* Hidden on screen, and the only thing on the page when printed. Rendered here

@@ -34,7 +34,6 @@ function attempt(overrides: Partial<Attempt> = {}): Attempt {
       expected_cooling_c: 0.41,
       person_degrees: 4812,
       people_reached: 48000,
-      cost_usd: 60000,
       tree_count: 4000,
       area_km2: 4.0,
       delta_pm25: null,
@@ -50,7 +49,6 @@ function result(overrides: Partial<SearchResult> = {}): SearchResult {
     objective: {
       metric: "person_degrees",
       target_cooling_c: null,
-      max_cost_usd: null,
       window: null,
       description: "cool this tile",
     },

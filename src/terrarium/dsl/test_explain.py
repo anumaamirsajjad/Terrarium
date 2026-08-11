@@ -23,7 +23,6 @@ PLANTING = BriefInputs(
     season="summer",
     area_km2=4.2,
     tree_count=25_000,
-    cost_total_usd=375_000.0,
     mean_delta_inside=-0.51,
     mean_delta_spillover=-0.12,
     spillover_cells=980,

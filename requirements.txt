@@ -235,8 +235,6 @@ pyogrio==0.13.0
     # via geopandas
 pyparsing==3.3.2
     # via rasterio
-pypdf==6.15.0
-    # via terrarium
 pyproj==3.7.2
     # via
     #   geopandas

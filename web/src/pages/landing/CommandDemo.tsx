@@ -8,7 +8,7 @@
  * them is what makes the keyless claim unconditional, so putting them back into the copy
  * would trade the strongest thing this page can say for a feature that no longer exists.
  *
- * What is left is real, and testable: English and Urdu, digits folded, no model required.
+ * What is left is real, and testable: a deterministic rule parser, no model required.
  */
 
 import { motion, useReducedMotion } from "motion/react";
@@ -18,8 +18,8 @@ import { useMarginNote } from "./marginNote";
 import { Eyebrow, InlineCaveat, Rule } from "./primitives";
 
 const LINES = [
-  { text: "Plant 5,000 trees near the Canal", dir: "ltr" as const },
-  { text: "سردیوں میں گاڑیوں پر پابندی", dir: "rtl" as const },
+  "Plant 5,000 trees near the Canal",
+  "Ban combustion vehicles here in winter",
 ];
 
 const TYPE_MS = 45;
@@ -43,7 +43,7 @@ export default function CommandDemo() {
   useEffect(() => {
     if (reduced) return;
 
-    if (!deleting && count === full.text.length) {
+    if (!deleting && count === full.length) {
       const hold = setTimeout(() => setDeleting(true), HOLD_MS);
       return () => clearTimeout(hold);
     }
@@ -57,12 +57,9 @@ export default function CommandDemo() {
       deleting ? DELETE_MS : TYPE_MS,
     );
     return () => clearTimeout(step);
-  }, [count, deleting, full.text.length, reduced]);
+  }, [count, deleting, full.length, reduced]);
 
-  // One text node, sliced by an index — never one element per character. Urdu is a
-  // cursive script: splitting it into separate spans breaks the joins between letters and
-  // renders the sentence as disconnected forms.
-  const shown = reduced ? full.text : full.text.slice(0, count);
+  const shown = reduced ? full : full.slice(0, count);
 
   return (
     <section ref={section} className="mx-auto max-w-4xl px-5 py-20 sm:px-8 sm:py-32">
@@ -94,11 +91,7 @@ export default function CommandDemo() {
         </div>
 
         <div className="flex min-h-[6rem] items-center px-6 py-7">
-          <p
-            dir={full.dir}
-            lang={full.dir === "rtl" ? "ur" : "en"}
-            className="w-full text-2xl tracking-tight text-white md:text-3xl"
-          >
+          <p className="w-full text-2xl tracking-tight text-white md:text-3xl">
             {shown}
             {!reduced && (
               <motion.span
@@ -128,10 +121,9 @@ export default function CommandDemo() {
 
       <div className="mt-10 grid gap-6 text-sm leading-relaxed text-white/50 md:grid-cols-2">
         <p>
-          Typed in English or Urdu. Eastern Arabic-Indic digits are folded to ASCII before
-          any pattern runs — <span className="font-mono text-white/75">۵۰۰۰</span> matches no{" "}
-          <code className="font-mono text-white/75">\d</code>, and without that pass an Urdu
-          sentence parses as a plan with no quantity in it.
+          Two things the layer can express: how many trees, and how much traffic. Everything
+          else in the sentence is ignored, exactly the same way in a preset button as in free
+          text.
         </p>
         <p>
           A language model is optional and lives in exactly one file. With no key set, the

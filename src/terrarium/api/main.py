@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from terrarium import __version__
 from terrarium.api.deps import RUNTIME_ATTR, STARTUP_ERROR_ATTR
-from terrarium.api.routes import agent, cube, evidence, explain, health, plan, policy, simulate
+from terrarium.api.routes import agent, chat, cube, explain, health, plan, simulate
 from terrarium.api.runtime import Runtime, StartupError, load_runtime
 from terrarium.config import Settings, get_settings
 
@@ -77,20 +77,16 @@ def create_app(
     app.include_router(cube.router)
     app.include_router(simulate.router)
     # /plan/presets needs no cube, so the router is mounted regardless: a deployment
-    # without artefacts can still show the costed intervention library.
+    # without artefacts can still show the intervention library.
     app.include_router(plan.router)
     # The search agent (Phase A). Needs the cube, so it gets the same 503-with-a-reason
     # treatment through `get_runtime` that /simulate does.
     app.include_router(agent.router)
     # The spatial explanation (Phase E). Needs the cube for the same reason /simulate does.
     app.include_router(explain.router)
-    # `/evidence/ask` reads this repository's own markdown and needs no cube at all, so it
-    # answers on a deployment whose Zarr store failed to load — which is precisely the
-    # deployment where somebody most wants to ask the docs what went wrong.
-    app.include_router(evidence.router)
-    # `/policy/measures` (Phase D) reads the DuckDB catalogue `scripts/extract_policy.py`
-    # already wrote. No cube and no key needed to serve it — those were spent once, offline.
-    app.include_router(policy.router)
+    # `/simulate/chat` needs no cube at all — it only ever reasons over a brief the client
+    # already has — but it does need a model, same as /agent/search.
+    app.include_router(chat.router)
 
     if loaded is not None:
         setattr(app.state, RUNTIME_ATTR, loaded)

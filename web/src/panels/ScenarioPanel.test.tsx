@@ -1,9 +1,8 @@
 /**
  * The DSL panel, rendered to a string.
  *
- * What is worth asserting here is what the panel refuses to hide: the validator's notes,
- * the refusal message with its arithmetic, and the fact that a cost figure is not
- * calibrated. Everything else is layout.
+ * What is worth asserting here is what the panel refuses to hide: the validator's notes
+ * and the refusal message with its arithmetic. Everything else is layout.
  */
 
 import { renderToStaticMarkup } from "react-dom/server";
@@ -44,13 +43,6 @@ const PLAN: PlanResponse = {
   tree_count: 75_240,
   max_trees: 210_000,
   canopy_utilisation: 0.36,
-  cost: {
-    planting_usd: 1_128_600,
-    restriction_usd: 0,
-    total_usd: 1_128_600,
-    basis: "Literature order-of-magnitude figures, not a quote for Lahore.",
-    calibrated: false,
-  },
   notes: ["Planting moves air quality by ~0.0003 µg/m3 at this scale."],
   warnings: [],
   basis: "One tree = 25 m2 of crown at maturity.",
@@ -112,10 +104,6 @@ describe("ScenarioPanel", () => {
     expect(html).toContain("75,240");
     expect(html).toContain("210,000");
     expect(html).toContain("12.54 km²");
-  });
-
-  it("never presents a cost as calibrated", () => {
-    expect(render({ plan: PLAN })).toContain("not calibrated");
   });
 
   it("keeps the validator's notes", () => {

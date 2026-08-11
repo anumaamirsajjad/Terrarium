@@ -26,7 +26,6 @@ import logging
 import re
 import urllib.error
 import urllib.request
-from base64 import b64encode
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
@@ -44,25 +43,6 @@ DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
 DEFAULT_GROQ_URL = "https://api.groq.com/openai/v1"
 # Text-only, which is all the planner needs. Fast and on the free tier.
 DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
-
-
-# --- Eastern Arabic-Indic digits -----------------------------------------------------
-#
-# One folding table for the whole project, and it lives here rather than in
-# `dsl/planner.py` (which is where it was written) because the *guard* is what makes it
-# load-bearing. `_numbers_in` compares numerals between a template and a model's rewrite;
-# an Urdu rewrite carrying ۵۰۰۰ matches no `\d`, so without this fold every translation
-# passes vacuously and the faithfulness check is decorative. `planner._normalise` calls
-# `fold_digits` — a second table anywhere would be a table that rots.
-_URDU_DIGITS = {
-    **{chr(0x06F0 + i): str(i) for i in range(10)},  # Urdu ۰-۹
-    **{chr(0x0660 + i): str(i) for i in range(10)},  # Arabic ٠-٩
-}
-
-
-def fold_digits(text: str) -> str:
-    """Rewrite Eastern Arabic-Indic digits as ASCII, leaving everything else alone."""
-    return "".join(_URDU_DIGITS.get(ch, ch) for ch in text)
 
 
 class LLMUnavailable(RuntimeError):
@@ -111,29 +91,6 @@ class GeminiAdapter:
 
     def complete_json(self, *, system: str, user: str) -> str:
         return self._generate([{"text": user}], system=system)
-
-    def complete_json_with_pdf(self, *, system: str, user: str, pdf: bytes) -> str:
-        """Answer about a PDF handed over as bytes, not as extracted text (Phase D).
-
-        This is the whole argument for Gemini in the policy phase. Naive text extraction
-        from the Punjab Clean Air Action Plan shreds words on the font encoding — *"The P
-        unja b Clea n A ir Act ion P la n"* — so a pypdf → text → model pipeline feeds the
-        model garbage and then blames the model. Native PDF input deletes the extraction
-        step. `pypdf` is still used, but only to check a quote against the document, never
-        to read meaning out of it.
-        """
-        return self._generate(
-            [
-                {
-                    "inline_data": {
-                        "mime_type": "application/pdf",
-                        "data": b64encode(pdf).decode(),
-                    }
-                },
-                {"text": user},
-            ],
-            system=system,
-        )
 
     def _generate(self, parts: list[dict[str, Any]], *, system: str) -> str:
         payload: dict[str, Any] = {
@@ -335,7 +292,7 @@ class FallbackAdapter:
 
 # What each caller is actually asking a model to do. Not a provider name: the point of
 # routing on the *task* is that the preference survives a provider being swapped out.
-Task = Literal["plan", "agent", "evidence", "policy", "prose"]
+Task = Literal["plan", "agent", "chat", "prose"]
 
 # Which provider each task would rather have, when both keys exist. The other one is still
 # tried behind it — `FallbackAdapter` is what makes two providers more than decoration, and
@@ -343,13 +300,9 @@ Task = Literal["plan", "agent", "evidence", "policy", "prose"]
 #
 # - `agent` wants Groq: the search loop pays its latency ten times over, and latency
 #   compounds inside a cycle in a way it never does in a single call.
-# - `evidence` and `policy` want Gemini: a 60k-token corpus and a 42-page PDF both need the
-#   long context, and only Gemini reads a PDF natively.
-# - `plan` and `prose` express no preference and take the default order.
+# - `plan`, `chat` and `prose` express no preference and take the default order.
 _TASK_PREFERS: dict[str, str] = {
     "agent": "groq",
-    "evidence": "gemini",
-    "policy": "gemini",
 }
 
 
@@ -442,11 +395,8 @@ Return JSON only, with exactly these keys:
 # identifier spellings, not figures anybody could be misled by.
 #
 # This is not a nicety. Without it the "2" in "km2" counts as one of the headline's
-# figures, and `_headline_figures_survive` then rejects **every Urdu translation**: a
-# translator that correctly renders "16.7 km2" as "۱۶.۷ مربع کلومیٹر" has dropped a figure
-# as far as the guard is concerned, and the whole of Phase C falls back to English for
-# doing its job properly. It also quietly strengthened the English guard, which had been
-# comparing a phantom digit on both sides for as long as it has existed.
+# figures, which would make `_headline_figures_survive` reject a rewrite for correctly
+# copying "16.7 km2" while leaving the unit spelling untouched.
 #
 # A model cannot exploit it: hiding an invented figure would mean writing it flush against
 # a letter, which is not something prose does.
@@ -459,13 +409,8 @@ def _numbers_in(text: str) -> set[str]:
     `180,905` and `180905` are the same figure written two ways, so the comparison strips
     separators before matching - otherwise the guard would reject a rewrite for correctly
     reformatting a number it had copied faithfully.
-
-    Eastern Arabic-Indic digits are folded first, so ۵۰۰۰ compares equal to 5000. Without
-    that pass an Urdu translation contains no numerals at all as far as `\\d` is concerned,
-    every comparison is trivially satisfied, and the guard that makes `translate` safe is
-    an expensive no-op. That is the difference between a check and a decoration.
     """
-    return set(_NUMBER.findall(fold_digits(text).replace(",", "")))
+    return set(_NUMBER.findall(text.replace(",", "")))
 
 
 def _numbers_are_faithful(*, source: str, rewritten: str) -> bool:
@@ -530,8 +475,7 @@ def chat_model(settings: Any, *, task: Task | None = None) -> Any:
 
     Groq first by default, matching `resolve_adapter` - same reasoning, and having the two
     disagree about provider order would be a confusing thing to debug at a demo. `task`
-    reorders it the same way, which is how `translate` reaches Gemini for its materially
-    better Urdu on a deployment carrying both keys.
+    reorders it the same way, for callers that need Gemini's long context.
 
     Imported lazily because these packages pull a non-trivial import tree, and the API
     loads this module at startup on deployments that have no key at all - where every one
@@ -693,157 +637,6 @@ def _guarded_rewrite(
     )
 
 
-# --- Urdu briefs (Phase C) -----------------------------------------------------------
-#
-# `dsl/planner.py` reads Urdu and `explain.py` answers only in English, which means a
-# Lahore resident's sentence is accepted and answered in a language they may not read.
-#
-# The English `plain_summary` stays the source of truth and the translation is a rewrite
-# of it, under the *same two guards* — which is the entire reason this is safe. A
-# translation is a rewording, and D24's rule is that a model may reword a number and never
-# source one. The guards need no change to hold across languages because `_numbers_in`
-# folds Eastern Arabic-Indic digits: ۵۰۰۰ and 5000 are the same figure to the check.
-
-# Languages the brief can be returned in. English is the template's own output and is not
-# a translation at all, which is why it costs no call.
-Language = Literal["en", "ur"]
-
-_LANGUAGE_NAMES: dict[str, str] = {"ur": "Urdu"}
-
-TRANSLATOR_SYSTEM = """You translate a short report about urban climate models into \
-{language}, for a general audience: a city councillor or a resident, not a scientist.
-
-Rules, in order of importance:
-1. NEVER introduce a number, percentage, quantity or unit that is not in the input. \
-Copy every number EXACTLY as written - do not round, rescale or convert them. Write the \
-digits in the same form the input used, and keep units (degC, km2, USD) recognisable.
-2. KEEP every number the input gives. A translation that drops the figures is useless to \
-somebody deciding whether to fund this.
-3. Translate only. Do not add a fact, a cause, a comparison, or any claim the input does \
-not make, and do not remove one. Do not change how big or small the report says the \
-effect is.
-4. Plain, natural {language} - the way a newspaper would write it, not a literal \
-word-for-word rendering of the English. Technical terms may stay in English where that is \
-what a reader would actually recognise.
-5. Short sentences. No exclamation marks, no salesmanship.
-
-Return JSON only, with exactly these keys:
-{{"headline": str, "points": [str, ...]}}"""
-
-
-def translate(plain: PlainSummary, *, language: str, settings: Any) -> PlainSummary:
-    """Return `plain` in `language`, or raise `LLMUnavailable`.
-
-    **Unlike `narrate`, this fails loudly.** The two look alike and are not: `narrate` is
-    a cosmetic rewrite of prose the reader could already read, so keeping the template
-    costs nothing they asked for. A translation *was* what they asked for, and quietly
-    handing back English is the answer to a different question — the reader has no way to
-    tell "no model configured" from "your language is not supported" from "the model
-    invented a figure and we caught it", and all three used to look identical.
-
-    `caveat` stays in English deliberately. It is the one sentence in the summary whose
-    precise claim has already been damaged once by a model rewriting it (see
-    `_guarded_rewrite`), and a translation is a rewrite with more room to drift, not less.
-    A caveat that has quietly become a hedge is worse than a caveat in the wrong language.
-    """
-    name = _LANGUAGE_NAMES.get(language)
-    if name is None:
-        # "en" is not a translation and never was: the template is already English, so
-        # there is nothing to do and nothing to risk. Any *other* unknown code is a
-        # request this cannot honour, and says so.
-        if language == "en":
-            return plain
-        raise LLMUnavailable(
-            f"no translation available for {language!r}; have "
-            f"{sorted(('en', *_LANGUAGE_NAMES))}"
-        )
-
-    translated = _guarded_rewrite(
-        plain,
-        settings=settings,
-        system=TRANSLATOR_SYSTEM.replace("{language}", name),
-        suffix=f":{language}",
-        # Gemini's Urdu is materially better than the open-weight alternatives, and this is
-        # the one task in the project where that difference is the whole point.
-        task="evidence",
-    )
-    if translated is None:
-        raise LLMUnavailable(
-            f"the brief could not be translated into {name}. Either no model is "
-            "configured, or its translation carried a figure the English did not."
-        )
-    return translated
-
-
-def translate_lines(lines: tuple[str, ...], *, language: str, settings: Any) -> tuple[str, ...]:
-    """Translate a list of short notes, or raise `LLMUnavailable`.
-
-    `/plan`'s notes are the other thing a resident is handed in a language they may not
-    read — *"this plan touches traffic only, so it returns no temperature change"* is the
-    sentence that stops a low-emission zone looking broken, and it is worth as much in Urdu
-    as the brief is.
-
-    **All-or-nothing**, in both directions: a partial translation would leave a list half
-    in each language, and a silent English one would answer a question nobody asked. An
-    empty list is not a failure — there is nothing to translate — so it comes straight back.
-    """
-    name = _LANGUAGE_NAMES.get(language)
-    if language == "en" or not lines:
-        return lines
-    if name is None:
-        raise LLMUnavailable(
-            f"no translation available for {language!r}; have "
-            f"{sorted(('en', *_LANGUAGE_NAMES))}"
-        )
-
-    model = chat_model(settings, task="evidence")
-    if model is None:
-        raise LLMUnavailable(f"no model configured, so the notes cannot be put into {name}")
-
-    source = "\n".join(lines)
-    payload = _invoke_json(
-        system=NOTES_SYSTEM.replace("{language}", name),
-        human="{notes}",
-        model=model,
-        payload={"notes": source},
-    )
-    if payload is None:
-        raise LLMUnavailable(f"the notes could not be translated into {name}")
-
-    try:
-        translated = tuple(str(line) for line in payload["notes"])
-    except (KeyError, TypeError) as exc:
-        raise LLMUnavailable(f"the translator returned the wrong shape for {name}") from exc
-
-    if len(translated) != len(lines) or not all(line.strip() for line in translated):
-        # A dropped note is a caveat that stopped being read, which is the failure mode
-        # `explain.py` spends its whole docstring guarding against.
-        raise LLMUnavailable(
-            f"the translator returned {len(translated)} of {len(lines)} notes; a caveat "
-            "that goes missing is worse than one in the wrong language"
-        )
-
-    if not _numbers_are_faithful(source=source, rewritten="\n".join(translated)):
-        raise LLMUnavailable("the translated notes carried a figure the English did not")
-
-    return translated
-
-
-NOTES_SYSTEM = """You translate short technical notes about an urban climate model into \
-{language}. Each note is one line.
-
-Rules:
-1. NEVER introduce a number, percentage, quantity or unit that is not in that line.
-2. Return EXACTLY as many lines as you were given, in the same order. Never merge, split, \
-drop or add a line.
-3. Translate only. Do not soften a warning, and do not add or remove a claim.
-4. Natural {language}. Technical terms may stay in English where that is what a reader \
-would recognise.
-
-Return JSON only, with exactly this key:
-{{"notes": [str, ...]}}"""
-
-
 # --- Describing where the cooling landed (Phase E) -----------------------------------
 #
 # Templates can state *how much* cooling landed. Nothing deterministic can say *where and
@@ -910,4 +703,90 @@ def describe_pattern(table: str, *, settings: Any) -> tuple[str, tuple[str, ...]
         return None
 
     return summary, points, f"langchain:{_model_name(model)}"
+
+
+# --- Talking about a result (result chat) ---------------------------------------------
+#
+# A follow-up question, not a rewrite: `narrate` and `describe_pattern` are handed a source
+# text and asked to reword or describe it, so `_numbers_are_faithful` compares the whole
+# rewrite against the whole source. Here the "source" is the facts block the caller built
+# from a `Brief` — every number the answer is allowed to cite — and the guard is unchanged:
+# it may explain what a figure means and may not invent a new one to fill a gap the facts
+# leave open.
+
+CHAT_SYSTEM = """You answer one follow-up question about a modelled urban-climate scenario, \
+for a city councillor or resident who has just seen the result.
+
+Rules, in order of importance:
+1. NEVER introduce a number, percentage, quantity or unit that is not in the facts or the \
+earlier conversation below. Copy every number EXACTLY as written - do not round, rescale, \
+convert or combine them.
+2. If the facts do not contain what is needed to answer, say so plainly rather than \
+guessing or estimating.
+3. Answer only the question asked. Do not volunteer a new comparison, a cause, or a claim \
+the facts do not make.
+4. Plain words, short sentences, British English. Say "ground temperature" not "land \
+surface temperature", "fumes" not "particulate matter", "area" not "polygon".
+
+Return JSON only, with exactly this key:
+{{"answer": str}}"""
+
+
+def answer_result_question(
+    *,
+    facts: str,
+    history: tuple[tuple[str, str], ...],
+    question: str,
+    settings: Any,
+) -> tuple[str, str] | None:
+    """Answer a follow-up question about a computed result, or `None`.
+
+    `None` covers every failure — no key, unreachable, malformed JSON, and an answer that
+    cited a figure the facts did not contain — and the caller turns it into a 503, because
+    unlike `narrate` there is no template to fall back to: an unanswered question is not a
+    worse version of an answered one, it is a different response.
+
+    `history` is this session's prior turns, oldest first, replayed as a transcript so a
+    question like "what about the north side" can refer back to an answer already given
+    without the model losing the thread. Passed through `payload` rather than spliced into
+    the template string, so a user's own question can contain `{` or `}` without breaking
+    the prompt.
+    """
+    model = chat_model(settings, task="chat")
+    if model is None:
+        return None
+
+    transcript = "\n".join(
+        f"{'Q' if role == 'user' else 'A'}: {content}" for role, content in history
+    )
+    transcript_block = f"Earlier in this conversation:\n{transcript}\n\n" if transcript else ""
+    payload = _invoke_json(
+        system=CHAT_SYSTEM,
+        human=(
+            "Facts about this result:\n{facts}\n\n{transcript_block}New question: {question}"
+        ),
+        model=model,
+        payload={
+            "facts": facts,
+            "transcript_block": transcript_block,
+            "question": question,
+        },
+    )
+    if payload is None:
+        return None
+
+    try:
+        answer = str(payload["answer"])
+    except (KeyError, TypeError):
+        logger.warning("chat answer returned the wrong shape, refusing it")
+        return None
+    if not answer.strip():
+        return None
+
+    if not _numbers_are_faithful(source=facts, rewritten=answer):
+        invented = sorted(_numbers_in(answer) - _numbers_in(facts))
+        logger.warning("chat answer invented figures %s, refusing it", invented)
+        return None
+
+    return answer, f"langchain:{_model_name(model)}"
 

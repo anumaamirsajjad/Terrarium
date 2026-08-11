@@ -64,7 +64,6 @@ def evaluate(
         expected_cooling_c=max(-mean_inside, 0.0) / HINDCAST_OVERPREDICTION,
         person_degrees=_person_degrees(result.delta, runtime),
         people_reached=_people_inside(mask, runtime),
-        cost_usd=resolved.cost.total_usd,
         tree_count=resolved.tree_count,
         area_km2=resolved.area_km2,
         delta_pm25=_air_delta(window, intervention),
@@ -127,7 +126,6 @@ def summarise(outcome: Outcome, *, score_value: float, units: str) -> str:
         f"{outcome.expected_cooling_c:.2f} degC expected cooling",
         f"{outcome.area_km2:.1f} km2",
         f"{outcome.tree_count:,} trees",
-        f"${outcome.cost_usd:,.0f}",
         f"{outcome.people_reached:,.0f} residents in the region",
         f"score {score_value:,.2f} {units}",
     ]

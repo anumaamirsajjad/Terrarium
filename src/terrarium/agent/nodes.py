@@ -285,7 +285,6 @@ class SearchContext:
                 "maximise": objective.metric,
                 "score_units": units_for(objective),
                 "target_cooling_c": objective.target_cooling_c,
-                "max_cost_usd": objective.max_cost_usd,
                 "window": self.label,
                 "regions": [
                     {
@@ -550,8 +549,6 @@ class SearchContext:
                 f"area: {outcome.area_km2:.1f} km2",
                 f"residents in the region: {outcome.people_reached:,.0f}",
                 f"trees: {outcome.tree_count:,}",
-                f"indicative cost: ${outcome.cost_usd:,.0f}, from literature unit costs "
-                "rather than a quote",
                 (
                     f"agent score: {best.score:,.2f}"
                     if best.score is not None
@@ -600,8 +597,11 @@ class SearchContext:
 
         A model told loudly never to invent a number complies by dropping every number —
         the failure `_headline_figures_survive` exists for. What a reader cannot lose is
-        what the winning plan buys, what it costs, and what the control scored, so those
-        are required to survive; everything else in `_facts` is the writer's to leave out.
+        what the winning plan buys and what the control scored, so those are required to
+        survive; everything else in `_facts` is the writer's to leave out. The PM2.5 figure
+        joins this list rather than staying optional: a plan that touches traffic is
+        answering an air question as much as a thermal one, and a report free to drop it
+        would routinely narrate only the half that plants trees.
         """
         best = state.get("best")
         baseline = state.get("baseline")
@@ -611,8 +611,9 @@ class SearchContext:
         figures = [
             f"{best.outcome.expected_cooling_c:.2f}",
             f"{best.outcome.area_km2:.1f}",
-            f"{best.outcome.cost_usd:,.0f}",
         ]
+        if best.outcome.delta_pm25 is not None:
+            figures.append(f"{best.outcome.delta_pm25:+.2f}")
         if baseline is not None and baseline.score is not None:
             figures.append(f"{baseline.score:,.2f}")
         return " ".join(figures)
@@ -628,18 +629,17 @@ GOAL_SYSTEM = """You convert a city planner's goal into one JSON object. Output 
 
 Schema:
 {
-  "metric": "cooling" | "person_degrees" | "cost_effectiveness",
+  "metric": "cooling" | "person_degrees",
   "target_cooling_c": number > 0, or null,
-  "max_cost_usd": number > 0, or null,
   "window": string like "2024-winter", or null,
   "description": the goal restated in under 200 characters
 }
 
 Rules:
 - "metric" is what to MAXIMISE. "cooling" = coldest result. "person_degrees" = reach the
-  most residents. "cost_effectiveness" = most residents cooled per dollar.
-- "target_cooling_c" and "max_cost_usd" are HARD CONSTRAINTS, not preferences. Set them
-  only when the text states a figure. "$500k" -> 500000. "1 degree" -> 1.0.
+  most residents.
+- "target_cooling_c" is a HARD CONSTRAINT, not a preference. Set it only when the text
+  states a figure. "1 degree" -> 1.0.
 - Never invent a constraint the text does not state. null is the correct answer far more
   often than a number is.
 """
@@ -684,9 +684,14 @@ Rules, in order of importance:
 every number EXACTLY as written - do not round, rescale, convert or combine them.
 2. KEEP the input's numbers, especially the comparison against the greedy control. If the
 search lost to the control, say so as plainly as the input does. That is the finding.
-3. Do not add a fact, a cause or a claim the input does not make.
-4. Plain words. Say "ground temperature" not "land surface temperature".
-5. Short sentences. British English. No exclamation marks, no salesmanship.
+3. If the input carries a PM2.5 figure, give it its own line explaining in everyday words
+what that change in traffic fumes actually means for someone breathing near the road -
+noticeably cleaner, a small easing, or too small to notice - never just the number on its
+own. Do not compare it to a level or a health guideline the input does not state.
+4. Do not add a fact, a cause or a claim the input does not make.
+5. Plain words. Say "ground temperature" not "land surface temperature", "traffic fumes"
+not "particulate matter".
+6. Short sentences. British English. No exclamation marks, no salesmanship.
 
 Return JSON only, with exactly these keys:
 {"lines": [str, ...]}"""

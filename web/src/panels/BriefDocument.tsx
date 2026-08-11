@@ -31,10 +31,6 @@ function signed(value: number, digits = 2): string {
 
 export default function BriefDocument({ result, plan, tile, producedAt }: BriefDocumentProps) {
   const { brief, stats, context, equity, air } = result;
-  // Read off `source`, not off what the UI asked for: a translation that invented a figure
-  // is rejected server-side and the English template comes back, and right-aligning that
-  // would print a working guard as a layout bug.
-  const urdu = brief.plain.source.endsWith(":ur");
 
   return (
     <article className="doc" aria-label="Printable council brief">
@@ -85,32 +81,23 @@ export default function BriefDocument({ result, plan, tile, producedAt }: BriefD
               </tr>
             )}
             {plan && (
-              <>
-                <tr>
-                  <th scope="row">Trees</th>
-                  <td>
-                    {plan.tree_count.toLocaleString()} of {plan.max_trees.toLocaleString()} the
-                    area can hold
-                  </td>
-                </tr>
-                <tr>
-                  <th scope="row">Indicative cost</th>
-                  <td>${plan.cost.total_usd.toLocaleString()} (not calibrated)</td>
-                </tr>
-              </>
+              <tr>
+                <th scope="row">Trees</th>
+                <td>
+                  {plan.tree_count.toLocaleString()} of {plan.max_trees.toLocaleString()} the
+                  area can hold
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
       </section>
 
       {/* The plain-language version, printed alongside the technical one rather than
-          instead of it. It is the half a resident reads, and when the API answered in Urdu
-          it is the only half they can — which is why the Urdu font is imported for print as
-          well as for screen. Without it this section prints as boxes, and a PDF has no
-          system fallback to rescue it. */}
-      <section className={`doc__section${urdu ? " doc__section--urdu" : ""}`}>
+          instead of it. It is the half a resident reads. */}
+      <section className="doc__section">
         <h2>In plain words</h2>
-        <div dir={urdu ? "rtl" : undefined} lang={urdu ? "ur" : undefined}>
+        <div>
           <p>{brief.plain.headline}</p>
           <ul>
             {brief.plain.points.map((point) => (

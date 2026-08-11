@@ -15,10 +15,8 @@ import type { MarginNote } from "./marginNote";
 /**
  * A line of type wiped up from behind its own baseline.
  *
- * Word by word, not letter by letter. Latin text survives either, but the same component
- * gets pointed at Urdu elsewhere on this page, and splitting a cursive script into
- * per-character elements breaks the joins between letters — the sentence renders as a row
- * of disconnected forms. Words are the smallest safe unit.
+ * Word by word, not letter by letter — the smallest unit that stays safe regardless of
+ * which script a caller points this at.
  */
 export function Reveal({
   text,

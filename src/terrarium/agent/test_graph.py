@@ -389,7 +389,7 @@ def test_the_goal_is_taken_from_the_model_and_schema_checked(
     _, _, candidates = tile
     model = ScriptedModel(
         [
-            _goal_reply(target_cooling_c=1.5, max_cost_usd=500_000.0),
+            _goal_reply(target_cooling_c=1.5),
             _propose_reply([candidates[61].region_id], _plant(fraction=0.3)),
         ]
     )
@@ -399,41 +399,17 @@ def test_the_goal_is_taken_from_the_model_and_schema_checked(
 
     assert result is not None
     assert result.objective.target_cooling_c == 1.5
-    assert result.objective.max_cost_usd == 500_000.0
 
 
 def test_a_goal_the_model_mangles_stops_the_search(
     synthetic_runtime: Runtime, tile: Tile, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A negative budget is not an `Objective`. Nothing substitutes a default."""
-    _patch(monkeypatch, ScriptedModel([json.dumps({"metric": "vibes", "max_cost_usd": -5})]))
+    """A negative target is not an `Objective`. Nothing substitutes a default."""
+    _patch(monkeypatch, ScriptedModel([json.dumps({"metric": "vibes", "target_cooling_c": -5})]))
 
     events = _search(synthetic_runtime, tile, ScriptedModel([]))
     assert events[-1].node == "error"
     assert "could not read the goal" in events[-1].message
-
-
-def test_an_over_budget_plan_never_becomes_the_answer(
-    synthetic_runtime: Runtime, tile: Tile, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _, _, candidates = tile
-    model = ScriptedModel(
-        [
-            _goal_reply(max_cost_usd=1.0),
-            _propose_reply([candidates[61].region_id], _plant(fraction=0.3)),
-        ]
-    )
-    _patch(monkeypatch, model)
-
-    result = _result(_search(synthetic_runtime, tile, model))
-
-    assert result is not None
-    assert result.objective.max_cost_usd == 1.0
-    # A $1 budget makes every plan infeasible, so `best` stays the control only if the
-    # control itself is free — which it is not. Either nothing won, or what won was within
-    # budget; there is no third outcome that would be acceptable.
-    if result.best is not None and result.best.outcome is not None:
-        assert result.best.outcome.cost_usd <= 1.0
 
 
 def test_a_refusal_is_a_sentence_a_person_could_act_on(

@@ -260,15 +260,6 @@ class Settings(BaseSettings):
     # the agent still runs, one refusal-loop iteration slower.
     groq_agent_model: str = "openai/gpt-oss-120b"
 
-    # Where policy PDFs land (Phase D). Downloaded once with the same discipline WorldPop
-    # gets - verify Content-Length, write through `.partial` - because the failure mode is
-    # identical: a short read is a valid-looking PDF with pages missing.
-    policy_dir: Path = DATA_DIR / "raw" / "policy"
-    # The evidence corpus (Phase B) is this repository's own markdown. No vector store and
-    # no embeddings: 240 KB of prose is a BM25 problem, and a section heading is a citation
-    # a reader can actually follow.
-    docs_root: Path = PROJECT_ROOT
-
     # Where `scripts/build_tile.py` writes by default.
     zarr_store: Path = DATA_DIR / "processed" / "cube.zarr"
     duckdb_path: Path = DATA_DIR / "processed" / "terrarium.duckdb"

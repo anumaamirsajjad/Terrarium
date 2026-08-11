@@ -43,11 +43,11 @@ def get_runtime(request: Request) -> Runtime:
 def require_model(settings: Annotated[Settings, Depends(get_settings)]) -> None:
     """503 when no language model is configured.
 
-    Three routes genuinely cannot work without one — `/agent/search`, `/evidence/ask`, and
-    any request asking for a translated brief — because each of them *is* a model doing
-    something, not a model decorating something. They used to carry deterministic stand-ins
-    and no longer do: each stand-in was a different procedure wearing the same response
-    shape, which is a worse failure than a status code.
+    These routes genuinely cannot work without one — `/agent/search` and `/simulate/chat` —
+    because each of them *is* a model doing something, not a model decorating something.
+    `/agent/search` used to carry deterministic stand-ins and no longer does: each stand-in
+    was a different procedure wearing the same response shape, which is a worse failure than
+    a status code.
 
     503 rather than 501 or 400, matching `get_runtime` above: the endpoint exists and this
     deployment is not configured to serve it. That is a deployment problem with a fix, and

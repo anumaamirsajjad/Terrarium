@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import pytest
 
-from terrarium.dsl.library import COST_PER_KM2_RESTRICTION_USD, COST_PER_TREE_USD
 from terrarium.dsl.schema import TREE_CANOPY_M2, Plan, PlantTrees, RestrictVehicles
 from terrarium.dsl.validate import PlanError, PolygonMeasurement, resolve
 
@@ -70,11 +69,9 @@ def test_a_canopy_fraction_within_the_headroom_has_no_capping_note() -> None:
     assert not any("more than this polygon can take" in note for note in resolved.notes)
 
 
-def test_a_fraction_is_costed_by_its_equivalent_tree_count() -> None:
+def test_a_fraction_has_its_equivalent_tree_count() -> None:
     resolved = resolve(_canopy(0.10), ROOMY)
     assert resolved.tree_count == 4_000
-    assert resolved.cost.planting_usd == pytest.approx(4_000 * COST_PER_TREE_USD)
-    assert resolved.cost.calibrated is False
 
 
 def test_an_unplantable_polygon_refuses_a_planting() -> None:
@@ -83,14 +80,12 @@ def test_an_unplantable_polygon_refuses_a_planting() -> None:
         resolve(_trees(10), water)
 
 
-def test_a_restriction_is_costed_by_area_and_plants_nothing() -> None:
+def test_a_restriction_plants_nothing() -> None:
     plan = Plan(name="LEZ", actions=(RestrictVehicles(emission_fraction_removed=1.0),))
     resolved = resolve(plan, ROOMY)
 
     assert resolved.canopy_fraction_added == 0.0
     assert resolved.tree_count == 0
-    assert resolved.cost.planting_usd == 0.0
-    assert resolved.cost.restriction_usd == pytest.approx(COST_PER_KM2_RESTRICTION_USD)
     assert any("no temperature change" in note for note in resolved.notes)
 
 
@@ -111,7 +106,6 @@ def test_a_combined_plan_carries_both_levers_and_neither_note() -> None:
 
     assert resolved.canopy_fraction_added == 0.10
     assert resolved.emission_fraction_removed == 0.5
-    assert resolved.cost.total_usd > resolved.cost.planting_usd
     assert resolved.notes == ()
 
 

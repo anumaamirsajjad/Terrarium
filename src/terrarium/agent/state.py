@@ -19,27 +19,26 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from terrarium.dsl.schema import Plan
 
-# What the search maximises. Three metrics rather than one because "best" is genuinely
-# ambiguous here and the ambiguity is the user's to resolve: the coldest plan, the plan
-# that reaches the most people, and the plan that reaches the most people per dollar are
-# routinely three different plans on this tile.
-Metric = Literal["cooling", "person_degrees", "cost_effectiveness"]
+# What the search maximises. Two metrics rather than one because "best" is genuinely
+# ambiguous here and the ambiguity is the user's to resolve: the coldest plan and the plan
+# that reaches the most people are routinely two different plans on this tile.
+Metric = Literal["cooling", "person_degrees"]
 
 
 class Objective(BaseModel):
     """The goal, in numbers. Produced from a sentence by `nodes.parse_goal`.
 
-    The two constraints are separate from the metric on purpose. *"Get 1 degC off
-    somewhere for under $500k, reaching as many people as possible"* is one metric
-    (`person_degrees`) and two constraints, and collapsing them into a single weighted
-    score would let the search buy its way past a budget it was told was hard.
+    The constraint is separate from the metric on purpose. *"Get 1 degC off somewhere,
+    reaching as many people as possible"* is one metric (`person_degrees`) and one
+    constraint, and collapsing them into a single weighted score would let the search
+    trade the constraint away instead of honouring it as hard.
     """
 
     model_config = ConfigDict(frozen=True)
 
     metric: Metric = Field(
         default="person_degrees",
-        description="What to maximise. Constraints below are separate and are not traded off",
+        description="What to maximise. The constraint below is separate and is not traded off",
     )
     target_cooling_c: float | None = Field(
         default=None,
@@ -49,9 +48,6 @@ class Objective(BaseModel):
             "positive. **Compared against the hindcast-corrected figure**, never the raw "
             "model output — a target met only before the 2.5x correction is a target missed"
         ),
-    )
-    max_cost_usd: float | None = Field(
-        default=None, gt=0.0, description="Hard budget. A plan over it never becomes `best`"
     )
     window: str | None = Field(
         default=None, description="Exact window label; null lets the runtime default apply"
@@ -124,7 +120,6 @@ class Outcome(BaseModel):
     )
     person_degrees: float = Field(description="Population x cooling, from cores.equity")
     people_reached: float = Field(ge=0.0)
-    cost_usd: float = Field(ge=0.0)
     tree_count: int = Field(ge=0)
     area_km2: float = Field(gt=0.0)
     delta_pm25: float | None = Field(

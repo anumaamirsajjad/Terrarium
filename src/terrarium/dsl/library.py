@@ -1,15 +1,8 @@
-"""The costed intervention library: presets, and what they cost.
+"""The intervention library: presets a user can offer as a button.
 
-Two things live here because they are the same claim from two directions. A preset is a
-plan somebody could plausibly propose to a council; a cost is what makes it a proposal
-rather than a wish. Both are deliberately shallow — a preset carries no geometry (the user
-draws that) and a cost carries no local procurement data (nobody has any), and both say so.
-
-**The cost figures are order-of-magnitude literature values, not quotes for Lahore.** They
-are the same category of number as the air core's emission factors: useful for comparing
-two plans against each other, not for a budget line. Every estimate carries its `basis`
-string for exactly that reason, and `calibrated` is `False` everywhere until somebody
-prices a real planting contract.
+A preset is a plan somebody could plausibly propose to a council. Deliberately shallow — it
+carries no geometry, since the user draws that — which is what lets one preset apply to
+whatever polygon is on screen.
 """
 
 from __future__ import annotations
@@ -18,54 +11,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from terrarium.config import Season
 from terrarium.dsl.schema import TREE_CANOPY_M2, Plan, PlantTrees, RestrictVehicles
-
-# Supply, plant, stake and water one street tree through establishment (~3 years). Municipal
-# street-tree programmes in South Asia report figures around this once establishment is
-# included; the number is dominated by the watering, not the sapling.
-COST_PER_TREE_USD = 15.0
-
-# First-year cost of a low-emission zone per km2: signage, ANPR cameras at the cordon, and
-# enforcement. Scales with the *perimeter* in reality, not the area, which is why this is
-# an order-of-magnitude figure and labelled as one — a long thin zone costs far more per
-# km2 than a compact one, and the DSL has no perimeter to reason with.
-COST_PER_KM2_RESTRICTION_USD = 250_000.0
-
-CAPITAL_BASIS = (
-    f"{COST_PER_TREE_USD:.0f} USD per tree (supply, planting and ~3 years of "
-    f"establishment watering) and {COST_PER_KM2_RESTRICTION_USD:,.0f} USD per km2 of "
-    "restriction (signage, cameras, first-year enforcement). Literature order-of-"
-    "magnitude figures for comparing plans, not a quote for Lahore."
-)
-
-
-class CostEstimate(BaseModel):
-    """What a plan would cost, and how much that number is worth."""
-
-    model_config = ConfigDict(frozen=True)
-
-    planting_usd: float = Field(ge=0.0)
-    restriction_usd: float = Field(ge=0.0)
-    total_usd: float = Field(ge=0.0)
-    basis: str = Field(description="Where these unit costs come from, in one sentence")
-    calibrated: bool = Field(
-        default=False,
-        description=(
-            "False everywhere today. No Lahore procurement figure has been used, so treat "
-            "the total as a scale, not a budget."
-        ),
-    )
-
-
-def estimate_cost(*, tree_count: int, restricted_area_km2: float) -> CostEstimate:
-    """Price a resolved plan. Pure arithmetic over two literature constants."""
-    planting = tree_count * COST_PER_TREE_USD
-    restriction = restricted_area_km2 * COST_PER_KM2_RESTRICTION_USD
-    return CostEstimate(
-        planting_usd=planting,
-        restriction_usd=restriction,
-        total_usd=planting + restriction,
-        basis=CAPITAL_BASIS,
-    )
 
 
 class Preset(BaseModel):
@@ -177,7 +122,7 @@ def trees_for_canopy(canopy_fraction_added: float, area_m2: float) -> int:
     """Equivalent tree count for a canopy fraction over an area.
 
     The inverse of the conversion in `dsl.validate`, and the reason a preset expressed as
-    a fraction can still be costed: a cost needs a count, and a person needs a count to
-    argue with.
+    a fraction still has a headline number to quote: a person can picture 4,000 trees in a
+    way "15% canopy" does not conjure on its own.
     """
     return round(canopy_fraction_added * area_m2 / TREE_CANOPY_M2)

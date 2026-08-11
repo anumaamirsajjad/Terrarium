@@ -139,67 +139,6 @@ def test_an_absurd_percentage_is_clamped_rather_than_refused() -> None:
     assert planting.canopy_fraction_added == 1.0
 
 
-# ------------------------------------------------------------------------ urdu ---
-#
-# Phase 11 captures voice in `ur-PK`, so an Urdu sentence has to reach a parser that can
-# read it. Without these, "voice in English and Urdu" would mean English plus a microphone
-# that produces a 422 in Urdu — and the LLM path cannot cover the gap, because there is no
-# key and the fallback is exactly this parser.
-
-
-def test_urdu_digits_are_read_as_numbers() -> None:
-    # Eastern Arabic-Indic digits match no `\d`, so without the normalisation pass this
-    # parses as a plan with no quantity in it.
-    planting = parse_rules("۵۰۰۰ درخت لگائیں").plan.planting
-    assert planting is not None
-    assert planting.tree_count == 5_000
-
-
-def test_urdu_reads_a_count_written_after_the_noun() -> None:
-    planting = parse_rules("درخت ۲۰۰۰ لگائیں").plan.planting
-    assert planting is not None
-    assert planting.tree_count == 2_000
-
-
-def test_urdu_ascii_digits_work_too() -> None:
-    # A phone keyboard often produces ASCII digits inside Urdu text.
-    planting = parse_rules("یہاں 5000 درخت لگائیں").plan.planting
-    assert planting is not None
-    assert planting.tree_count == 5_000
-
-
-def test_urdu_percentage_of_canopy() -> None:
-    planting = parse_rules("۳۰ فیصد سایہ").plan.planting
-    assert planting is not None
-    assert planting.canopy_fraction_added == pytest.approx(0.30)
-
-
-def test_urdu_vehicle_restriction() -> None:
-    restriction = parse_rules("گاڑیوں پر پابندی لگائیں").plan.restriction
-    assert restriction is not None
-    assert restriction.emission_fraction_removed == 1.0
-
-
-def test_urdu_season_is_read() -> None:
-    # The one that matters most: the same restriction buys several times more under the
-    # winter inversion.
-    plan = parse_rules("سردیوں میں گاڑیوں پر پابندی").plan
-    assert str(plan.season) == "winter"
-
-
-def test_urdu_with_nothing_actionable_still_refuses() -> None:
-    with pytest.raises(PlanParseError):
-        parse_rules("لاہور کا موسم کیسا ہے")
-
-
-def test_the_refusal_names_the_urdu_vocabulary_too() -> None:
-    # Someone who just spoke Urdu into a microphone needs to be told what Urdu it
-    # understands, not what English it understands.
-    with pytest.raises(PlanParseError) as exc:
-        parse_rules("hello")
-    assert "درخت" in str(exc.value)
-
-
 # --------------------------------------------------------------------- llm path ---
 
 

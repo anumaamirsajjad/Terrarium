@@ -37,17 +37,10 @@ export interface AgentPanelProps {
   onApply: (attempt: Attempt) => void;
 }
 
-const EXAMPLE = "get 1 degC off somewhere for under $500k, reaching as many people as possible";
-
-function usd(value: number): string {
-  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `$${(value / 1_000).toFixed(0)}k`;
-  return `$${value.toFixed(0)}`;
-}
+const EXAMPLE = "get 1 degC off somewhere, reaching as many people as possible";
 
 function scoreLabel(metric: string): string {
   if (metric === "cooling") return "°C expected cooling";
-  if (metric === "cost_effectiveness") return "person-degrees per $";
   return "person-degrees";
 }
 
@@ -81,6 +74,15 @@ export default function AgentPanel({
   onApply,
 }: AgentPanelProps) {
   const [goal, setGoal] = useState("");
+  const [appliedPartial, setAppliedPartial] = useState<Attempt | null>(null);
+
+  const handleApply = (attempt: Attempt) => {
+    onApply(attempt);
+    // The drawn-polygon state this feeds is a single ring: a merged, multi-region
+    // winner only carries its first region across. Say so, rather than let the
+    // applied area silently read smaller than the one that was scored.
+    setAppliedPartial(attempt.region_ids.length > 1 ? attempt : null);
+  };
 
   const best = result?.best ?? null;
   const baseline = result?.baseline ?? null;
@@ -128,6 +130,10 @@ export default function AgentPanel({
           search behind this, because a lattice sweep would be a different, worse procedure
           returning the same shape.
         </p>
+        <p className="hint">
+          Already know where? Draw a zone and press <code>/</code> to describe a plan for it
+          instead — this panel finds a place, that one checks a place you picked.
+        </p>
       </form>
 
       {error && <p className="error-text">{error}</p>}
@@ -162,13 +168,6 @@ export default function AgentPanel({
                   <dd>{best.outcome.tree_count.toLocaleString()}</dd>
                 </div>
                 <div>
-                  <dt>Indicative cost</dt>
-                  <dd>
-                    {usd(best.outcome.cost_usd)}
-                    <span className="muted"> · not calibrated</span>
-                  </dd>
-                </div>
-                <div>
                   <dt>Score</dt>
                   <dd>
                     {(best.score ?? 0).toLocaleString(undefined, {
@@ -197,9 +196,18 @@ export default function AgentPanel({
                   : "The greedy control produced no runnable plan, so there is nothing to compare this against."}
               </p>
 
-              <button type="button" className="agent__apply" onClick={() => onApply(best)}>
+              <button type="button" className="agent__apply" onClick={() => handleApply(best)}>
                 Apply this plan
               </button>
+
+              {appliedPartial && (
+                <p className="result__note">
+                  Applied region {appliedPartial.region_ids[0]} only — the winning plan merged{" "}
+                  {appliedPartial.region_ids.length} regions ({appliedPartial.region_ids.join(", ")}
+                  ), but the drawn area can hold one shape at a time. Redraw around the others to
+                  include them.
+                </p>
+              )}
             </>
           ) : (
             <p className="agent__headline">

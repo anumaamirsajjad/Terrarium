@@ -10,7 +10,6 @@ from __future__ import annotations
 import xarray as xr
 
 from terrarium.agent.baseline import BASELINE_SIMULATIONS, greedy_best, rank
-from terrarium.agent.objective import INFEASIBLE
 from terrarium.agent.state import Candidate, Objective
 from terrarium.api.candidates import build_lattice
 from terrarium.api.runtime import Runtime
@@ -52,21 +51,6 @@ def test_the_control_produces_a_runnable_plan(synthetic_runtime: Runtime) -> Non
     assert best.outcome.expected_cooling_c > 0
 
 
-def test_the_control_respects_a_budget(synthetic_runtime: Runtime) -> None:
-    """A control that ignored the objective's constraints would be scored differently
-    from the agent, and 'the agent beat greedy' would stop meaning anything."""
-    window, candidates = _setup(synthetic_runtime)
-
-    best, _ = greedy_best(
-        runtime=synthetic_runtime,
-        window=window,
-        candidates=candidates,
-        objective=Objective(metric="cooling", max_cost_usd=1.0),
-    )
-
-    assert best is None or best.score == INFEASIBLE or best.score is None
-
-
 def test_the_metric_changes_which_plan_wins(synthetic_runtime: Runtime) -> None:
     """Not a tautology worth skipping: it is the reason `Objective.metric` exists at all.
 
@@ -85,7 +69,7 @@ def test_the_metric_changes_which_plan_wins(synthetic_runtime: Runtime) -> None:
         runtime=synthetic_runtime,
         window=window,
         candidates=candidates,
-        objective=Objective(metric="cost_effectiveness"),
+        objective=Objective(metric="person_degrees"),
     )
 
     assert cooling is not None and value is not None

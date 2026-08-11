@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from terrarium.dsl.library import CostEstimate, estimate_cost
 from terrarium.dsl.schema import TREE_CANOPY_M2, Plan
 
 M2_PER_KM2 = 1_000_000.0
@@ -69,9 +68,8 @@ class ResolvedPlan(BaseModel):
     """A plan, checked against a polygon, in the units `/simulate` speaks.
 
     Carries both unit systems on purpose. `canopy_fraction_added` is what the core acts on;
-    `tree_count` is what a person argues about and what the cost is built from. Publishing
-    only one of them would leave every reader converting by hand with a crown area they
-    would have to guess.
+    `tree_count` is what a person can actually picture. Publishing only one of them would
+    leave every reader converting by hand with a crown area they would have to guess.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -95,7 +93,6 @@ class ResolvedPlan(BaseModel):
             "documented as a ceiling, and refused for a tree count, which is not."
         ),
     )
-    cost: CostEstimate
     notes: tuple[str, ...] = Field(
         default=(),
         description="Non-fatal warnings. A plan with notes still runs; read them anyway.",
@@ -189,10 +186,6 @@ def resolve(plan: Plan, measurement: PolygonMeasurement) -> ResolvedPlan:
             requested_canopy_m2 / measurement.plantable_canopy_m2
             if measurement.plantable_canopy_m2 > 0
             else 0.0
-        ),
-        cost=estimate_cost(
-            tree_count=tree_count,
-            restricted_area_km2=measurement.area_km2 if restriction else 0.0,
         ),
         notes=tuple(notes),
         basis=CONVERSION_BASIS,

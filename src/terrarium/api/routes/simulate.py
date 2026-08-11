@@ -12,7 +12,7 @@ from typing import Annotated
 
 import numpy as np
 import xarray as xr
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 
 from terrarium.api.deps import get_runtime
 from terrarium.api.geometry import GeometryError, mask_from_geojson
@@ -40,8 +40,8 @@ from terrarium.cores.thermal.simulate import (
     tree_built_contrast,
 )
 from terrarium.dsl.explain import AirInputs, Brief, BriefInputs, EquityInputs, brief_for
-from terrarium.dsl.library import estimate_cost, trees_for_canopy
-from terrarium.dsl.llm import Language, LLMUnavailable, narrate, translate
+from terrarium.dsl.library import trees_for_canopy
+from terrarium.dsl.llm import narrate
 from terrarium.state.cube import select_window
 
 logger = logging.getLogger(__name__)
@@ -180,32 +180,19 @@ def _brief(
     equity: EquityResponse | None,
     air: AirResponse | None,
     settings: Settings,
-    language: str,
 ) -> Brief:
     """Write the narrative block from the numbers already computed. No new physics.
 
-    Costed from the canopy that was *actually* added rather than what was asked for: the
-    core caps each cell at its own headroom, so the requested fraction is a ceiling and
-    billing for it would price trees the plan cannot plant.
+    Tree count is from the canopy that was *actually* added rather than what was asked for:
+    the core caps each cell at its own headroom, so the requested fraction is a ceiling.
 
     The plain-language block is then offered to the narrator (D24), which either rewords
     it or hands it straight back. `narrate` cannot raise, so there is nothing to catch and
     no branch here for the keyless case - which is the point: a deployment with no key
     produces the template prose and the same response shape.
-
-    **English first, then translated** (Phase C). The English `plain_summary` stays the
-    source of truth and `translate` is a rewrite of it under the same two guards, which is
-    what makes a translated brief as checkable as an English one. Narration is skipped for
-    a non-English request: rewording and then translating is two chances to drift where
-    one will do, and the template's prose is already the version the guards were written
-    against.
     """
     area_km2 = area_m2 / 1_000_000.0
     tree_count = trees_for_canopy(context.mean_canopy_added, area_m2)
-    cost = estimate_cost(
-        tree_count=tree_count,
-        restricted_area_km2=area_km2 if request.emission_fraction_removed > 0 else 0.0,
-    )
 
     brief = brief_for(
         BriefInputs(
@@ -214,7 +201,6 @@ def _brief(
             season=season,
             area_km2=area_km2,
             tree_count=tree_count,
-            cost_total_usd=cost.total_usd,
             mean_delta_inside=stats.mean_delta_inside,
             mean_delta_spillover=stats.mean_delta_spillover,
             spillover_cells=stats.spillover_cells,
@@ -251,14 +237,7 @@ def _brief(
             ),
         )
     )
-    # `translate` raises when it cannot honour the language; `narrate` never does, because
-    # it is a rewrite of prose the reader could already read. The route turns the first
-    # into a 503 rather than quietly answering in English — see `dsl.llm.translate`.
-    plain = (
-        translate(brief.plain, language=language, settings=settings)
-        if language != "en"
-        else narrate(brief.plain, settings=settings)
-    )
+    plain = narrate(brief.plain, settings=settings)
     return brief.model_copy(update={"plain": plain})
 
 
@@ -271,17 +250,6 @@ async def run_simulation(
     request: SimulateRequest,
     runtime: Annotated[Runtime, Depends(get_runtime)],
     settings: Annotated[Settings, Depends(get_settings)],
-    lang: Annotated[
-        Language,
-        Query(
-            description=(
-                "Language for the plain-language block. 'ur' translates it through a "
-                "model under the same faithfulness guards the English narrator carries; "
-                "with no key configured, or if the translation invents a figure, the "
-                "English template comes back and `brief.plain.source` says so."
-            )
-        ),
-    ] = "en",
 ) -> SimulateResponse:
     try:
         label = runtime.resolve_window(request.window)
@@ -348,27 +316,19 @@ async def run_simulation(
     equity = _equity(result.delta, runtime)
     air = _air(window, intervention, runtime, label)
 
-    try:
-        brief = _brief(
-            request=request,
-            label=label,
-            season=season,
-            # The drawn polygon, not the planted cells: an intervention that only
-            # restricts traffic plants nothing, and `n_cells_changed` is zero for it.
-            area_m2=float(mask.sum()) * float(runtime.grid.resolution_m) ** 2,
-            stats=stats_response,
-            context=context,
-            equity=equity,
-            air=air,
-            settings=settings,
-            language=lang,
-        )
-    except LLMUnavailable as exc:
-        # Only reachable for `lang != "en"`. The physics all ran and the English brief is
-        # sitting right there, but the caller asked for a language and answering in
-        # another one is a different answer — so this says so instead of quietly
-        # substituting. 503, matching `require_model`: the fix is configuration.
-        raise HTTPException(status_code=503, detail=str(exc)) from None
+    brief = _brief(
+        request=request,
+        label=label,
+        season=season,
+        # The drawn polygon, not the planted cells: an intervention that only
+        # restricts traffic plants nothing, and `n_cells_changed` is zero for it.
+        area_m2=float(mask.sum()) * float(runtime.grid.resolution_m) ** 2,
+        stats=stats_response,
+        context=context,
+        equity=equity,
+        air=air,
+        settings=settings,
+    )
 
     return SimulateResponse(
         equity=equity,

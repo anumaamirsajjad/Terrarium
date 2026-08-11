@@ -282,32 +282,13 @@ def _narrate_with(monkeypatch: pytest.MonkeyPatch, text: str) -> PlainSummary:
     return llm.narrate(_plain(), settings=object())
 
 
-def _translate_with(monkeypatch: pytest.MonkeyPatch, text: str) -> PlainSummary:
-    """Run `translate` into Urdu against a chain whose model answers with `text`."""
-    model = FakeListChatModel(responses=[text])
-    monkeypatch.setattr(llm, "chat_model", lambda _settings, **_kw: model)
-    return llm.translate(_plain(), language="ur", settings=object())
-
-
 def test_no_key_keeps_the_narrator_s_template() -> None:
-    """`narrate` still degrades silently, and correctly so: it is a cosmetic rewrite of
-    prose the reader could already read, so the template costs them nothing they asked
-    for. `translate` is the opposite case and is tested below."""
+    """`narrate` degrades silently, and correctly so: it is a cosmetic rewrite of prose
+    the reader could already read, so the template costs them nothing they asked for."""
     plain = _plain()
 
     # `chat_model` returns None for a settings object with no keys on it at all.
     assert llm.narrate(plain, settings=object()) is plain
-
-
-def test_no_key_makes_a_translation_fail_rather_than_answer_in_english() -> None:
-    """The asymmetry with `narrate` above is the whole point.
-
-    A caller that asked for Urdu and silently got English cannot tell that from a
-    working translation, from an unsupported language, or from a translation that
-    invented a figure and was correctly thrown away. All four used to look identical.
-    """
-    with pytest.raises(llm.LLMUnavailable):
-        llm.translate(_plain(), language="ur", settings=object())
 
 
 def test_a_faithful_rewrite_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -481,154 +462,65 @@ def test_a_provider_that_raises_keeps_the_template(monkeypatch: pytest.MonkeyPat
     assert llm.narrate(_plain(), settings=object()).source == "template"
 
 
-# --- Urdu (Phase C) ------------------------------------------------------------------
-#
-# The guard has to survive a change of script, and the reason it does is one shared digit
-# fold. Without it ۵۰۰۰ matches no `\d`, an Urdu rewrite reads as containing no numbers at
-# all, every translation passes vacuously, and `_numbers_are_faithful` is a decoration.
+# --- answer_result_question -----------------------------------------------------------
 
 
-def test_urdu_digits_fold_to_ascii_for_the_guard() -> None:
-    """۵۰۰۰ and 5000 are the same figure to the check. One table, in one module."""
-    assert llm.fold_digits("۵۰۰۰ درخت") == "5000 درخت"
-    assert llm._numbers_in("۱۶.۷ مربع کلومیٹر") == {"16.7"}
-    # And the planner's parser reads the same table, rather than carrying a second one.
-    from terrarium.dsl.planner import parse_rules
-
-    parsed = parse_rules("۵۰۰۰ درخت لگائیں")
-    assert parsed.plan.actions[0].tree_count == 5000  # type: ignore[union-attr]
-
-
-def test_a_faithful_urdu_translation_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
-    result = _translate_with(
-        monkeypatch,
-        json.dumps(
-            {
-                "headline": "16.7 مربع کلومیٹر پر شجرکاری زمین کو تقریباً 0.16 degC ٹھنڈا کرے گی۔",
-                "points": ["یہاں تقریباً 6.2 ملین لوگ رہتے ہیں۔"],
-            }
-        ),
+def _ask(monkeypatch: pytest.MonkeyPatch, text: str) -> tuple[str, str] | None:
+    model = FakeListChatModel(responses=[text])
+    monkeypatch.setattr(llm, "chat_model", lambda _settings, **_kw: model)
+    return llm.answer_result_question(
+        facts="expected cooling: 0.41 degC\narea: 4.0 km2",
+        history=(),
+        question="why did it cool that much?",
+        settings=object(),
     )
 
-    assert result.source.endswith(":ur")
-    assert "16.7" in result.headline
 
-
-def test_an_urdu_translation_written_in_urdu_digits_still_passes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The fold works in the accepting direction too, not only the rejecting one.
-
-    A translator that renders 16.7 as ۱۶.۷ has copied the figure faithfully, and refusing
-    it would push every Urdu brief back to English for doing its job properly.
-    """
-    result = _translate_with(
-        monkeypatch,
-        json.dumps(
-            {
-                "headline": "۱۶.۷ مربع کلومیٹر پر شجرکاری زمین کو تقریباً ۰.۱۶ degC ٹھنڈا کرے گی۔",
-                "points": ["یہاں تقریباً ۶.۲ ملین لوگ رہتے ہیں۔"],
-            }
-        ),
-    )
-
-    assert result.source.endswith(":ur")
-
-
-def test_an_invented_figure_rejects_an_urdu_translation_too(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The whole point of folding the digits. Written in Eastern Arabic-Indic numerals,
-    ۱.۶ is a tenfold overstatement of 0.16 — and before the fold it was invisible.
-
-    The guard is unchanged; what changed is that it now raises instead of quietly
-    handing back English, so a caught fabrication is visible to the caller.
-    """
-    with pytest.raises(llm.LLMUnavailable):
-        _translate_with(
-            monkeypatch,
-            json.dumps(
-                {
-                    "headline": "۱۶.۷ مربع کلومیٹر پر شجرکاری زمین کو پورے ۱.۶ degC ٹھنڈا کرے گی۔",
-                    "points": ["یہاں تقریباً ۶.۲ ملین لوگ رہتے ہیں۔"],
-                }
-            ),
+def test_no_key_refuses_rather_than_answering() -> None:
+    """Unlike `narrate`, there is no template to fall back to: a question either gets a
+    grounded answer or nothing, never a silent substitute."""
+    assert (
+        llm.answer_result_question(
+            facts="expected cooling: 0.41 degC", history=(), question="why?", settings=object()
         )
-
-
-def test_an_urdu_translation_that_drops_the_headline_figures_is_rejected(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A model told loudly never to invent a number complies by dropping every number.
-    That failure crosses languages unchanged, so the second guard does too."""
-    with pytest.raises(llm.LLMUnavailable):
-        _translate_with(
-            monkeypatch,
-            json.dumps(
-                {
-                    "headline": "شجرکاری سے زمین کچھ ٹھنڈی ہو گی۔",
-                    "points": ["یہاں بہت سے لوگ رہتے ہیں۔"],
-                }
-            ),
-        )
-
-
-def test_the_caveat_stays_english_and_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The one sentence a model has already damaged once by rewriting it.
-
-    A translation is a rewrite with more room to drift, not less, and a caveat that has
-    quietly become a hedge is worse than a caveat in the wrong language.
-    """
-    result = _translate_with(
-        monkeypatch,
-        json.dumps(
-            {
-                "headline": "16.7 مربع کلومیٹر پر شجرکاری زمین کو تقریباً 0.16 degC ٹھنڈا کرے گی۔",
-                "points": ["یہاں تقریباً 6.2 ملین لوگ رہتے ہیں۔"],
-                "caveat": "نتیجہ توقع سے کم ہو سکتا ہے۔",
-            }
-        ),
+        is None
     )
 
-    assert result.caveat == _plain().caveat
-    assert result.verdict == _plain().verdict
+
+def test_a_faithful_answer_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    answer_text = "It cooled by 0.41 degC because of the added canopy."
+    result = _ask(monkeypatch, json.dumps({"answer": answer_text}))
+    assert result is not None
+    answer, source = result
+    assert "0.41" in answer
+    assert source.startswith("langchain:")
 
 
-def test_english_costs_nothing_and_an_unsupported_language_is_refused(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """'en' is not a translation and never was, so it never reaches a model. Anything
-    else this cannot do is a request that cannot be honoured, and says which."""
-    plain = _plain()
-    monkeypatch.setattr(
-        llm, "chat_model", lambda _settings, **_kw: pytest.fail("should not be reached")
+def test_an_invented_figure_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The whole guard: a number not in the facts must not reach the reader."""
+    result = _ask(monkeypatch, json.dumps({"answer": "It cooled by 1.9 degC."}))
+    assert result is None
+
+
+def test_history_reaches_the_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A follow-up question is answered with the earlier turn visible to the model."""
+
+    class _Capturing(FakeListChatModel):
+        seen: str = ""
+
+        def invoke(self, input: Any, *args: Any, **kwargs: Any) -> Any:
+            type(self).seen = str(input)
+            return super().invoke(input, *args, **kwargs)
+
+    scripted = _Capturing(responses=[json.dumps({"answer": "Yes, still 4.0 km2."})])
+    monkeypatch.setattr(llm, "chat_model", lambda _settings, **_kw: scripted)
+
+    result = llm.answer_result_question(
+        facts="area: 4.0 km2",
+        history=(("user", "how big is the area?"), ("assistant", "4.0 km2.")),
+        question="is that the same as before?",
+        settings=object(),
     )
-
-    assert llm.translate(plain, language="en", settings=object()) is plain
-
-    with pytest.raises(llm.LLMUnavailable, match="no translation available"):
-        llm.translate(plain, language="fr", settings=object())
-
-
-def test_notes_translate_all_or_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A list half in each language reads as a bug; a silent English one answers a
-    different question. So a short reply raises rather than doing either."""
-    notes = ("This plan touches traffic only.", "Planting moves air quality by ~0.0003 ug/m3.")
-
-    short = FakeListChatModel(responses=[json.dumps({"notes": ["صرف ٹریفک۔"]})])
-    monkeypatch.setattr(llm, "chat_model", lambda _settings, **_kw: short)
-    with pytest.raises(llm.LLMUnavailable, match="1 of 2 notes"):
-        llm.translate_lines(notes, language="ur", settings=object())
-
-    good = FakeListChatModel(
-        responses=[json.dumps({"notes": ["صرف ٹریفک۔", "شجرکاری ~0.0003 ug/m3 بدلتی ہے۔"]})]
-    )
-    monkeypatch.setattr(llm, "chat_model", lambda _settings, **_kw: good)
-    translated = llm.translate_lines(notes, language="ur", settings=object())
-    assert translated != notes and len(translated) == 2
-
-
-def test_empty_notes_need_no_model() -> None:
-    """Nothing to translate is not a failure. `/plan` routinely returns no notes."""
-    assert llm.translate_lines((), language="ur", settings=object()) == ()
+    assert result is not None
+    assert "how big is the area" in _Capturing.seen
 

@@ -232,15 +232,6 @@ export interface Plan {
   season?: "summer" | "winter" | null;
 }
 
-export interface CostEstimate {
-  planting_usd: number;
-  restriction_usd: number;
-  total_usd: number;
-  basis: string;
-  /** False everywhere. Literature unit costs, good for ranking plans, not a budget. */
-  calibrated: boolean;
-}
-
 export interface Preset {
   slug: string;
   label: string;
@@ -270,7 +261,6 @@ export interface PlanResponse {
   max_trees: number;
   /** Requested canopy over available canopy. Above 1.0 the core caps and delivers less. */
   canopy_utilisation: number;
-  cost: CostEstimate;
   notes: string[];
   warnings: string[];
   basis: string;
@@ -285,51 +275,6 @@ export interface PlanRequest {
   preset?: string;
   plan?: Plan;
   window?: string | null;
-}
-
-// ------------------------------------------------------- policy documents (Phase D) ---
-
-/** The sectors Phase D's extraction sorts a measure into. `other` is most of a document. */
-export type PolicySector =
-  | "transport"
-  | "urban_greening"
-  | "industry"
-  | "waste"
-  | "agriculture"
-  | "other";
-
-/** One quantified commitment out of a published policy document, verbatim quote included. */
-export interface PolicyMeasure {
-  title: string;
-  sector: PolicySector;
-  /** The quantified target as stated, e.g. "35% reduction in PM2.5". Empty for most measures. */
-  target: string;
-  target_year: number | null;
-  source_page: number | null;
-  /** Verbatim from the document — checked against it server-side before this ever exists. */
-  quote: string;
-  document: string;
-  document_sha256: string;
-}
-
-/** A measure turned into a runnable `Plan`, and the sentence tracing the number back. */
-export interface MappedPlan {
-  measure: PolicyMeasure;
-  plan: Plan;
-  basis: string;
-  /** True when the document named no figure and this project's own default stands in. */
-  assumed: boolean;
-}
-
-export interface PolicyMeasureItem {
-  measure: PolicyMeasure;
-  /** Null when neither lever — a canopy fraction, an emission fraction — can say this. */
-  mapped: MappedPlan | null;
-}
-
-export interface PolicyMeasuresResponse {
-  measures: PolicyMeasureItem[];
-  expressible: number;
 }
 
 export interface GeoJsonPolygon {
@@ -380,10 +325,9 @@ export interface CandidatesResponse {
 }
 
 export interface Objective {
-  metric: "cooling" | "person_degrees" | "cost_effectiveness";
+  metric: "cooling" | "person_degrees";
   /** Compared against the hindcast-**corrected** figure, never the raw model output. */
   target_cooling_c: number | null;
-  max_cost_usd: number | null;
   window: string | null;
   description: string;
 }
@@ -395,7 +339,6 @@ export interface Outcome {
   expected_cooling_c: number;
   person_degrees: number;
   people_reached: number;
-  cost_usd: number;
   tree_count: number;
   area_km2: number;
   delta_pm25: number | null;
@@ -507,53 +450,19 @@ export interface SpatialExplanation {
   source: string;
 }
 
-// -------------------------------------------------- ask the evidence (Phase B) ---
+// ------------------------------------------------------------- ask about a result ---
 
-/** One section of the project's own documentation. `anchor` is `file.md#heading-slug`. */
-export interface Section {
-  file: string;
-  heading: string;
-  anchor: string;
-  body: string;
-  level: number;
+/** One turn of a conversation about a result — sent back with the next question. */
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
 }
 
-export interface Citation {
-  anchor: string;
-  file: string;
-  heading: string;
-}
-
-/**
- * An answer from the repository's own record.
- *
- * Returned **only when the citation guard passed**. There is no half-answer: a model that
- * cited something it was not shown has its whole answer discarded, and that arrives as a
- * 502 whose `detail` carries `rejected_citations` and the passages — see `EvidenceFailure`.
- */
-export interface Answer {
-  question: string;
+/** An answer grounded in the brief's own figures, or a refusal to invent one. */
+export interface ResultChatResponse {
   answer: string;
-  /** Every one of these resolves to a passage below. Checked server-side. */
-  citations: Citation[];
-  /** What was retrieved. Always present, so the answer can be checked against it. */
-  passages: Section[];
-  /** The provider chain that wrote it. */
+  /** The provider chain that wrote it, e.g. "langchain:<model>". */
   source: string;
-}
-
-/**
- * The `detail` of a failed `/evidence/ask`.
- *
- * 422 when the corpus has nothing for the question; 502 when a model answered and the
- * answer was thrown away; 503 when none is configured. The passages ride along either
- * way, so a client can still show the evidence rather than only an apology.
- */
-export interface EvidenceFailure {
-  message: string;
-  /** Non-empty when the answer was discarded for citing something it was not shown. */
-  rejected_citations: string[];
-  passages: Section[];
 }
 
 /** An API error that carries the server's own explanation. */
@@ -576,18 +485,6 @@ async function parseError(response: Response, path: string): Promise<ApiError> {
     if (Array.isArray(detail) && detail.length > 0) {
       const first = detail[0] as { msg?: unknown };
       if (typeof first.msg === "string") return new ApiError(response.status, first.msg);
-    }
-    // `/evidence/ask` sends a structured detail so a rejected answer can name the anchors
-    // it invented. Flattened into the message rather than dropped: "the model cited
-    // docs/INVENTED.md#x" is the whole reason the caller is seeing an error at all.
-    if (detail && typeof detail === "object") {
-      const failure = detail as Partial<EvidenceFailure>;
-      if (typeof failure.message === "string") {
-        const fabricated = failure.rejected_citations?.length
-          ? ` (${failure.rejected_citations.join(", ")})`
-          : "";
-        return new ApiError(response.status, `${failure.message}${fabricated}`);
-      }
     }
   } catch {
     // Fall through to the status line — the body was not JSON.
@@ -620,35 +517,23 @@ export const api = {
   layer: (name: string, window?: string) =>
     request<LayerResponse>(`/cube/layer/${name}${query({ window })}`),
 
-  /**
-   * `lang` is a *request*, not a guarantee. The server answers in English whenever no key
-   * is configured or the translation would have invented a figure, and says which it did
-   * through `brief.plain.source` — so read that, never this, to decide on `dir="rtl"`.
-   */
-  simulate: (body: SimulateRequest, lang?: "en" | "ur") =>
-    request<SimulateResponse>(`/simulate${query({ lang })}`, {
+  simulate: (body: SimulateRequest) =>
+    request<SimulateResponse>("/simulate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
 
-  /** The costed intervention library. Answers even when the cube failed to load. */
+  /** The intervention library. Answers even when the cube failed to load. */
   presets: () => request<PresetsResponse>("/plan/presets"),
 
   /**
-   * What `scripts/extract_policy.py` has extracted so far (Phase D). `measures: []` before
-   * it has ever run — that is the honest answer, not an error. Answers even when the cube
-   * failed to load, and needs no key: the extraction spent it once, offline.
+   * Validate a plan *before* running it. A refusal here — 422 with the arithmetic — is
+   * the point: a plan that cannot fit must not come back as a small delta that reads like
+   * a plan which merely worked badly.
    */
-  policyMeasures: () => request<PolicyMeasuresResponse>("/policy/measures"),
-
-  /**
-   * Validate and cost a plan *before* running it. A refusal here — 422 with the
-   * arithmetic — is the point: a plan that cannot fit must not come back as a small
-   * delta that reads like a plan which merely worked badly.
-   */
-  plan: (body: PlanRequest, lang?: "en" | "ur") =>
-    request<PlanResponse>(`/plan${query({ lang })}`, {
+  plan: (body: PlanRequest) =>
+    request<PlanResponse>("/plan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -666,14 +551,22 @@ export const api = {
     }),
 
   /**
-   * Ask the project's own documentation. Needs no cube, so it answers on a deployment
-   * whose Zarr store failed to load.
+   * A follow-up question about a result already in hand. Needs no cube: the brief the
+   * client already has is what gets reasoned over, and `history` carries the conversation
+   * held about it so far.
    */
-  ask: (question: string) =>
-    request<Answer>("/evidence/ask", {
+  chat: (body: {
+    brief: Brief;
+    window: string;
+    season: string;
+    plan_name?: string;
+    history: ChatTurn[];
+    question: string;
+  }) =>
+    request<ResultChatResponse>("/simulate/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify(body),
     }),
 
   /** The lattice the agent searches over, for the map overlay. */

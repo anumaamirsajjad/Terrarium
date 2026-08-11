@@ -44,18 +44,6 @@ const VERDICT: Record<PlainSummary["verdict"], { label: string; className: strin
   none: null,
 };
 
-/**
- * Did the server actually answer in Urdu?
- *
- * Read off `source` rather than off the language the UI *asked* for, because those come
- * apart on purpose: a translation that invented a figure is rejected server-side and the
- * English template comes back with `source: "template"`. Setting `dir="rtl"` on English
- * prose would right-align the fallback and make a working guard look like a rendering bug.
- */
-function isUrdu(plain: PlainSummary): boolean {
-  return plain.source.endsWith(":ur");
-}
-
 export default function PlainPanel({ brief }: PlainPanelProps) {
   const { plain } = brief;
   const cooling = Math.abs(brief.expected_cooling_c);
@@ -63,7 +51,6 @@ export default function PlainPanel({ brief }: PlainPanelProps) {
   // rather than a small result. The headline sentence already says what happened.
   const measurable = cooling >= 0.005;
   const verdict = VERDICT[plain.verdict];
-  const urdu = isUrdu(plain);
 
   return (
     <section aria-labelledby="plain-heading">
@@ -88,9 +75,7 @@ export default function PlainPanel({ brief }: PlainPanelProps) {
         </span>
       )}
 
-      {/* The translated block, and only it. The caveat below stays English because the
-          server never sends it to a model — see `_guarded_rewrite`. */}
-      <div dir={urdu ? "rtl" : undefined} lang={urdu ? "ur" : undefined}>
+      <div>
         <p className="mt-3 text-sm leading-relaxed text-white/85">{plain.headline}</p>
 
         <ul className="mt-4 space-y-2">
