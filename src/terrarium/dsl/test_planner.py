@@ -72,6 +72,7 @@ def test_a_very_long_digit_run_does_not_crash_the_parser() -> None:
     text = "plant " + "9" * 309 + " trees"
     planting = parse_rules(text).plan.planting
     assert planting is not None
+    assert planting.tree_count is not None
     assert planting.tree_count < 10**16
 
 

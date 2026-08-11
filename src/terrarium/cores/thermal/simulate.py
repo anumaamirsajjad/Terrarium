@@ -22,8 +22,10 @@ import xarray as xr
 from terrarium.cores.base import CoreResult, Intervention, summarise_delta
 from terrarium.cores.thermal.features import (
     BASE_VARIABLES,
-    features_from_arrays,
     meteorology_from_cube,
+)
+from terrarium.cores.thermal.features import (
+    features_from_arrays as features_from_arrays,
 )
 from terrarium.cores.thermal.model import predict
 

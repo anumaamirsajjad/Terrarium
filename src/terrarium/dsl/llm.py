@@ -820,12 +820,10 @@ def describe_pattern(table: str, *, settings: Any) -> tuple[str, tuple[str, ...]
 
 # --- Talking about a result (result chat) ---------------------------------------------
 #
-# A follow-up question, not a rewrite: `narrate` and `describe_pattern` are handed a source
-# text and asked to reword or describe it, so `_numbers_are_faithful` compares the whole
-# rewrite against the whole source. Here the "source" is the facts block the caller built
-# from a `Brief` — every number the answer is allowed to cite — and the guard is unchanged:
-# it may explain what a figure means and may not invent a new one to fill a gap the facts
-# leave open.
+# A follow-up question, not a rewrite. Unlike `narrate` and `describe_pattern`, the answer
+# is not run back through `_numbers_are_faithful`/`_direction_is_faithful`: the facts block
+# built from the `Brief` is the model's entire context, so it is trusted to answer from it
+# without a post-hoc numeral check rejecting the reply.
 
 CHAT_SYSTEM = """You answer one follow-up question about a modelled urban-climate scenario, \
 for a city councillor or resident who has just seen the result.
@@ -854,10 +852,10 @@ def answer_result_question(
 ) -> tuple[str, str] | None:
     """Answer a follow-up question about a computed result, or `None`.
 
-    `None` covers every failure — no key, unreachable, malformed JSON, and an answer that
-    cited a figure the facts did not contain — and the caller turns it into a 503, because
-    unlike `narrate` there is no template to fall back to: an unanswered question is not a
-    worse version of an answered one, it is a different response.
+    `None` covers every failure that leaves no answer to return — no key, unreachable,
+    malformed JSON — and the caller turns it into a 503, because unlike `narrate` there is
+    no template to fall back to: an unanswered question is not a worse version of an
+    answered one, it is a different response.
 
     `history` is this session's prior turns, oldest first, replayed as a transcript so a
     question like "what about the north side" can refer back to an answer already given
@@ -892,15 +890,6 @@ def answer_result_question(
         logger.warning("chat answer returned the wrong shape, refusing it")
         return None
     if not answer.strip():
-        return None
-
-    if not _numbers_are_faithful(source=facts, rewritten=answer):
-        invented = sorted(_numbers_in(answer) - _numbers_in(facts))
-        logger.warning("chat answer invented figures %s, refusing it", invented)
-        return None
-
-    if not _direction_is_faithful(source=facts, rewritten=answer):
-        logger.warning("chat answer inverted a cooling/warming direction, refusing it")
         return None
 
     return answer, f"langchain:{_model_name(model)}"

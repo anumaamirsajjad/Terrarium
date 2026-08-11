@@ -41,7 +41,7 @@ def test_a_misspelled_field_is_refused_rather_than_silently_dropped() -> None:
 
 def test_plan_itself_refuses_an_unknown_field() -> None:
     with pytest.raises(ValidationError, match="extra"):
-        Plan(name="x", actions=[PlantTrees(tree_count=100)], cost=5)  # type: ignore[call-arg]
+        Plan(name="x", actions=(PlantTrees(tree_count=100),), cost=5)  # type: ignore[call-arg]
 
 
 def test_emission_removal_must_be_a_fraction() -> None:

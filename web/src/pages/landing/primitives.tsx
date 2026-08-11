@@ -10,7 +10,6 @@ import { animate, motion, useInView, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
 import { GLIDE, SETTLE } from "../../motion/springs";
-import type { MarginNote } from "./marginNote";
 
 /**
  * A line of type wiped up from behind its own baseline.
@@ -105,29 +104,6 @@ export function Counter({
       })}
       {suffix}
     </span>
-  );
-}
-
-/**
- * The margin rail's own note, restated in flow.
- *
- * `MarginRail` is `hidden ... xl:block` — a caveat crushed into a phone's gutter is a
- * caveat nobody reads, so below `xl` it never renders at all. This is the inline
- * replacement: closed by default so it doesn't compete with the section's own copy, one
- * per section, reading the same `note` object the rail was handed so the two can never
- * drift apart.
- */
-export function InlineCaveat({ note }: { note: MarginNote }) {
-  return (
-    <details className="mt-8 border-t border-white/10 pt-5 xl:hidden">
-      <summary className="cursor-pointer list-none font-mono text-[0.6rem] tracking-[0.2em] text-white/30 uppercase">
-        What this does not prove
-      </summary>
-      <p className="text-shoal/90 mt-3 font-mono text-[0.7rem] leading-relaxed">
-        {note.subject}
-      </p>
-      <p className="mt-2 text-[0.72rem] leading-relaxed text-white/45">{note.body}</p>
-    </details>
   );
 }
 

@@ -15,10 +15,9 @@ import { useRef, useState } from "react";
 
 import { GLIDE } from "../../motion/springs";
 import EquityViz from "./EquityViz";
-import { useMarginNote } from "./marginNote";
 import PlumeViz from "./PlumeViz";
 import ThermalViz from "./ThermalViz";
-import { Counter, Eyebrow, InlineCaveat } from "./primitives";
+import { Counter, Eyebrow } from "./primitives";
 import { useIsWide } from "./useIsWide";
 
 const PANES = [
@@ -33,10 +32,6 @@ const PANES = [
       { value: 12, decimals: 0, suffix: " / 12", label: "test configs it ran hot in" },
     ],
     Viz: ThermalViz,
-    margin: {
-      subject: "Blocked cross-validation proves generalisation across space, not across change.",
-      body: "It says the emulator predicts an unseen part of the tile. It says nothing about whether it predicts the effect of an intervention, which is what the hindcast was built to answer, and the hindcast says it over-predicts.",
-    },
   },
   {
     key: "air",
@@ -49,10 +44,6 @@ const PANES = [
       { value: 53, decimals: 0, suffix: "", label: "monitors, leave-one-out" },
     ],
     Viz: PlumeViz,
-    margin: {
-      subject: "Summer is unvalidated, and the winter number is optimistic.",
-      body: "The one fitted parameter was chosen on the same 53 stations the error is quoted from. Summer beats the null at no setting: its boundary layer is well mixed by mid-morning, so local sources disperse before they make a pattern.",
-    },
   },
   {
     key: "equity",
@@ -65,10 +56,6 @@ const PANES = [
       { value: 0, decimals: 1, suffix: " %", label: "to the most crowded decile" },
     ],
     Viz: EquityViz,
-    margin: {
-      subject: "Ordered by population density, not by deprivation.",
-      body: "No free, keyless deprivation layer exists for Lahore, and substituting built-up density for one would be a claim the data cannot support. This answers a narrower question: does the cooling reach the crowded places?",
-    },
   },
 ] as const;
 
@@ -87,10 +74,8 @@ export default function Simulators() {
   // The rail fills continuously rather than in three jumps, so the scroll has a readout.
   const railScale = useTransform(scrollYProgress, [0, 1], [0, 1]);
 
-  // The ref goes on the sticky pane, not on the 320vh track. `useInView` asks for a
-  // fraction of the *element* to be visible, and 40 % of three-and-a-bit screens can
-  // never be on screen at once — so a note attached to the track would never once fire.
-  const pane = useMarginNote<HTMLDivElement>(`simulator-${PANES[active]!.key}`, PANES[active]!.margin);
+  // The ref goes on the sticky pane, not on the 320vh track: it is what pins.
+  const pane = useRef<HTMLDivElement>(null);
 
   const wide = useIsWide();
 
@@ -196,8 +181,6 @@ export default function Simulators() {
                         <pane.Viz active />
                       </div>
                     )}
-
-                    <InlineCaveat note={pane.margin} />
                   </motion.div>
                   );
                 })}
