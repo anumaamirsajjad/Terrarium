@@ -11,17 +11,9 @@ import { motion, useScroll, useTransform } from "motion/react";
 import { useRef } from "react";
 
 import { RISE, STAGGER } from "../../motion/springs";
-import { useMarginNote } from "./marginNote";
-import { Eyebrow, InlineCaveat, Rule } from "./primitives";
-
-const NOTE = {
-  subject: 'The brief’s confidence never says "high."',
-  body: "`uncertainties` is never empty and `confidence` has no high tier: nothing in this project has earned the word.",
-};
+import { Eyebrow, Rule } from "./primitives";
 
 export default function Outro() {
-  const section = useMarginNote("brief", NOTE);
-
   const sheet = useRef<HTMLDivElement>(null);
   const { scrollYProgress } = useScroll({ target: sheet, offset: ["start end", "end start"] });
   // A slow counter-drift, so the sheet sits in its own plane rather than on the page.
@@ -30,7 +22,6 @@ export default function Outro() {
   return (
     <>
       <motion.section
-        ref={section}
         variants={STAGGER}
         initial="hidden"
         whileInView="show"
@@ -62,8 +53,6 @@ export default function Outro() {
             wider web. Both need a free key configured on the server; without one, they say
             so rather than guess.
           </p>
-
-          <InlineCaveat note={NOTE} />
         </motion.div>
 
         <motion.div

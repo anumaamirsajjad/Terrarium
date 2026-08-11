@@ -28,7 +28,12 @@ import {
 } from "@deck.gl/core";
 import { ChevronsLeftRight } from "lucide-react";
 // maplibre-gl v6 dropped its default export; import the classes by name.
-import { Map as MapLibreMap, NavigationControl, ScaleControl } from "maplibre-gl";
+import {
+  Map as MapLibreMap,
+  NavigationControl,
+  ScaleControl,
+  setRTLTextPlugin,
+} from "maplibre-gl";
 import type { MapMouseEvent } from "maplibre-gl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -39,6 +44,18 @@ import "./maplibreWorker";
 import type { TileInfo } from "../api/client";
 import { antSegments, DASH, GAP, PERIOD } from "./ants";
 import type { Position } from "./useDrawnPolygon";
+
+// The basemap's place labels concatenate `name:latin` with `name:nonlatin`, and over
+// Lahore that second field is Urdu, written in the Arabic script. MapLibre ships no
+// shaper for that script by default, so without this plugin every Urdu label renders as
+// isolated, unjoined glyphs in the wrong order, reading as mirrored gibberish rather than
+// a place name. `lazy: true` defers the fetch until an RTL run is actually encountered,
+// which on this tile is every non-English label. Free CDN script, no key, registered once
+// before any Map exists, same as the worker URL fix above.
+void setRTLTextPlugin(
+  "https://unpkg.com/@mapbox/mapbox-gl-rtl-text@0.3.0/dist/mapbox-gl-rtl-text.js",
+  true,
+);
 
 /** Keyless, unmetered, attribution added automatically by MapLibre. See D13. */
 export const BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/positron";

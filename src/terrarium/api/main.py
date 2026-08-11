@@ -49,12 +49,15 @@ def _scrub_non_finite(value: Any) -> Any:
     return value
 
 
-async def _validation_error_response(_: Request, exc: RequestValidationError) -> JSONResponse:
-    # `jsonable_encoder` first, same as FastAPI's own default handler: an error's `ctx`
-    # can carry the raised exception object itself (e.g. from a `model_validator`), which
-    # needs converting before it is JSON-safe at all - scrubbing alone is not that step.
-    errors = jsonable_encoder(exc.errors())
-    return JSONResponse(status_code=422, content={"detail": _scrub_non_finite(errors)})
+def _register_validation_error_handler(app: FastAPI) -> None:
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error_response(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # `jsonable_encoder` first, same as FastAPI's own default handler: an error's `ctx`
+        # can carry the raised exception object itself (e.g. from a `model_validator`),
+        # which needs converting before it is JSON-safe at all - scrubbing alone is not
+        # that step.
+        errors = jsonable_encoder(exc.errors())
+        return JSONResponse(status_code=422, content={"detail": _scrub_non_finite(errors)})
 
 
 # Anything above ~1 MB is not a polygon a person drew by hand (F21): the mask this
@@ -125,7 +128,7 @@ def create_app(
         version=__version__,
     )
 
-    app.add_exception_handler(RequestValidationError, _validation_error_response)
+    _register_validation_error_handler(app)
     app.add_middleware(BodySizeLimitMiddleware)
     app.add_middleware(
         CORSMiddleware,

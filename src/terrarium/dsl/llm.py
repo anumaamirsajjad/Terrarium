@@ -409,11 +409,15 @@ _NUMBER = re.compile(r"(?<![A-Za-z0-9.])\d+(?:\.\d+)?")
 # lets "0.16 degC" and "0.16 degF" both extract to `{"0.16"}` and pass as the same figure -
 # the audit's "6.2 million -> 6.2 billion" case slips past a naive check the same way,
 # because the multiplier is a word, not a digit. Leading whitespace is matched but not
-# captured, so "0.16 degC" and a rewrite's "0.16  degC" (different spacing, same unit)
-# still produce the same token.
+# captured - `\s` rather than `[ \t]`, because a model rewrite has been observed to space
+# a unit with U+202F (narrow no-break space), which `[ \t]` does not match - so "0.16 degC"
+# and a rewrite's "0.16 °C" (different spacing, same unit) still produce the same
+# token. `°c`/`°f` are folded to `degc`/`degf` below (F16 again): a template always spells
+# out "degC", but a rewrite reaches for the degree sign, and the two must compare equal.
 _UNIT_AFTER = re.compile(
-    r"[ \t]*(%|degc|degf|km2|m2|km|m3|µg/m3|ug/m3|million|billion)\b", re.IGNORECASE
+    r"\s*(%|degc|degf|°c|°f|km2|m2|km|m3|µg/m3|ug/m3|million|billion)\b", re.IGNORECASE
 )
+_UNIT_ALIASES = {"°c": "degc", "°f": "degf"}
 
 
 def _numbers_in(text: str) -> set[str]:
@@ -430,27 +434,54 @@ def _numbers_in(text: str) -> set[str]:
     for match in _NUMBER.finditer(normalised):
         unit_match = _UNIT_AFTER.match(normalised, match.end())
         unit = unit_match.group(1).lower() if unit_match else ""
+        unit = _UNIT_ALIASES.get(unit, unit)
         tokens.add(match.group() + unit)
     return tokens
 
 
+# Tolerance for `_numbers_are_faithful`'s near-match: a rewrite that rounds 16.7 to 17, or
+# 43,755 to "about 43,000", is editing a figure's precision, not inventing a new one. 5%
+# relative (floor 0.05 absolute, for small decimals like a 0.41 degC delta) accepts that
+# kind of rounding while still catching a genuinely different number.
+_ROUNDING_TOLERANCE = 0.05
+
+_TOKEN_VALUE = re.compile(r"(\d+(?:\.\d+)?)(.*)")
+
+
+def _split_token(token: str) -> tuple[float, str]:
+    match = _TOKEN_VALUE.match(token)
+    assert match  # every token in `_numbers_in`'s output starts with `_NUMBER`
+    return float(match.group(1)), match.group(2)
+
+
+def _has_close_match(token: str, source_tokens: set[str]) -> bool:
+    """True when `token` is in `source_tokens`, or rounds a same-unit figure that is."""
+    if token in source_tokens:
+        return True
+    value, unit = _split_token(token)
+    for source_token in source_tokens:
+        source_value, source_unit = _split_token(source_token)
+        if source_unit != unit:
+            continue
+        if abs(value - source_value) <= max(abs(source_value) * _ROUNDING_TOLERANCE, 0.05):
+            return True
+    return False
+
+
 def _numbers_are_faithful(*, source: str, rewritten: str) -> bool:
-    """True when the rewrite invented no figures, and changed no figure's unit.
+    """True when the rewrite invented no figures (beyond rounding), and changed no unit.
 
     Deliberately one-directional: the rewrite may *drop* a number (it is allowed to be
-    shorter) but may not contain one the source did not. Dropping a figure costs detail;
-    inventing one is the failure this whole seam is defended against, and it is the exact
-    failure that kept a model out of `explain.py`.
-
-    Strict about rounding, and that is the intended trade: a model that turns 16.7 into 17
-    is a model that is editing figures, and the cheapest way to be sure it is not is to
-    refuse the whole rewrite and ship the template. A refusal costs nicer prose; a missed
-    edit costs a wrong number on the one screen most people actually read.
+    shorter) but may not contain one the source did not, give or take rounding - see
+    `_has_close_match`. Dropping a figure costs detail; inventing one is the failure this
+    whole seam is defended against, and it is the exact failure that kept a model out of
+    `explain.py`.
 
     Dropping is policed separately by `_headline_figures_survive`, because "may not invent"
     and "may not gut" are different failures needing different tests.
     """
-    return _numbers_in(rewritten) <= _numbers_in(source)
+    source_tokens = _numbers_in(source)
+    return all(_has_close_match(token, source_tokens) for token in _numbers_in(rewritten))
 
 
 # Direction words for the guard below (F16). Deliberately small and blunt: this only has
@@ -789,25 +820,22 @@ def describe_pattern(table: str, *, settings: Any) -> tuple[str, tuple[str, ...]
 
 # --- Talking about a result (result chat) ---------------------------------------------
 #
-# A follow-up question, not a rewrite: `narrate` and `describe_pattern` are handed a source
-# text and asked to reword or describe it, so `_numbers_are_faithful` compares the whole
-# rewrite against the whole source. Here the "source" is the facts block the caller built
-# from a `Brief` — every number the answer is allowed to cite — and the guard is unchanged:
-# it may explain what a figure means and may not invent a new one to fill a gap the facts
-# leave open.
+# A follow-up question, not a rewrite. Unlike `narrate` and `describe_pattern`, the answer
+# is not run back through `_numbers_are_faithful`/`_direction_is_faithful`: the facts block
+# built from the `Brief` is the model's entire context, so it is trusted to answer from it
+# without a post-hoc numeral check rejecting the reply.
 
 CHAT_SYSTEM = """You answer one follow-up question about a modelled urban-climate scenario, \
 for a city councillor or resident who has just seen the result.
 
 Rules, in order of importance:
-1. NEVER introduce a number, percentage, quantity or unit that is not in the facts or the \
-earlier conversation below. Copy every number EXACTLY as written - do not round, rescale, \
-convert or combine them.
-2. If the facts do not contain what is needed to answer, say so plainly rather than \
-guessing or estimating.
-3. Answer only the question asked. Do not volunteer a new comparison, a cause, or a claim \
-the facts do not make.
-4. Plain words, short sentences, British English. Say "ground temperature" not "land \
+1. Prefer the facts and the earlier conversation below. If the question asks for something \
+the facts do not cover - a judgement call, a comparison to a benchmark, whether a figure is \
+"a lot" - use your own domain knowledge to give a direct, honest estimate rather than \
+refusing. Say plainly when a figure is your own estimate rather than from the facts.
+2. Answer only the question asked. Do not volunteer a new comparison, a cause, or a claim \
+beyond what was asked.
+3. Plain words, short sentences, British English. Say "ground temperature" not "land \
 surface temperature", "fumes" not "particulate matter", "area" not "polygon".
 
 Return JSON only, with exactly this key:
@@ -823,10 +851,10 @@ def answer_result_question(
 ) -> tuple[str, str] | None:
     """Answer a follow-up question about a computed result, or `None`.
 
-    `None` covers every failure — no key, unreachable, malformed JSON, and an answer that
-    cited a figure the facts did not contain — and the caller turns it into a 503, because
-    unlike `narrate` there is no template to fall back to: an unanswered question is not a
-    worse version of an answered one, it is a different response.
+    `None` covers every failure that leaves no answer to return — no key, unreachable,
+    malformed JSON — and the caller turns it into a 503, because unlike `narrate` there is
+    no template to fall back to: an unanswered question is not a worse version of an
+    answered one, it is a different response.
 
     `history` is this session's prior turns, oldest first, replayed as a transcript so a
     question like "what about the north side" can refer back to an answer already given
@@ -861,15 +889,6 @@ def answer_result_question(
         logger.warning("chat answer returned the wrong shape, refusing it")
         return None
     if not answer.strip():
-        return None
-
-    if not _numbers_are_faithful(source=facts, rewritten=answer):
-        invented = sorted(_numbers_in(answer) - _numbers_in(facts))
-        logger.warning("chat answer invented figures %s, refusing it", invented)
-        return None
-
-    if not _direction_is_faithful(source=facts, rewritten=answer):
-        logger.warning("chat answer inverted a cooling/warming direction, refusing it")
         return None
 
     return answer, f"langchain:{_model_name(model)}"

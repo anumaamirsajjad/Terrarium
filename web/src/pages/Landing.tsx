@@ -3,9 +3,9 @@
  *
  * Every figure here is checkable against the repo. Where a number would have been
  * flattering and wrong — a bigger seasonal factor, a cooling this tile cannot deliver, a
- * feature that was removed — the smaller true one is used instead, and the margin rail
- * states what each claim does not prove. That is the same rule the brief and the panels
- * follow, and it is the only reason a visitor should believe any of the rest of it.
+ * feature that was removed — the smaller true one is used instead. That is the same rule
+ * the brief and the panels follow, and it is the only reason a visitor should believe any
+ * of the rest of it.
  *
  * The palette is the HEAT ramp's own stops, so the page and the map are one colour system.
  * Display type is Geist Mono, because what this instrument produces is numbers.
@@ -17,7 +17,6 @@ import Alignment from "./landing/Alignment";
 import Architecture from "./landing/Architecture";
 import CommandDemo from "./landing/CommandDemo";
 import Hero from "./landing/Hero";
-import { MarginRail, MarginRailProvider } from "./landing/MarginRail";
 import Outro from "./landing/Outro";
 import ScrollChrome from "./landing/ScrollChrome";
 import Simulators from "./landing/Simulators";
@@ -28,34 +27,28 @@ export default function Landing() {
     // honour the OS preference automatically, leaving opacity alone. The canvases opt out
     // separately, because a render loop is not something this can reach.
     <MotionConfig reducedMotion="user">
-      <MarginRailProvider>
-        <ScrollChrome />
-        <MarginRail />
+      <ScrollChrome />
 
-        {/**
-         * `overflow-x-clip`, never `overflow-x-hidden`.
-         *
-         * `hidden` makes this element a scroll container, and a scroll container between
-         * the viewport and a `position: sticky` child breaks the child — it sticks to an
-         * ancestor that never scrolls, so it simply scrolls away. That silently emptied
-         * the sticky simulator narrative and the architecture rail: three screens of
-         * nothing, with no error anywhere. `clip` trims the overflow without creating a
-         * scroll container, which is exactly what is wanted here.
-         */}
-        <main className="bg-void min-h-screen overflow-x-clip text-white antialiased">
-          <Hero />
-          {/* The raster substrate starts below the hero: over the 3D city it would read
-              as a second, contradictory grid. The right padding reserves the margin
-              rail's gutter, so a caveat never lands on top of the text it qualifies. */}
-          <div className="raster xl:pr-72">
-            <Alignment />
-            <Simulators />
-            <Architecture />
-            <CommandDemo />
-            <Outro />
-          </div>
-        </main>
-      </MarginRailProvider>
+      {/**
+       * `overflow-x-clip`, never `overflow-x-hidden`.
+       *
+       * `hidden` makes this element a scroll container, and a scroll container between
+       * the viewport and a `position: sticky` child breaks the child — it sticks to an
+       * ancestor that never scrolls, so it simply scrolls away. That silently emptied
+       * the sticky simulator narrative and the architecture rail: three screens of
+       * nothing, with no error anywhere. `clip` trims the overflow without creating a
+       * scroll container, which is exactly what is wanted here.
+       */}
+      <main className="bg-void min-h-screen overflow-x-clip text-white antialiased">
+        <Hero />
+        <div className="raster">
+          <Alignment />
+          <Simulators />
+          <Architecture />
+          <CommandDemo />
+          <Outro />
+        </div>
+      </main>
     </MotionConfig>
   );
 }

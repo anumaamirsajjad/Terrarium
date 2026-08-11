@@ -22,8 +22,7 @@
 import { type MotionValue, motion, useScroll, useTransform } from "motion/react";
 import { useRef } from "react";
 
-import { useMarginNote } from "./marginNote";
-import { Eyebrow, InlineCaveat, Rule } from "./primitives";
+import { Eyebrow, Rule } from "./primitives";
 import { useIsWide } from "./useIsWide";
 
 /** The analysis grid, as pixels on this stage. One cell is 100 m in the cube. */
@@ -280,16 +279,10 @@ const RULES: readonly { method: Source["method"]; kind: string; why: string }[] 
   },
 ];
 
-const NOTE = {
-  subject: "A remote fetch that succeeds is not a fetch that completed.",
-  body: "WorldPop's server drops connections mid-transfer without raising, and a short read yields a valid-looking GeoTIFF with rows missing. The ingest verifies the content length and renames a partial file into place, because otherwise a truncated download looks exactly like a cache hit.",
-};
-
 export default function Alignment() {
   const track = useRef<HTMLDivElement>(null);
-  // The ref goes on the sticky pane, never on the tall track: `useInView` wants a fraction
-  // of the *element* on screen, and 40 % of two and a half viewports never is.
-  const pane = useMarginNote<HTMLDivElement>("alignment", NOTE);
+  // The ref goes on the sticky pane, never on the tall track: it is what pins.
+  const pane = useRef<HTMLDivElement>(null);
   const stageTrack = useRef<HTMLDivElement>(null);
   const wide = useIsWide();
 
@@ -420,8 +413,6 @@ export default function Alignment() {
                   this block would have scrolled past long before the drain fires — the
                   residents would come and go on a figure nobody could still see. */}
               {wide && population}
-
-              <InlineCaveat note={NOTE} />
             </div>
 
             {/* Below `lg` the stage owns 200vh of runway and pins itself inside it, which
