@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from terrarium.dsl.llm import LLMUnavailable
-from terrarium.dsl.planner import PlanParseError, parse_rules, plan_from_text
+from terrarium.dsl.planner import PlanParseError, _number, parse_rules, plan_from_text
 from terrarium.dsl.schema import Plan, PlantTrees
 
 
@@ -53,6 +53,26 @@ def test_tree_counts_are_read_in_the_forms_people_type(text: str, expected: int 
     planting = parse_rules(text).plan.planting
     assert planting is not None
     assert planting.tree_count == expected
+
+
+def test_number_rejects_a_value_that_would_overflow_round() -> None:
+    """F14: `float("9"*309)` is `inf`, and `round(inf)` raises a bare `OverflowError`.
+
+    `_number` is exercised directly because the regex cap below already keeps a real
+    request from reaching this path with digits long enough to overflow - this is the
+    second, independent line of defence the plan asked for.
+    """
+    with pytest.raises(PlanParseError):
+        _number("9" * 309, None)
+
+
+def test_a_very_long_digit_run_does_not_crash_the_parser() -> None:
+    """The regex cap (F14) truncates a runaway digit run to a large but finite count
+    rather than ever handing `_number` something that overflows `float()`."""
+    text = "plant " + "9" * 309 + " trees"
+    planting = parse_rules(text).plan.planting
+    assert planting is not None
+    assert planting.tree_count < 10**16
 
 
 @pytest.mark.parametrize(
@@ -181,9 +201,7 @@ def test_model_output_that_fails_validation_falls_back_rather_than_reaching_a_co
 
 
 def test_an_unreachable_model_falls_back() -> None:
-    parsed = plan_from_text(
-        "plant 200 trees", adapter=_StubAdapter(LLMUnavailable("no network"))
-    )
+    parsed = plan_from_text("plant 200 trees", adapter=_StubAdapter(LLMUnavailable("no network")))
     assert parsed.source == "rules"
 
 

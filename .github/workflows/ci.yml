@@ -48,6 +48,9 @@ jobs:
       - name: Lint
         run: uv run ruff check src/ scripts/
 
+      - name: Format
+        run: uv run ruff format --check src/ scripts/
+
       - name: Types
         run: uv run mypy
 

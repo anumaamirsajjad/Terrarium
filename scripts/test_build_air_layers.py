@@ -83,9 +83,7 @@ def test_a_failed_fetch_keeps_what_the_cube_already_had(
     )
     existing = np.array([122.8, 999.0], dtype="float32")
 
-    values = build_air_layers._wind_direction(
-        None, None, ["2025-summer", "2025-winter"], existing
-    )
+    values = build_air_layers._wind_direction(None, None, ["2025-summer", "2025-winter"], existing)
 
     assert values[0] == pytest.approx(122.8), "a failed fetch must not erase a good value"
     assert values[1] == pytest.approx(289.0), "a successful one must still overwrite"

@@ -8,6 +8,7 @@ numbers. The DSL's own rules are tested in `dsl/`.
 
 from __future__ import annotations
 
+import json
 from typing import Any, cast
 
 import pytest
@@ -109,6 +110,31 @@ def test_text_with_no_intervention_in_it_is_refused_usefully(client: TestClient)
     assert "5,000 trees" in response.json()["detail"]
 
 
+def test_nan_in_an_explicit_plan_is_a_422_not_a_500(client: TestClient) -> None:
+    """F22, on the second route the finding named. Same mechanism as /simulate: `NaN` has
+    no JSON spelling, so an error response that echoes it used to fail to serialise."""
+    body = json.dumps(
+        {
+            "geometry": PLANTABLE,
+            "plan": {
+                "name": "test",
+                "actions": [{"kind": "plant_trees", "canopy_fraction_added": float("nan")}],
+            },
+        }
+    )
+    response = client.post("/plan", content=body, headers={"content-type": "application/json"})
+    assert response.status_code == 422
+
+
+def test_a_tree_count_long_enough_to_overflow_is_a_422_not_a_500(client: TestClient) -> None:
+    # F14: `float("9"*309)` is `inf`, and `round(inf)` used to raise a bare `OverflowError`
+    # straight out of the rule parser - a well-formed request 500ing.
+    response = client.post(
+        "/plan", json={"geometry": PLANTABLE, "text": "plant " + "9" * 309 + " trees"}
+    )
+    assert response.status_code == 422
+
+
 # ------------------------------------------------------ measured against the tile ---
 
 
@@ -124,9 +150,7 @@ def test_the_polygon_is_measured_rather_than_assumed(client: TestClient) -> None
 def test_a_planting_that_cannot_fit_is_refused_with_the_arithmetic(client: TestClient) -> None:
     # The refusal the phase exists for. It has to arrive from /plan, before /simulate runs
     # a core and returns a small delta that looks like a plan that merely worked badly.
-    response = client.post(
-        "/plan", json={"geometry": PLANTABLE, "text": "plant 90,000,000 trees"}
-    )
+    response = client.post("/plan", json={"geometry": PLANTABLE, "text": "plant 90,000,000 trees"})
     assert response.status_code == 422
 
     detail = response.json()["detail"]

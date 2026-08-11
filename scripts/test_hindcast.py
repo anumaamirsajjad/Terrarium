@@ -118,9 +118,7 @@ def test_the_default_split_is_two_halves() -> None:
 
 
 def test_an_explicit_split_is_honoured() -> None:
-    before, after = hindcast._split(
-        ["a", "b", "c", "d"], ["2016-summer"], ["2024-summer"]
-    )
+    before, after = hindcast._split(["a", "b", "c", "d"], ["2016-summer"], ["2024-summer"])
 
     assert (before, after) == (["2016-summer"], ["2024-summer"])
 

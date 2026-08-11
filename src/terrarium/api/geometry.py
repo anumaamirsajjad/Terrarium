@@ -30,13 +30,25 @@ class GeometryError(ValueError):
     """The submitted geometry cannot become a mask. Carries a user-facing reason."""
 
 
-def _as_geometry(geojson: dict[str, Any]) -> dict[str, Any]:
+# No drawing library nests a Feature more than one deep inside a FeatureCollection, which
+# is the whole reason `_as_geometry` unwraps at all - this bounds a body crafted to recurse
+# the parser into a stack overflow (F20) well above that, with room to spare.
+MAX_UNWRAP_DEPTH = 4
+
+
+def _as_geometry(geojson: dict[str, Any], *, depth: int = 0) -> dict[str, Any]:
     """Unwrap a Feature or FeatureCollection down to a single geometry object.
 
     Drawing libraries hand back whichever of the three they feel like - MapLibre's draw
     plugin emits a Feature, some emit a bare geometry - so accepting only one of them
     would fail on the frontend's very first request for a reason nobody could see.
     """
+    if depth > MAX_UNWRAP_DEPTH:
+        raise GeometryError(
+            f"geometry nests more than {MAX_UNWRAP_DEPTH} Feature/FeatureCollection "
+            "layers deep, which no real drawing produces - refusing to unwrap further"
+        )
+
     kind = geojson.get("type")
 
     if kind == "FeatureCollection":
@@ -46,13 +58,13 @@ def _as_geometry(geojson: dict[str, Any]) -> dict[str, Any]:
                 f"expected exactly one feature, got {len(features)}. Draw one polygon, "
                 "or send its geometry directly."
             )
-        return _as_geometry(features[0])
+        return _as_geometry(features[0], depth=depth + 1)
 
     if kind == "Feature":
         geometry = geojson.get("geometry")
         if not isinstance(geometry, dict):
             raise GeometryError("feature has no geometry")
-        return _as_geometry(geometry)
+        return _as_geometry(geometry, depth=depth + 1)
 
     if kind not in SUPPORTED_TYPES:
         raise GeometryError(
@@ -60,6 +72,24 @@ def _as_geometry(geojson: dict[str, Any]) -> dict[str, Any]:
             "An intervention needs an area, so points and lines cannot be used."
         )
     return geojson
+
+
+# The mask is this tile's fixed cell count whatever the polygon's own resolution, so a
+# finer polygon buys a client nothing (F21). A drawn polygon has dozens of vertices; ten
+# thousand is generous headroom above that and well below what makes rasterising expensive.
+MAX_VERTICES = 10_000
+
+
+def _count_vertices(coordinates: Any) -> int:
+    """Leaf coordinate pairs in a GeoJSON `coordinates` array, at any nesting depth.
+
+    Polygon nests rings-of-pairs; MultiPolygon nests polygons-of-rings-of-pairs. Rather
+    than special-case each, a `coordinates` list whose first element is a number *is* one
+    pair; anything else is a list of smaller `coordinates` to recurse into.
+    """
+    if coordinates and isinstance(coordinates[0], (int, float)):
+        return 1
+    return sum(_count_vertices(item) for item in coordinates)
 
 
 def mask_from_geojson(geojson: dict[str, Any], grid: Grid) -> np.ndarray:
@@ -75,6 +105,14 @@ def mask_from_geojson(geojson: dict[str, Any], grid: Grid) -> np.ndarray:
     no effect rather than a polygon in the wrong place.
     """
     geometry = _as_geometry(geojson)
+
+    vertices = _count_vertices(geometry.get("coordinates") or [])
+    if vertices > MAX_VERTICES:
+        raise GeometryError(
+            f"geometry has {vertices:,} vertices; refusing above {MAX_VERTICES:,} - the "
+            "mask this produces is the same fixed cell count either way, so a finer "
+            "polygon does not buy a more precise answer"
+        )
 
     try:
         geom = shape(geometry)

@@ -130,8 +130,15 @@ class BenefitDistribution(BaseModel):
         half warming produced shares of +/-2010 % and a `concentrated` flag of 6030 %,
         which would have rendered to the screen as a confident finding. Below this ratio
         the split is not reportable and callers must say so rather than draw the bars.
+
+        Also `False` when the net is confidently *warming* (`total_person_degrees <= 0` -
+        positive means net cooling, per the module docstring's sign convention):
+        `net_to_gross` is a magnitude and does not see that sign, so a plan whose net
+        effect is reliably a warming one used to pass this guard and be reported as "who
+        received the cooling" - shares like 104 % and -0 % over a cooling that never
+        happened. There is nothing to distribute when there is no net cooling.
         """
-        return self.net_to_gross >= RELIABLE_NET_FRACTION
+        return self.total_person_degrees > 0 and self.net_to_gross >= RELIABLE_NET_FRACTION
 
     @property
     def top_three_share(self) -> float:

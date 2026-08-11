@@ -170,8 +170,8 @@ def resolve(plan: Plan, measurement: PolygonMeasurement) -> ResolvedPlan:
         )
     if planting is not None and restriction is None:
         notes.append(
-            "Planting moves air quality by ~0.0003 µg/m3 at this scale, so no air result "
-            "is returned. Trees are a thermal instrument here, not an air one."
+            "Planting moves locally-generated PM2.5 by ~0.0003 µg/m3 at this scale, so no "
+            "air result is returned. Trees are a thermal instrument here, not an air one."
         )
 
     return ResolvedPlan(

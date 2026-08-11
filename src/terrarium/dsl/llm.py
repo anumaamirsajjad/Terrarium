@@ -83,7 +83,11 @@ class GeminiAdapter:
     api_key: str
     model: str = DEFAULT_GEMINI_MODEL
     base_url: str = DEFAULT_GEMINI_URL
-    timeout_s: float = 20.0
+    # F17: matches `NARRATOR_TIMEOUT_S` below - state it here too, because the two drifted
+    # once already (20s here, 8s there) and nothing caught it. `/plan` is on this adapter's
+    # budget: at the old 20s/30s (Gemini/Groq) a single request could hold a worker for
+    # 50s across the fallback chain.
+    timeout_s: float = 8.0
 
     @property
     def name(self) -> str:
@@ -165,7 +169,8 @@ class GroqAdapter:
     api_key: str
     model: str = DEFAULT_GROQ_MODEL
     base_url: str = DEFAULT_GROQ_URL
-    timeout_s: float = 30.0
+    # F17: matches GeminiAdapter and `NARRATOR_TIMEOUT_S` below - see the comment there.
+    timeout_s: float = 8.0
     # Anything but urllib's default; see the Cloudflare note above.
     user_agent: str = "terrarium/0.1"
 
@@ -175,7 +180,6 @@ class GroqAdapter:
 
     def complete_json(self, *, system: str, user: str) -> str:
         return self._chat(user, system=system)
-
 
     def _chat(self, content: Any, *, system: str) -> str:
         payload: dict[str, Any] = {
@@ -277,7 +281,6 @@ class FallbackAdapter:
 
     def complete_json(self, *, system: str, user: str) -> str:
         return self._first(lambda a: a.complete_json(system=system, user=user))
-
 
     def _first(self, call: Any) -> str:
         failures: list[str] = []
@@ -402,19 +405,37 @@ Return JSON only, with exactly these keys:
 # a letter, which is not something prose does.
 _NUMBER = re.compile(r"(?<![A-Za-z0-9.])\d+(?:\.\d+)?")
 
+# The unit or magnitude word right after a numeral, if any (F16). Comparing bare digits
+# lets "0.16 degC" and "0.16 degF" both extract to `{"0.16"}` and pass as the same figure -
+# the audit's "6.2 million -> 6.2 billion" case slips past a naive check the same way,
+# because the multiplier is a word, not a digit. Leading whitespace is matched but not
+# captured, so "0.16 degC" and a rewrite's "0.16  degC" (different spacing, same unit)
+# still produce the same token.
+_UNIT_AFTER = re.compile(
+    r"[ \t]*(%|degc|degf|km2|m2|km|m3|µg/m3|ug/m3|million|billion)\b", re.IGNORECASE
+)
+
 
 def _numbers_in(text: str) -> set[str]:
-    """Every numeral in a string, with thousands separators normalised away.
+    """Every numeral in a string, tokenised with the unit or magnitude word after it.
 
-    `180,905` and `180905` are the same figure written two ways, so the comparison strips
-    separators before matching - otherwise the guard would reject a rewrite for correctly
-    reformatting a number it had copied faithfully.
+    `180,905` and `180905` are the same figure written two ways, so thousands separators
+    are normalised away first. The unit is folded into the token because a bare-digit
+    comparison cannot tell a swapped unit from a faithfully copied one (F16); a numeral
+    with no recognised unit after it (a tree count, a cell count) still compares on the
+    digits alone, which is what every existing caller already relies on.
     """
-    return set(_NUMBER.findall(text.replace(",", "")))
+    normalised = text.replace(",", "")
+    tokens: set[str] = set()
+    for match in _NUMBER.finditer(normalised):
+        unit_match = _UNIT_AFTER.match(normalised, match.end())
+        unit = unit_match.group(1).lower() if unit_match else ""
+        tokens.add(match.group() + unit)
+    return tokens
 
 
 def _numbers_are_faithful(*, source: str, rewritten: str) -> bool:
-    """True when the rewrite invented no figures.
+    """True when the rewrite invented no figures, and changed no figure's unit.
 
     Deliberately one-directional: the rewrite may *drop* a number (it is allowed to be
     shorter) but may not contain one the source did not. Dropping a figure costs detail;
@@ -432,6 +453,53 @@ def _numbers_are_faithful(*, source: str, rewritten: str) -> bool:
     return _numbers_in(rewritten) <= _numbers_in(source)
 
 
+# Direction words for the guard below (F16). Deliberately small and blunt: this only has
+# to catch the one failure `_numbers_are_faithful` cannot — a rewrite that keeps every
+# figure and its unit but inverts what they mean, "cools 0.16 degC" into "warms 0.16 degC".
+_COOLING_WORDS = re.compile(r"\b(cool(?:s|er|ing)?|falls?|drops?|decreas(?:es|ing)?)\b", re.I)
+_WARMING_WORDS = re.compile(
+    r"\b(warm(?:s|er|ing)?|hotter|ris(?:es|ing)|increas(?:es|ing)?)\b", re.I
+)
+
+
+def _direction_is_faithful(*, source: str, rewritten: str) -> bool:
+    """False when the rewrite reports the opposite of the source's cooling/warming sign.
+
+    A post-check on the model's output, in the same style as `_numbers_are_faithful` and
+    for the same reason a prompt instruction is not enough: this seam is built to fail
+    closed. A source that is unambiguously about cooling (mentions cooling words and no
+    warming ones) followed by a rewrite that is unambiguously about warming (and vice
+    versa) is rejected; a source or rewrite that is ambiguous or silent on direction is
+    left to the numeral guard, because there is nothing here to contradict.
+    """
+    source_cools = bool(_COOLING_WORDS.search(source))
+    source_warms = bool(_WARMING_WORDS.search(source))
+    rewritten_cools = bool(_COOLING_WORDS.search(rewritten))
+    rewritten_warms = bool(_WARMING_WORDS.search(rewritten))
+
+    inverted_to_warming = (
+        source_cools and not source_warms and rewritten_warms and not rewritten_cools
+    )
+    inverted_to_cooling = (
+        source_warms and not source_cools and rewritten_cools and not rewritten_warms
+    )
+    return not (inverted_to_warming or inverted_to_cooling)
+
+
+def _bare_numbers_in(text: str) -> set[str]:
+    """Every numeral in a string, ignoring any unit or magnitude word after it.
+
+    Used only by `_headline_figures_survive`. That check's job is "did this numeral
+    survive at all", regardless of unit — its `headline` argument (e.g.
+    `agent.nodes._headline_figures`) is deliberately built as bare digits with no unit
+    context, precisely so a caller does not have to match the surrounding prose's exact
+    wording. Comparing it against `_numbers_in`'s unit-aware tokens would reject a
+    rewrite for correctly keeping "0.51" just because the source happened to spell it
+    "0.51 degC" and the bare headline didn't.
+    """
+    return set(_NUMBER.findall(text.replace(",", "")))
+
+
 def _headline_figures_survive(*, headline: str, rewritten: str) -> bool:
     """True when the rewrite kept the figures the report is actually about.
 
@@ -446,7 +514,7 @@ def _headline_figures_survive(*, headline: str, rewritten: str) -> bool:
     editorially drops the cost line is still a good rewrite. Checked against the whole
     rewrite rather than against its headline, so moving a figure into a bullet is fine.
     """
-    return _numbers_in(headline) <= _numbers_in(rewritten)
+    return _bare_numbers_in(headline) <= _bare_numbers_in(rewritten)
 
 
 def _strip_fence(text: str) -> str:
@@ -467,6 +535,8 @@ def _strip_fence(text: str) -> str:
 # 8 s, against a /simulate budget of 3 s that the route measures 0.84 s warm against. The
 # narrator is allowed to overrun that budget because it is the last thing to run and the
 # alternative is worse prose, but it is not allowed to hang a request indefinitely.
+# F17: GeminiAdapter and GroqAdapter's `timeout_s` are set to this same number, above -
+# they drifted apart once (20s/30s vs this 8s) with nothing to catch it.
 NARRATOR_TIMEOUT_S = 8.0
 
 
@@ -557,9 +627,7 @@ def _invoke_json(*, system: str, human: str, model: Any, payload: dict[str, str]
 
 def _model_name(model: Any) -> str:
     """What to attribute prose to. Some bindings carry neither attribute."""
-    return str(
-        getattr(model, "model_name", None) or getattr(model, "model", None) or "model"
-    )
+    return str(getattr(model, "model_name", None) or getattr(model, "model", None) or "model")
 
 
 def narrate(plain: PlainSummary, *, settings: Any) -> PlainSummary:
@@ -571,10 +639,7 @@ def narrate(plain: PlainSummary, *, settings: Any) -> PlainSummary:
     wi-fi off. That is the same contract `dsl.planner` has with the rule parser, and it is
     what keeps the zero-budget claim unconditional: the key buys nicer prose, not function.
     """
-    return (
-        _guarded_rewrite(plain, settings=settings, system=NARRATOR_SYSTEM, suffix="")
-        or plain
-    )
+    return _guarded_rewrite(plain, settings=settings, system=NARRATOR_SYSTEM, suffix="") or plain
 
 
 def _guarded_rewrite(
@@ -611,9 +676,7 @@ def _guarded_rewrite(
         return None
 
     source = "\n".join((plain.headline, *plain.points))
-    payload = _invoke_json(
-        system=system, human="{report}", model=model, payload={"report": source}
-    )
+    payload = _invoke_json(system=system, human="{report}", model=model, payload={"report": source})
     if payload is None:
         return None
 
@@ -634,8 +697,12 @@ def _guarded_rewrite(
         logger.warning("rewrite invented figures %s, rejecting it", invented)
         return None
 
+    if not _direction_is_faithful(source=source, rewritten=rewritten):
+        logger.warning("rewrite inverted the cooling/warming direction, rejecting it")
+        return None
+
     if not _headline_figures_survive(headline=plain.headline, rewritten=rewritten):
-        dropped = sorted(_numbers_in(plain.headline) - _numbers_in(rewritten))
+        dropped = sorted(_bare_numbers_in(plain.headline) - _bare_numbers_in(rewritten))
         logger.warning("rewrite dropped headline figures %s, rejecting it", dropped)
         return None
 
@@ -713,6 +780,10 @@ def describe_pattern(table: str, *, settings: Any) -> tuple[str, tuple[str, ...]
         logger.warning("spatial describer invented figures %s, dropping it", invented)
         return None
 
+    if not _direction_is_faithful(source=table, rewritten=written):
+        logger.warning("spatial describer inverted a cooling/warming direction, dropping it")
+        return None
+
     return summary, points, f"langchain:{_model_name(model)}"
 
 
@@ -773,9 +844,7 @@ def answer_result_question(
     transcript_block = f"Earlier in this conversation:\n{transcript}\n\n" if transcript else ""
     payload = _invoke_json(
         system=CHAT_SYSTEM,
-        human=(
-            "Facts about this result:\n{facts}\n\n{transcript_block}New question: {question}"
-        ),
+        human=("Facts about this result:\n{facts}\n\n{transcript_block}New question: {question}"),
         model=model,
         payload={
             "facts": facts,
@@ -799,5 +868,8 @@ def answer_result_question(
         logger.warning("chat answer invented figures %s, refusing it", invented)
         return None
 
-    return answer, f"langchain:{_model_name(model)}"
+    if not _direction_is_faithful(source=facts, rewritten=answer):
+        logger.warning("chat answer inverted a cooling/warming direction, refusing it")
+        return None
 
+    return answer, f"langchain:{_model_name(model)}"

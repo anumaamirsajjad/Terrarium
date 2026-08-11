@@ -106,13 +106,21 @@ Meteorology arrived with the time dimension and immediately dominated: `air_temp
 identifier* and identifying the window explains most of a target spanning 22 °C. Two things
 follow, and neither is optional reading before quoting a number:
 
-- **It does not contaminate an intervention.** `simulate` holds meteorology fixed across
-  baseline and scenario, so every meteorology split lands identically on both sides and
-  cancels in the difference. The gain ranking describes what separates windows, not what
-  drives the intervention.
-- **It is a weak temporal feature.** Across nine summers `air_temp_c` correlates with mean
-  summer LST at only r = 0.55. That is why an unseen year costs 1.9–5.3 °C of offset — the
-  model has nothing else that varies with the year.
+- **It does not silently leak weather into an intervention's inputs, but it does not
+  cancel either (F12).** `simulate` holds meteorology identical across baseline and
+  scenario, so every split lands on both sides alike — but LightGBM is not additive, and
+  identical inputs do not guarantee an identical effect on the delta. Varying only
+  `air_temp_c` with every land input fixed has been measured to swing a headline cooling
+  figure **4.1x** (−0.058 to −0.240 °C), with the step structure of tree splits. The gain
+  ranking still describes what separates windows rather than what drives the
+  intervention, but "the weather cancels out" is not the true version of that sentence —
+  meteorology conditions the intervention's *scale*, and every planted brief now states
+  that sensitivity rather than assuming it away.
+- **It is a weak temporal feature, and an unseen year is not only an offset.** Across nine
+  summers `air_temp_c` correlates with mean summer LST at only r = 0.55, and an unseen
+  year costs 1.9–5.3 °C. That figure is not a fixed correction to subtract: the same
+  non-additivity above means an unseen year's weather also changes the intervention's
+  *scale*, which an offset does not address.
 
 `cores/equity.py` is the second, and is a pure function rather than a `Core`: it takes a
 delta field and a population field and returns who received the cooling.

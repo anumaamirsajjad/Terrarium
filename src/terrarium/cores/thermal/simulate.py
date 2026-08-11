@@ -141,9 +141,7 @@ def tree_built_contrast(cube: xr.Dataset) -> float:
     return float(np.median(lst[built]) - np.median(lst[trees]))
 
 
-def simulate(
-    cube: xr.Dataset, intervention: Intervention, model: lgb.Booster
-) -> CoreResult:
+def simulate(cube: xr.Dataset, intervention: Intervention, model: lgb.Booster) -> CoreResult:
     """Predict the LST change caused by `intervention`. Whole tile, degrees Celsius."""
     arrays = {name: np.asarray(cube[name].values) for name in BASE_VARIABLES}
     shape = arrays["ndvi"].shape

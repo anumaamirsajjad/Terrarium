@@ -68,8 +68,10 @@ def _print_sources(records: list[SourceRecord]) -> None:
 
 
 def _print_summary(summary: CubeSummary) -> None:
-    print(f"  {'variable':<22} {'units':<8} {'dims':<11} {'valid':>7} "
-          f"{'min':>10} {'mean':>10} {'max':>10}")
+    print(
+        f"  {'variable':<22} {'units':<8} {'dims':<11} {'valid':>7} "
+        f"{'min':>10} {'mean':>10} {'max':>10}"
+    )
     print(f"  {'-' * 22} {'-' * 8} {'-' * 11} {'-' * 7} {'-' * 10} {'-' * 10} {'-' * 10}")
     for var in summary.variables:
         axes = ",".join(var.dims.axes)
@@ -121,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=None,
         help="Scenes composited per collection per window, least-cloudy first "
-             "(default: from config)",
+        "(default: from config)",
     )
     parser.add_argument(
         "--years",
@@ -129,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
         nargs="+",
         default=None,
         help="Years to build seasonal windows for; each adds a summer and a winter "
-             "(default: from config). One year makes for a much faster smoke test.",
+        "(default: from config). One year makes for a much faster smoke test.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -192,8 +194,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  zarr      {zarr_path}")
     print(f"  catalog   {settings.duckdb_path}")
     print(f"  windows   {len(summary.windows)}: {', '.join(summary.windows)}")
-    print(f"  populated {len(summary.populated)}/{len(summary.variables)}: "
-          f"{', '.join(summary.populated) or 'none'}")
+    print(
+        f"  populated {len(summary.populated)}/{len(summary.variables)}: "
+        f"{', '.join(summary.populated) or 'none'}"
+    )
     if summary.missing:
         print(f"  MISSING   {', '.join(summary.missing)}")
     if gaps:

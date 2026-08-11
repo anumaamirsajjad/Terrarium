@@ -51,9 +51,7 @@ def test_geometry_rasterises_back_to_the_same_cells(synthetic_runtime: Runtime) 
     # An interior block, so neither edge clipping nor the short final block is in play.
     interior = [c for c in candidates if c.cells == BLOCK_CELLS**2][5]
 
-    assert np.array_equal(
-        region_mask([interior], grid), mask_from_geojson(interior.geometry, grid)
-    )
+    assert np.array_equal(region_mask([interior], grid), mask_from_geojson(interior.geometry, grid))
 
 
 def test_merged_regions_rasterise_back_too(synthetic_runtime: Runtime) -> None:
@@ -63,9 +61,7 @@ def test_merged_regions_rasterise_back_too(synthetic_runtime: Runtime) -> None:
     full = [c for c in candidates if c.cells == BLOCK_CELLS**2]
     pair = [full[5], full[9]]
 
-    assert np.array_equal(
-        region_mask(pair, grid), mask_from_geojson(region_geometry(pair), grid)
-    )
+    assert np.array_equal(region_mask(pair, grid), mask_from_geojson(region_geometry(pair), grid))
 
 
 def test_block_measurement_matches_measure_polygon(synthetic_runtime: Runtime) -> None:

@@ -61,8 +61,12 @@ def test_cooling_is_reported_corrected_not_raw(synthetic_runtime: Runtime) -> No
     delta[mask] = -1.0
 
     regions = explain_pattern(
-        window=window, label=label, grid=grid, delta=delta,
-        canopy_added=np.where(mask, 0.3, 0.0), mask=mask,
+        window=window,
+        label=label,
+        grid=grid,
+        delta=delta,
+        canopy_added=np.where(mask, 0.3, 0.0),
+        mask=mask,
     )
 
     assert regions[0].expected_cooling_c == 0.4
@@ -80,8 +84,12 @@ def test_spillover_is_distinguished_from_the_drawn_area(synthetic_runtime: Runti
     delta[20:40, 60:80] = -0.5
 
     regions = explain_pattern(
-        window=window, label=label, grid=grid, delta=delta,
-        canopy_added=np.where(mask, 0.3, 0.0), mask=mask,
+        window=window,
+        label=label,
+        grid=grid,
+        delta=delta,
+        canopy_added=np.where(mask, 0.3, 0.0),
+        mask=mask,
     )
     by_id = {region.region_id: region for region in regions}
 
@@ -101,8 +109,12 @@ def test_negligible_change_is_dropped_rather_than_called_slight_cooling(
 
     assert (
         explain_pattern(
-            window=window, label=label, grid=grid, delta=delta,
-            canopy_added=np.where(mask, 0.3, 0.0), mask=mask,
+            window=window,
+            label=label,
+            grid=grid,
+            delta=delta,
+            canopy_added=np.where(mask, 0.3, 0.0),
+            mask=mask,
         )
         == ()
     )
@@ -119,8 +131,12 @@ def test_regions_are_ordered_by_how_much_they_cooled(synthetic_runtime: Runtime)
     delta[60:80, 40:60] = -2.0
 
     regions = explain_pattern(
-        window=window, label=label, grid=grid, delta=delta,
-        canopy_added=np.where(mask, 0.3, 0.0), mask=mask,
+        window=window,
+        label=label,
+        grid=grid,
+        delta=delta,
+        canopy_added=np.where(mask, 0.3, 0.0),
+        mask=mask,
     )
 
     assert [region.region_id for region in regions] == ["r03c02", "r01c02"]
@@ -137,8 +153,12 @@ def test_water_and_tree_cover_come_from_the_cube(synthetic_runtime: Runtime) -> 
     delta[mask] = -1.0
 
     regions = explain_pattern(
-        window=window, label=label, grid=grid, delta=delta,
-        canopy_added=np.where(mask, 0.3, 0.0), mask=mask,
+        window=window,
+        label=label,
+        grid=grid,
+        delta=delta,
+        canopy_added=np.where(mask, 0.3, 0.0),
+        mask=mask,
     )
 
     assert regions[0].water_fraction > 0.2
@@ -155,8 +175,12 @@ def test_the_table_carries_every_number_the_model_may_use(synthetic_runtime: Run
     delta[mask] = -1.0
 
     regions = explain_pattern(
-        window=window, label=label, grid=grid, delta=delta,
-        canopy_added=np.where(mask, 0.3, 0.0), mask=mask,
+        window=window,
+        label=label,
+        grid=grid,
+        delta=delta,
+        canopy_added=np.where(mask, 0.3, 0.0),
+        mask=mask,
     )
     table = as_table(regions, label=label)
 

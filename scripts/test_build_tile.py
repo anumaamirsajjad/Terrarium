@@ -105,11 +105,7 @@ def test_static_variables_are_not_reported_per_window() -> None:
 
     build_tile._print_per_window(cube, GRID, summarise(cube, GRID))
 
-    temporal = [
-        v.name
-        for v in summarise(cube, GRID).variables
-        if v.dims is not Dims.SPACE
-    ]
+    temporal = [v.name for v in summarise(cube, GRID).variables if v.dims is not Dims.SPACE]
     assert "elevation_m" not in temporal
     assert {"ndvi", "lst_c", "air_temp_c"} <= set(temporal)
 

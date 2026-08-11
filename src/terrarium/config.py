@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -170,9 +170,23 @@ class Settings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     # Vite dev server. Needed so the browser can call the API cross-origin.
-    cors_origins: list[str] = Field(
-        default=["http://localhost:5173", "http://127.0.0.1:5173"]
-    )
+    cors_origins: list[str] = Field(default=["http://localhost:5173", "http://127.0.0.1:5173"])
+
+    @field_validator("cors_origins")
+    @classmethod
+    def _no_wildcard_origin(cls, origins: list[str]) -> list[str]:
+        """Refuse `"*"` rather than accept it (F23).
+
+        The natural reach for a deployment target like HF Spaces is
+        `TERRARIUM_CORS_ORIGINS='["*"]'`, and a wildcard origin is exactly what makes
+        `allow_credentials` dangerous — list the real origin instead.
+        """
+        if "*" in origins:
+            raise ValueError(
+                'cors_origins may not contain "*" - list the deployment\'s real origin '
+                '(e.g. ["https://your-app.hf.space"]) instead of a wildcard'
+            )
+        return origins
 
     # STAC catalogue. See CLAUDE.md > Data source.
     stac_url: str = "https://planetarycomputer.microsoft.com/api/stac/v1"

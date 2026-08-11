@@ -56,9 +56,7 @@ def build_graph(context: SearchContext) -> object:
     summer proposal against a winter composite. Compilation is microseconds; the cores are
     the cost here.
     """
-    builder: StateGraph[SearchState, None, SearchState, SearchState] = StateGraph(
-        SearchState
-    )
+    builder: StateGraph[SearchState, None, SearchState, SearchState] = StateGraph(SearchState)
 
     builder.add_node("parse_goal", context.parse_goal)
     builder.add_node("survey", context.survey)

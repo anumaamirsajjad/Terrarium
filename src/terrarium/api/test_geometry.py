@@ -59,9 +59,9 @@ def test_the_mask_lands_where_the_polygon_is(grid: Grid) -> None:
     got_x = float(grid.x_coords()[xs].mean())
     got_y = float(grid.y_coords()[ys].mean())
 
-    want_x, want_y = Transformer.from_crs(
-        "EPSG:4326", grid.crs, always_xy=True
-    ).transform(CENTRE_LON, CENTRE_LAT)
+    want_x, want_y = Transformer.from_crs("EPSG:4326", grid.crs, always_xy=True).transform(
+        CENTRE_LON, CENTRE_LAT
+    )
 
     # Within one cell of the true centre.
     assert abs(got_x - want_x) < grid.resolution_m
@@ -146,6 +146,55 @@ def test_a_self_intersecting_polygon_is_rejected(grid: Grid) -> None:
     }
     with pytest.raises(GeometryError, match="not valid"):
         mask_from_geojson(bowtie, grid)
+
+
+def test_a_ring_of_a_million_vertices_is_rejected(grid: Grid) -> None:
+    """F21: the mask is this tile's fixed cell count whatever the ring's resolution, so
+    a ring finer than a person could draw buys nothing and only costs CPU to rasterise."""
+    ring = [
+        [CENTRE_LON + HALF_DEG * np.cos(t), CENTRE_LAT + HALF_DEG * np.sin(t)]
+        for t in np.linspace(0, 2 * np.pi, 1_000_000)
+    ]
+    ring.append(ring[0])
+    huge = {"type": "Polygon", "coordinates": [ring]}
+
+    with pytest.raises(GeometryError, match="vertices"):
+        mask_from_geojson(huge, grid)
+
+
+def test_a_deeply_nested_feature_collection_is_rejected(grid: Grid) -> None:
+    """F20: `_as_geometry` recurses once per unwrap; nothing a drawing library produces
+    nests a Feature more than one deep, so a body engineered to nest thousands of layers
+    used to recurse the parser into a stack overflow rather than a 422."""
+    nested: dict[str, Any] = {
+        "type": "Feature",
+        "properties": {},
+        "geometry": box(CENTRE_LON, CENTRE_LAT),
+    }
+    for _ in range(2_000):
+        nested = {
+            "type": "FeatureCollection",
+            "features": [{"type": "Feature", "properties": {}, "geometry": nested}],
+        }
+    # The outermost wrapper is itself a Feature whose "geometry" is a FeatureCollection,
+    # which is not a real GeoJSON shape - the point is only that unwrapping terminates.
+    with pytest.raises(GeometryError):
+        mask_from_geojson(nested, grid)
+
+
+def test_a_normal_feature_still_unwraps_within_the_depth_limit(grid: Grid) -> None:
+    wrapped = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {},
+                "geometry": box(CENTRE_LON, CENTRE_LAT),
+            }
+        ],
+    }
+    bare = mask_from_geojson(box(CENTRE_LON, CENTRE_LAT), grid)
+    assert np.array_equal(mask_from_geojson(wrapped, grid), bare)
 
 
 def test_a_multipolygon_selects_both_lobes(grid: Grid) -> None:

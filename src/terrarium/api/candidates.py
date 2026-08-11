@@ -134,9 +134,7 @@ def build_lattice(
                     area_m2=cells * cell_m2,
                     plantable_canopy_m2=plantable,
                     max_trees=int(plantable // TREE_CANOPY_M2),
-                    mean_lst_c=(
-                        float(lst_total[block_row, block_col]) / count if count else None
-                    ),
+                    mean_lst_c=(float(lst_total[block_row, block_col]) / count if count else None),
                     population=float(population[block_row, block_col]),
                     emission_g_s=float(emissions[block_row, block_col]),
                     geometry=_block_geometry(row0, row1, col0, col1, grid, to_wgs84),

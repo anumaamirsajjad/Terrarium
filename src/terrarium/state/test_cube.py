@@ -66,9 +66,7 @@ def test_static_variables_are_not_replicated_across_time(
     assert "time" not in cube["population"].dims
 
 
-def test_meteorology_is_a_series_not_a_map(
-    grid: Grid, windows: tuple[SeasonWindow, ...]
-) -> None:
+def test_meteorology_is_a_series_not_a_map(grid: Grid, windows: tuple[SeasonWindow, ...]) -> None:
     """One reanalysis point cannot resolve anything inside a 20 km tile."""
     cube = empty_cube(grid, windows)
 

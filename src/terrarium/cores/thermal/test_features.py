@@ -104,8 +104,10 @@ def cube() -> xr.Dataset:
 def test_meteorology_is_constant_across_the_tile(cube: xr.Dataset) -> None:
     """It varies between windows, never within one. Anything else invents structure."""
     window = cube.isel(time=0)
-    arrays = {n: np.asarray(window[n].values) for n in
-              ("ndvi", "ndbi", "albedo", "elevation_m", "landcover")}
+    arrays = {
+        n: np.asarray(window[n].values)
+        for n in ("ndvi", "ndbi", "albedo", "elevation_m", "landcover")
+    }
     frame, _ = features_from_arrays(arrays, meteorology_from_cube(window))
 
     for name in METEOROLOGY_VARIABLES:
@@ -116,8 +118,10 @@ def test_meteorology_is_constant_across_the_tile(cube: xr.Dataset) -> None:
 def test_meteorology_is_required_not_defaulted(cube: xr.Dataset) -> None:
     """A silent default would train against the wrong weather without any visible sign."""
     window = cube.isel(time=0)
-    arrays = {n: np.asarray(window[n].values) for n in
-              ("ndvi", "ndbi", "albedo", "elevation_m", "landcover")}
+    arrays = {
+        n: np.asarray(window[n].values)
+        for n in ("ndvi", "ndbi", "albedo", "elevation_m", "landcover")
+    }
 
     with pytest.raises(ValueError, match="meteorology"):
         features_from_arrays(arrays, {"air_temp_c": 30.0})
@@ -187,8 +191,13 @@ def test_pooled_folds_hold_a_cell_out_of_every_window(cube: xr.Dataset) -> None:
     folds = pooled_spatial_folds(SHAPE, training.cell_index)
 
     by_window = {
-        w: dict(zip(training.cell_index[training.window_index == i],
-                    folds[training.window_index == i], strict=True))
+        w: dict(
+            zip(
+                training.cell_index[training.window_index == i],
+                folds[training.window_index == i],
+                strict=True,
+            )
+        )
         for i, w in enumerate(training.windows)
     }
 

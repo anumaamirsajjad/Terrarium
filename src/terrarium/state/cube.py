@@ -157,9 +157,7 @@ CUBE_VARIABLES: tuple[VariableSpec, ...] = (
     ),
     VariableSpec(
         name="albedo",
-        description=(
-            "Broadband shortwave albedo, Liang (2001) coefficients on Sentinel-2 bands"
-        ),
+        description=("Broadband shortwave albedo, Liang (2001) coefficients on Sentinel-2 bands"),
         units="1",
         dtype="float32",
         resampling=Resampling.BILINEAR,
@@ -650,9 +648,7 @@ def summarise(ds: xr.Dataset, grid: Grid) -> CubeSummary:
         # Absent, not merely empty: a cube written before the variable was declared. It
         # reports as unpopulated, which is what it is from a consumer's point of view.
         values = (
-            np.asarray(ds[spec.name].values)
-            if spec.name in ds
-            else np.array([], dtype=spec.dtype)
+            np.asarray(ds[spec.name].values) if spec.name in ds else np.array([], dtype=spec.dtype)
         )
         if spec.is_categorical:
             valid = values != np.asarray(spec.fill_value).astype(values.dtype)

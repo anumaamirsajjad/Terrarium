@@ -138,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
         nargs="*",
         default=None,
         help="seasonal windows to train on (default: every window in the cube). "
-             "Pass one label to reproduce the Phase 2/3 single-date model.",
+        "Pass one label to reproduce the Phase 2/3 single-date model.",
     )
     parser.add_argument("--rounds", type=int, default=400)
     parser.add_argument("--skip-cv", action="store_true", help="train only, no validation")
@@ -183,8 +183,7 @@ def main(argv: list[str] | None = None) -> int:
 
     dropped = [label for label in chosen if label not in training.windows]
     if dropped:
-        print(f"  NOTE  {len(dropped)} window(s) contributed no usable rows: "
-              f"{', '.join(dropped)}")
+        print(f"  NOTE  {len(dropped)} window(s) contributed no usable rows: {', '.join(dropped)}")
         print("        usually missing LST (winter cloud) or missing meteorology.\n")
 
     if n_rows < 1000:
@@ -228,12 +227,16 @@ def main(argv: list[str] | None = None) -> int:
     # honest framing for the pitch: this intervention buys summer cooling.
     mask_base = circular_mask(grid, args.lon, args.lat, args.radius_m)
 
-    print(f"  worked intervention: +{args.canopy:.0%} canopy, built-up cells within "
-          f"{args.radius_m:.0f} m of {args.lat:.4f} N {args.lon:.4f} E")
+    print(
+        f"  worked intervention: +{args.canopy:.0%} canopy, built-up cells within "
+        f"{args.radius_m:.0f} m of {args.lat:.4f} N {args.lon:.4f} E"
+    )
     print("  evaluated in every window the model was trained on\n")
 
-    print(f"    {'window':<16} {'cells':>7} {'dLST in':>9} {'spillover':>10} "
-          f"{'contrast':>9} {'linear':>8} {'ratio':>7}")
+    print(
+        f"    {'window':<16} {'cells':>7} {'dLST in':>9} {'spillover':>10} "
+        f"{'contrast':>9} {'linear':>8} {'ratio':>7}"
+    )
     print(f"    {'-' * 16} {'-' * 7} {'-' * 9} {'-' * 10} {'-' * 9} {'-' * 8} {'-' * 7}")
 
     ok = True
@@ -262,9 +265,11 @@ def main(argv: list[str] | None = None) -> int:
         expected = -mean_fraction * contrast
         ratio = stats.mean_delta_inside / expected if expected else float("nan")
 
-        print(f"    {label:<16} {stats.n_cells_changed:>7,} "
-              f"{stats.mean_delta_inside:>+9.3f} {stats.mean_delta_spillover:>+10.3f} "
-              f"{contrast:>+9.2f} {expected:>+8.3f} {ratio:>7.2f}")
+        print(
+            f"    {label:<16} {stats.n_cells_changed:>7,} "
+            f"{stats.mean_delta_inside:>+9.3f} {stats.mean_delta_spillover:>+10.3f} "
+            f"{contrast:>+9.2f} {expected:>+8.3f} {ratio:>7.2f}"
+        )
 
         is_summer = label.endswith("summer")
         seen_summer = seen_summer or is_summer

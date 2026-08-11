@@ -185,3 +185,19 @@ def test_a_pure_cooling_plan_is_reliable() -> None:
 
     assert result.net_to_gross == pytest.approx(1.0)
     assert result.shares_reliable
+
+
+def test_a_dominant_warming_plan_reports_its_shares_as_unreliable() -> None:
+    """`net_to_gross` is a magnitude and does not see sign (F13/F15).
+
+    A tile that reliably warms overall used to pass the same magnitude guard a reliably
+    cooling tile does, and be reported as "who received the cooling" with shares like
+    104 % of a cooling that never happened. There is no cooling to distribute here.
+    """
+    result = benefit_distribution(np.full(SHAPE, +1.0), _population())
+
+    # Not a vanishing denominator - the tile warms reliably, just in the wrong direction.
+    assert result.net_to_gross == pytest.approx(1.0)
+    assert result.total_person_degrees < 0  # negative net = net warming, per module docstring
+    assert not result.shares_reliable
+    assert not result.concentrated

@@ -113,9 +113,7 @@ def preset(slug: str) -> Preset:
     try:
         return PRESETS_BY_SLUG[slug]
     except KeyError:
-        raise KeyError(
-            f"no preset {slug!r}; have {sorted(PRESETS_BY_SLUG)}"
-        ) from None
+        raise KeyError(f"no preset {slug!r}; have {sorted(PRESETS_BY_SLUG)}") from None
 
 
 def trees_for_canopy(canopy_fraction_added: float, area_m2: float) -> int:

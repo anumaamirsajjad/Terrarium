@@ -32,7 +32,7 @@ from terrarium.api.schemas.simulate import SimulateRequest
 from terrarium.config import Settings, get_settings
 from terrarium.dsl.library import PRESETS, preset
 from terrarium.dsl.llm import resolve_adapter
-from terrarium.dsl.planner import PlanParseError, plan_from_text
+from terrarium.dsl.planner import plan_from_text
 from terrarium.dsl.schema import Plan
 from terrarium.dsl.validate import PlanError, resolve
 from terrarium.state.cube import select_window
@@ -82,7 +82,10 @@ def _plan_and_source(
     adapter = resolve_adapter(settings)
     try:
         parsed = plan_from_text(request.text, adapter=adapter)
-    except PlanParseError as exc:
+    except ValueError as exc:
+        # `PlanParseError` *is* a `ValueError`; caught by the base class as defence in
+        # depth (F14) so the next arithmetic surprise inside the parser is a 422 rather
+        # than a 500, even if it forgets to wrap itself in `PlanParseError`.
         # 422, not 400: the request was well formed and the sentence was not understood.
         # The message lists the vocabulary that *is* understood, which is the only useful
         # thing to say to someone who just typed something into a box.

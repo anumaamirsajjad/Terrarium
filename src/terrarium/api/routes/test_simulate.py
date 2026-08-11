@@ -8,6 +8,7 @@ what it actually did rather than what was asked for.
 
 from __future__ import annotations
 
+import json
 from typing import Any, cast
 
 import numpy as np
@@ -51,6 +52,22 @@ def simulate(client: TestClient, **overrides: Any) -> dict[str, Any]:
     response = client.post("/simulate", json=body)
     assert response.status_code == 200, response.text
     return cast("dict[str, Any]", response.json())
+
+
+def test_nan_in_the_body_is_a_422_not_an_unserialisable_500(client: TestClient) -> None:
+    """F22: `NaN` fails `ge`/`le` anyway, but FastAPI's own 422 echoes the rejected value
+    back - and `NaN` has no JSON spelling, so that echo used to fail to serialise and turn
+    a 422 into a 500. `allow_inf_nan=False` refuses it before there is anything to echo.
+
+    Sent as raw bytes rather than through `json=`: httpx's own encoder rejects a `NaN`
+    float before a request even leaves the client, so the raw wire format - a bare `NaN`
+    token, which is what a hand-built or non-Python client can still send - is what has
+    to be exercised here.
+    """
+    body = json.dumps({"geometry": PLANTABLE, "canopy_fraction_added": float("nan")})
+    response = client.post("/simulate", content=body, headers={"content-type": "application/json"})
+    assert response.status_code == 422
+    assert "canopy_fraction_added" in response.text
 
 
 def test_planting_cools_the_planted_area(client: TestClient) -> None:
@@ -149,9 +166,7 @@ def test_winter_and_summer_give_different_answers(client: TestClient) -> None:
 
 
 def test_an_unknown_window_is_404(client: TestClient) -> None:
-    response = client.post(
-        "/simulate", json={"geometry": PLANTABLE, "window": "1999-summer"}
-    )
+    response = client.post("/simulate", json={"geometry": PLANTABLE, "window": "1999-summer"})
 
     assert response.status_code == 404
     assert "1999-summer" in response.json()["detail"]
@@ -215,9 +230,7 @@ def test_a_point_is_rejected(client: TestClient) -> None:
 
 
 def test_a_canopy_fraction_above_one_is_rejected_by_the_schema(client: TestClient) -> None:
-    response = client.post(
-        "/simulate", json={"geometry": PLANTABLE, "canopy_fraction_added": 1.5}
-    )
+    response = client.post("/simulate", json={"geometry": PLANTABLE, "canopy_fraction_added": 1.5})
 
     assert response.status_code == 422
 

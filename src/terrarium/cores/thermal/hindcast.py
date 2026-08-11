@@ -223,9 +223,7 @@ def detect_change(
     if not before or not after:
         raise ValueError("hindcast needs at least one window on each side of the change")
 
-    change = _median_over_windows(cube, after, "ndvi") - _median_over_windows(
-        cube, before, "ndvi"
-    )
+    change = _median_over_windows(cube, after, "ndvi") - _median_over_windows(cube, before, "ndvi")
 
     finite = np.isfinite(change)
     if not finite.any():

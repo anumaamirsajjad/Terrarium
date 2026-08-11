@@ -30,9 +30,7 @@ def get_runtime(request: Request) -> Runtime:
     """
     runtime = cast("Runtime | None", getattr(request.app.state, RUNTIME_ATTR, None))
     if runtime is None:
-        reason = cast(
-            "str | None", getattr(request.app.state, STARTUP_ERROR_ATTR, None)
-        )
+        reason = cast("str | None", getattr(request.app.state, STARTUP_ERROR_ATTR, None))
         raise HTTPException(
             status_code=503,
             detail=reason or "cube and model are not loaded; this deployment cannot serve data",

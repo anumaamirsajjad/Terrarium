@@ -133,9 +133,7 @@ def _air(
         ),
         mixing_height_m=params.mixing_height_m,
         wind_speed_ms=float(np.asarray(window["wind_speed_ms"].values).reshape(-1)[0]),
-        wind_direction_deg=float(
-            np.asarray(window["wind_direction_deg"].values).reshape(-1)[0]
-        ),
+        wind_direction_deg=float(np.asarray(window["wind_direction_deg"].values).reshape(-1)[0]),
         emission_fraction_removed=intervention.emission_fraction_removed,
         delta=build_layer(
             result.delta,

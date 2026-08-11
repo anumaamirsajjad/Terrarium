@@ -10,9 +10,14 @@ as arguments so that loading them can happen exactly once, here, rather than per
 from __future__ import annotations
 
 import logging
+import math
+from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from terrarium import __version__
 from terrarium.api.deps import RUNTIME_ATTR, STARTUP_ERROR_ATTR
@@ -21,6 +26,83 @@ from terrarium.api.runtime import Runtime, StartupError, load_runtime
 from terrarium.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def _scrub_non_finite(value: Any) -> Any:
+    """Replace a `NaN`/`Infinity` float with its `repr` so a structure containing one can
+    still be JSON-encoded (F22).
+
+    `allow_inf_nan=False` on a schema's float fields rejects the value, but the resulting
+    `RequestValidationError` still echoes the raw rejected input in its `"input"` field -
+    that is the whole point of a validation error - and `NaN` has no JSON spelling.
+    Starlette's `JSONResponse` encodes strictly, so that echo used to fail to serialise
+    and turn a would-be 422 into an unrelated 500. Scrubbing here, once, for every route,
+    is the belt to the field setting's braces: it also covers a non-finite float on a
+    field with no `allow_inf_nan` constraint at all.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return repr(value)
+    if isinstance(value, dict):
+        return {k: _scrub_non_finite(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_scrub_non_finite(v) for v in value]
+    return value
+
+
+async def _validation_error_response(_: Request, exc: RequestValidationError) -> JSONResponse:
+    # `jsonable_encoder` first, same as FastAPI's own default handler: an error's `ctx`
+    # can carry the raised exception object itself (e.g. from a `model_validator`), which
+    # needs converting before it is JSON-safe at all - scrubbing alone is not that step.
+    errors = jsonable_encoder(exc.errors())
+    return JSONResponse(status_code=422, content={"detail": _scrub_non_finite(errors)})
+
+
+# Anything above ~1 MB is not a polygon a person drew by hand (F21): the mask this
+# produces is a fixed cell count for the tile whatever the request's own resolution, so a
+# 100 MB body buys a client nothing but CPU spent parsing it.
+MAX_BODY_BYTES = 1_000_000
+
+
+class BodySizeLimitMiddleware:
+    """Reject a request whose declared body size exceeds `MAX_BODY_BYTES`, before FastAPI
+    reads or parses it.
+
+    Pure ASGI rather than Starlette's `BaseHTTPMiddleware`, which buffers the whole body
+    into memory before a handler ever sees it — exactly the cost this guard exists to
+    avoid paying on a 100 MB request.
+
+    # ponytail: trusts the `Content-Length` header rather than also metering a chunked
+    # body with none, since every real client here (the frontend, curl, requests) sends
+    # one. Add streaming enforcement if an adversarial chunked upload becomes a real path.
+    """
+
+    def __init__(self, app: Any, *, max_bytes: int = MAX_BODY_BYTES) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        declared = dict(scope.get("headers") or []).get(b"content-length")
+        if declared is not None and int(declared) > self.max_bytes:
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 413,
+                    "headers": [(b"content-type", b"application/json")],
+                }
+            )
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": b'{"detail":"request body too large"}',
+                }
+            )
+            return
+
+        await self.app(scope, receive, send)
 
 
 def create_app(
@@ -43,11 +125,19 @@ def create_app(
         version=__version__,
     )
 
+    app.add_exception_handler(RequestValidationError, _validation_error_response)
+    app.add_middleware(BodySizeLimitMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
+        # F23: nothing in this project uses cookies or HTTP auth, and that is what makes
+        # a wildcard origin dangerous with credentials on - the two together are a CSRF
+        # hole for the same routes, from any origin, on someone else's browser tab.
+        allow_credentials=False,
+        # Narrowed from "*": this API implements GET and POST (and OPTIONS for the
+        # preflight); advertising DELETE, PUT and PATCH invites a client to expect a
+        # method that 404s.
+        allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
     )
 

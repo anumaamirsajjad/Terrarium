@@ -175,7 +175,7 @@ export interface PlainSummary {
    * model cannot talk a marginal plan up into a moderate one. `"unrated"` is an
    * air-only plan, whose magnitudes are uncalibrated.
    */
-  verdict: "large" | "moderate" | "small" | "marginal" | "unrated" | "none";
+  verdict: "large" | "moderate" | "small" | "marginal" | "unrated" | "none" | "warming";
   headline: string;
   points: string[];
   caveat: string;

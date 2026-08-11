@@ -208,6 +208,15 @@ def emission_grid(payload: dict[str, Any], grid: Grid) -> np.ndarray:
     Pure: JSON in, `(y, x)` float32 out. Cells with no source are 0.0, not NaN - the
     inventory covers the whole tile, and "no road here" is a real zero.
     """
+    if not payload.get("elements"):
+        # An empty response - a 504 or a broken query answered as 200-with-nothing - is a
+        # fault upstream, not a finding that this tile has no roads (F25). Left unchecked,
+        # this silently built an inventory that answers zero everywhere.
+        raise ValueError(
+            "Overpass payload has no elements - refusing to build an emission inventory "
+            "that would silently read as zero everywhere"
+        )
+
     to_grid = Transformer.from_crs(WGS84, grid.crs, always_xy=True).transform
     height, width = grid.shape
     left, bottom, right, top = grid.bounds

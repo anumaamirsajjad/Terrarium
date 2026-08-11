@@ -263,9 +263,7 @@ def test_a_model_trained_on_stale_features_is_refused_at_startup(tmp_path: Path)
     model_path = tmp_path / "thermal.txt"
     stale.save_model(str(model_path))
 
-    settings = Settings(
-        env="test", serve_zarr_store=cube_path, thermal_model_path=model_path
-    )
+    settings = Settings(env="test", serve_zarr_store=cube_path, thermal_model_path=model_path)
     with pytest.raises(StartupError, match="different feature set"):
         load_runtime(settings)
 
@@ -285,9 +283,7 @@ def test_a_model_with_the_right_features_in_the_wrong_order_is_refused(
     model_path = tmp_path / "thermal.txt"
     model.save_model(str(model_path))
 
-    settings = Settings(
-        env="test", serve_zarr_store=cube_path, thermal_model_path=model_path
-    )
+    settings = Settings(env="test", serve_zarr_store=cube_path, thermal_model_path=model_path)
     with pytest.raises(StartupError, match="different order"):
         load_runtime(settings)
 
@@ -300,9 +296,7 @@ def test_a_current_model_loads_and_can_simulate(tmp_path: Path) -> None:
     model_path = tmp_path / "thermal.txt"
     model.save_model(str(model_path))
 
-    settings = Settings(
-        env="test", serve_zarr_store=cube_path, thermal_model_path=model_path
-    )
+    settings = Settings(env="test", serve_zarr_store=cube_path, thermal_model_path=model_path)
     runtime = load_runtime(settings)
     assert list(runtime.model.feature_name()) == list(FEATURE_NAMES)
 

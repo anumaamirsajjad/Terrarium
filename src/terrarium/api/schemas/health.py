@@ -12,9 +12,7 @@ class TileInfo(BaseModel):
 
     name: str
     country: str
-    bbox: tuple[float, float, float, float] = Field(
-        description="WGS84 [west, south, east, north]"
-    )
+    bbox: tuple[float, float, float, float] = Field(description="WGS84 [west, south, east, north]")
     centroid: tuple[float, float] = Field(description="WGS84 [longitude, latitude]")
     crs: str
     target_resolution_m: int

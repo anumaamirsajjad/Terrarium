@@ -91,7 +91,7 @@ class BriefInputs(BaseModel):
     plan_notes: tuple[str, ...] = ()
 
 
-Impact = Literal["large", "moderate", "small", "marginal", "unrated", "none"]
+Impact = Literal["large", "moderate", "small", "marginal", "unrated", "none", "warming"]
 
 # The phrase that goes in the headline for each verdict. A word like "marginal" is precise
 # and means nothing to the reader this block is for, so the verdict travels as a structured
@@ -254,8 +254,34 @@ def plain_summary(inputs: BriefInputs, expected: float) -> PlainSummary:
     same fact in a unit they can judge, and it carries the ceiling with it for free.
     """
     cooled = expected < -0.005
+    warming = expected > 0.005
     air = inputs.air
     points: list[str] = []
+
+    if warming:
+        # A tree ensemble is not monotone in canopy at the pixel level (F13/F15): a
+        # minority of cells warm even under a plan that cools on average tile-wide. A
+        # small polygon can land squarely on one. This is a real model output, so it is
+        # reported as warming, never smoothed into "no measurable change".
+        return PlainSummary(
+            verdict="warming",
+            headline=(
+                f"{inputs.plan_name} across {inputs.area_km2:.1f} km2 is modelled to make "
+                f"the ground about {expected:.2f} degC WARMER on a {inputs.season} "
+                "morning here, not cooler."
+            ),
+            points=(
+                "This is a real model output, not a labelling mistake: the emulator is a "
+                "tree ensemble fitted per pixel, and a minority of cells move the wrong "
+                "way even under a plan that cools this tile on average.",
+                "A small polygon can land on one of those cells. Try a larger area, or "
+                "check the map for where exactly the warming sits.",
+            ),
+            caveat=(
+                "This is a model of the ground surface, not the air, and not a promise "
+                "about any single street."
+            ),
+        )
 
     if not cooled and air is None:
         # Two different nothings, and telling a reader the wrong one is worse than telling
@@ -270,8 +296,7 @@ def plain_summary(inputs: BriefInputs, expected: float) -> PlainSummary:
                     "from."
                 ),
                 points=(
-                    "This is a gap in the data, not a finding that the plan would achieve "
-                    "nothing.",
+                    "This is a gap in the data, not a finding that the plan would achieve nothing.",
                     "Planting trees in the same area can be modelled right now; a traffic "
                     "ban cannot, until the emissions layer is loaded.",
                 ),
@@ -404,8 +429,7 @@ def plain_summary(inputs: BriefInputs, expected: float) -> PlainSummary:
     points.append(
         f"This is a {inputs.season} figure"
         + (
-            ", and summer is when it counts - the same trees do far less on a winter "
-            "morning."
+            ", and summer is when it counts - the same trees do far less on a winter morning."
             if inputs.season == "summer"
             else ". The same trees do several times more on a summer morning, which is "
             "when the heat is actually a problem."
@@ -434,7 +458,7 @@ def brief_for(inputs: BriefInputs) -> Brief:
 
     planted = inputs.mean_canopy_added > 0
 
-    if planted:
+    if planted and inputs.mean_delta_inside < 0:
         headline = (
             f"{inputs.plan_name} over {inputs.area_km2:.2f} km2 cools this tile's "
             f"mid-morning land surface by {abs(inputs.mean_delta_inside):.2f} degC on "
@@ -449,6 +473,16 @@ def brief_for(inputs: BriefInputs) -> Brief:
                 f" The densest tenth of the population receives "
                 f"{inputs.equity.densest_decile_share:.0%} of it."
             )
+    elif planted:
+        # A warming result (F15): the emulator is not monotone in canopy at the pixel
+        # level, so a plan that cools this tile on average can still warm a polygon that
+        # lands on the wrong cells. Report it as warming, not as a muted "cools by 0.00".
+        headline = (
+            f"{inputs.plan_name} over {inputs.area_km2:.2f} km2 is modelled to WARM this "
+            f"tile's mid-morning land surface by {inputs.mean_delta_inside:.2f} degC on "
+            f"average inside the polygon in {inputs.window} — closer to {expected:.2f} "
+            "degC once the hindcast correction is applied."
+        )
     elif inputs.air is not None:
         headline = (
             f"{inputs.plan_name} over {inputs.area_km2:.2f} km2 removes "
@@ -480,11 +514,20 @@ def brief_for(inputs: BriefInputs) -> Brief:
                 "roughly three years in the ground to reach the crown size this figure "
                 "assumes, not a change visible on planting day."
             )
-        findings.append(
-            f"The ceiling on this window is {inputs.tree_built_contrast_c:.2f} degC — the "
-            "tile's own observed gap between built-up and tree-cover pixels. No planting "
-            "here can beat that, whatever the literature says about other cities."
-        )
+        if inputs.mean_delta_inside < 0:
+            findings.append(
+                f"The ceiling on this window is {inputs.tree_built_contrast_c:.2f} degC — "
+                "the tile's own observed gap between built-up and tree-cover pixels. No "
+                "planting here can beat that, whatever the literature says about other "
+                "cities."
+            )
+        else:
+            findings.append(
+                f"The ceiling on this window is {inputs.tree_built_contrast_c:.2f} degC — "
+                "the tile's own observed gap between built-up and tree-cover pixels. This "
+                "result is on the wrong side of it: a warming figure this large is a local "
+                "model artefact, not a physical ceiling being exceeded."
+            )
         if inputs.spillover_cells:
             findings.append(
                 f"Cooling reaches past the polygon: {_c(inputs.mean_delta_spillover)} degC "
@@ -495,7 +538,10 @@ def brief_for(inputs: BriefInputs) -> Brief:
             f"Best single cell: {_c(inputs.min_delta)} degC. A mean over a polygon hides "
             "how uneven the planting's effect is."
         )
-        if inputs.ratio_to_linear is not None:
+        if inputs.ratio_to_linear is not None and inputs.mean_delta_inside < 0:
+            # Withheld for a warming result: the sentence only means "slightly
+            # conservative" relative to a linear cooling response, which does not exist
+            # to be conservative against when the net delta is positive.
             findings.append(
                 f"Against a purely linear response the model returns "
                 f"{inputs.ratio_to_linear:.2f}x — slightly conservative, which is the "
@@ -508,7 +554,12 @@ def brief_for(inputs: BriefInputs) -> Brief:
     # divide by nothing and come back "unreliable" — reporting that as a finding would
     # describe a distribution the plan never attempted.
     equity = inputs.equity if planted else None
-    if equity is not None and equity.shares_reliable:
+    # `shares_reliable` was built for a near-zero net benefit (shares dividing by ~0 and
+    # exploding); it says nothing about a net delta that is confidently the wrong sign. A
+    # warming result withholds the shares too, or a 5.25 degC warming reads as "104% of
+    # it received by the densest decile" (F15) — a real division, not a wrong number, but
+    # not a share of a cooling that never happened either.
+    if equity is not None and equity.shares_reliable and inputs.mean_delta_inside < 0:
         verdict = "concentrated in a few places" if equity.concentrated else "reasonably spread"
         findings.append(
             f"Who gets it: the three best-served population deciles hold "
@@ -522,6 +573,12 @@ def brief_for(inputs: BriefInputs) -> Brief:
                 "degree-cells, lands where nobody lives. Moving the polygon toward "
                 "housing buys more people per degree without costing another tree."
             )
+    elif equity is not None and inputs.mean_delta_inside >= 0:
+        findings.append(
+            "The equity split is withheld: this plan is modelled to warm rather than "
+            "cool on average, so a share of 'who received the cooling' has no meaning "
+            "here."
+        )
     elif equity is not None:
         findings.append(
             "The equity split is withheld: this plan cools and warms in near-equal "
@@ -579,6 +636,19 @@ def brief_for(inputs: BriefInputs) -> Brief:
             "radiating surface. It runs several degrees above air temperature and peaks "
             "after the overpass, so this is not what a thermometer in the shade would read."
         )
+        uncertainties.append(
+            "The emulator is a tree ensemble fitted per pixel, not a monotone function of "
+            "canopy: on a whole-tile planting a small minority of cells move the wrong "
+            "way even though the tile mean cools. The polygon mean above is the quantity "
+            "to read, not any single cell on the map."
+        )
+        uncertainties.append(
+            "Meteorology is held identical between the baseline and this scenario, so it "
+            "cancels out of the delta above — but the model is not additive, and varying "
+            "only the window's air temperature has been measured to swing a headline "
+            "cooling figure by up to 4x. An unseen year's weather changes this plan's "
+            "scale, not only its offset."
+        )
     else:
         uncertainties.append(
             f"This is {inputs.window} ({inputs.season}). Under the November-January "
@@ -616,9 +686,7 @@ def brief_for(inputs: BriefInputs) -> Brief:
         # never 'high'. A summer air figure drops to 'low' because its spatial pattern
         # beats no null model; a winter one no longer has to, since it does (D21).
         confidence=(
-            "low"
-            if not planted or (air is not None and inputs.season != "winter")
-            else "moderate"
+            "low" if not planted or (air is not None and inputs.season != "winter") else "moderate"
         ),
         expected_cooling_c=expected,
         expected_pm25_delta=air.mean_delta_inside if air is not None else None,

@@ -40,9 +40,7 @@ def grid_info(grid: Grid) -> GridInfo:
     transformer = Transformer.from_crs(grid.crs, WGS84, always_xy=True)
     # All four corners, not two: a UTM rectangle reprojects to a slight quadrilateral,
     # so taking the envelope guarantees the reported box covers the whole raster.
-    lons, lats = transformer.transform(
-        [left, right, right, left], [bottom, bottom, top, top]
-    )
+    lons, lats = transformer.transform([left, right, right, left], [bottom, bottom, top, top])
 
     return GridInfo(
         crs=grid.crs,

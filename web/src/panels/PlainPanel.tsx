@@ -40,14 +40,21 @@ const VERDICT: Record<PlainSummary["verdict"], { label: string; className: strin
   unrated: { label: "size not verified", className: "bg-amber-400/10 text-amber-200/90" },
   // The headline already says nothing happened; a badge saying so twice is noise.
   none: null,
+  // Red, deliberately breaking the "not a red-to-green scale" rule above: this is the one
+  // verdict that means the plan made things worse, not merely small.
+  warming: { label: "warms, not cools", className: "bg-rose-400/15 text-rose-300" },
 };
 
 export default function PlainPanel({ brief }: PlainPanelProps) {
   const { plain } = brief;
+  const warming = plain.verdict === "warming";
   const cooling = Math.abs(brief.expected_cooling_c);
   // Below a hundredth of a degree the rounded figure reads "0.00", which looks like a bug
   // rather than a small result. The headline sentence already says what happened.
-  const measurable = cooling >= 0.005;
+  // A warming result is excluded here: `expected_cooling_c` is positive for it, and taking
+  // its absolute value would render "N.NN °C cooler ground" for a result that is the
+  // opposite of cooler (F15).
+  const measurable = !warming && cooling >= 0.005;
   // An air-only plan (a restriction with no planting) never has a measurable temperature
   // change, so it used to fall through to no headline number at all — the paragraph below
   // was the only place the improvement showed up. This gives it the same prominence a
@@ -69,6 +76,15 @@ export default function PlainPanel({ brief }: PlainPanelProps) {
             {cooling.toFixed(2)} °C
           </span>
           <span className="text-xs text-white/50">cooler ground, on average</span>
+        </div>
+      )}
+
+      {warming && (
+        <div className="flex items-baseline gap-2">
+          <span className="text-4xl font-semibold tracking-tight text-rose-300">
+            {brief.expected_cooling_c.toFixed(2)} °C
+          </span>
+          <span className="text-xs text-white/50">warmer ground, on average</span>
         </div>
       )}
 

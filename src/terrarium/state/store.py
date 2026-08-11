@@ -130,6 +130,12 @@ def write_cube(ds: xr.Dataset, path: Path, *, grid: Grid) -> Path:
             "shape": list(grid.shape),
         }
     )
+    # F9: also written bare, not only inside the `grid` blob. `open_cube` restores the CRS
+    # from this key, and a cube that has already been through one open/write cycle carries
+    # `spatial_ref` (a coordinate, not an attr) rather than `attrs["crs"]` - dropped two
+    # lines below without ever being copied back here, which silently lost the CRS on the
+    # *second* write of a cube's life, not the first, which is why it went unnoticed.
+    ds.attrs["crs"] = grid.crs
     # rioxarray stashes the CRS on a non-serialisable object; the attrs above carry it.
     ds = ds.drop_vars("spatial_ref", errors="ignore")
 
@@ -141,9 +147,7 @@ def write_cube(ds: xr.Dataset, path: Path, *, grid: Grid) -> Path:
         if not {"y", "x"} <= set(var.dims):
             continue
         encoding[str(name)] = {
-            "chunks": tuple(
-                min(512, ds.sizes[dim]) if dim in ("y", "x") else 1 for dim in var.dims
-            )
+            "chunks": tuple(min(512, ds.sizes[dim]) if dim in ("y", "x") else 1 for dim in var.dims)
         }
     ds.to_zarr(path, mode="w", encoding=encoding, consolidated=True)
     logger.info("wrote cube to %s", path)
@@ -154,6 +158,10 @@ def open_cube(path: Path) -> xr.Dataset:
     """Open a previously written cube. The CRS is restored from attrs."""
     ds = cast("xr.Dataset", xr.open_zarr(path, consolidated=True))
     crs = ds.attrs.get("crs")
+    if not crs and ds.attrs.get("grid"):
+        # F9: repairs a cube written before `write_cube` started setting `attrs["crs"]`
+        # bare - its `grid` blob still has the CRS, `write_cube` just never re-read it.
+        crs = json.loads(ds.attrs["grid"]).get("crs")
     if crs:
         # rioxarray's accessor is untyped, hence the cast.
         ds = cast("xr.Dataset", ds.rio.write_crs(crs))

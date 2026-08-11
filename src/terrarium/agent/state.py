@@ -224,6 +224,4 @@ class SearchEvent(BaseModel):
     attempt: Attempt | None = Field(
         default=None, description="Present on the events that produced one"
     )
-    result: SearchResult | None = Field(
-        default=None, description="Present on the final event only"
-    )
+    result: SearchResult | None = Field(default=None, description="Present on the final event only")

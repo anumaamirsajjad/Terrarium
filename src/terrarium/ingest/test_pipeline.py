@@ -568,8 +568,14 @@ def test_every_window_gets_its_own_composite(
     """Each window must be searched over its own dates, not the whole span at once."""
     searched: list[str | None] = []
     # `mocked` already replaced the real search; wrap whatever is currently installed.
-    inner = _fake_search({COLLECTION_SENTINEL2: (30, 6), COLLECTION_LANDSAT: (12, 4),
-                          COLLECTION_DEM: (2, 2), COLLECTION_WORLDCOVER: (1, 1)})
+    inner = _fake_search(
+        {
+            COLLECTION_SENTINEL2: (30, 6),
+            COLLECTION_LANDSAT: (12, 4),
+            COLLECTION_DEM: (2, 2),
+            COLLECTION_WORLDCOVER: (1, 1),
+        }
+    )
 
     def recording_search(
         catalog: object,
@@ -795,8 +801,14 @@ def test_one_bad_window_does_not_cost_the_others(
     so this is a genuinely new failure mode.
     """
     doomed = windows[-1]
-    inner = _fake_search({COLLECTION_SENTINEL2: (30, 6), COLLECTION_LANDSAT: (12, 4),
-                          COLLECTION_DEM: (2, 2), COLLECTION_WORLDCOVER: (1, 1)})
+    inner = _fake_search(
+        {
+            COLLECTION_SENTINEL2: (30, 6),
+            COLLECTION_LANDSAT: (12, 4),
+            COLLECTION_DEM: (2, 2),
+            COLLECTION_WORLDCOVER: (1, 1),
+        }
+    )
 
     def flaky_search(
         catalog: object,
@@ -822,9 +834,7 @@ def test_one_bad_window_does_not_cost_the_others(
 
     # And the other sources for the doomed window still landed.
     assert np.isfinite(select_window(cube, doomed.label)["ndvi"].values).any()
-    assert doomed.label not in {
-        r.window for r in records if r.collection_id == COLLECTION_LANDSAT
-    }
+    assert doomed.label not in {r.window for r in records if r.collection_id == COLLECTION_LANDSAT}
 
 
 def test_observation_depth_is_measured_and_an_unobserved_pixel_is_flagged(
@@ -1241,9 +1251,7 @@ def test_a_truncated_download_recovers_on_the_next_attempt(
     tested only as far as the rejection.
     """
     responses = iter([_ShortResponse(), _CompleteResponse()])
-    monkeypatch.setattr(
-        urllib.request, "urlopen", lambda url, timeout=None: next(responses)
-    )
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=None: next(responses))
     target = tmp_path / "worldpop.tif"
     url = "http://example.invalid/x.tif"
 
@@ -1267,9 +1275,7 @@ def test_a_download_without_content_length_says_it_could_not_be_verified(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Silence here would mean a passing build implying a check that never ran."""
-    monkeypatch.setattr(
-        urllib.request, "urlopen", lambda url, timeout=None: _NoLengthResponse()
-    )
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=None: _NoLengthResponse())
     target = tmp_path / "worldpop.tif"
 
     with caplog.at_level(logging.WARNING):
@@ -1439,9 +1445,7 @@ def test_negative_reflectance_cannot_push_ndvi_out_of_bounds(
         )
 
     monkeypatch.setattr(pipeline, "load_items", load)
-    monkeypatch.setattr(
-        pipeline, "search_collection", _fake_search({COLLECTION_SENTINEL2: (5, 5)})
-    )
+    monkeypatch.setattr(pipeline, "search_collection", _fake_search({COLLECTION_SENTINEL2: (5, 5)}))
 
     arrays, _ = pipeline._ingest_sentinel2(FAKE_CATALOG, settings, grid, settings.windows[0])
     ndvi = np.asarray(arrays["ndvi"].values)

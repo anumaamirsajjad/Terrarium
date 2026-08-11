@@ -31,6 +31,19 @@ def test_a_planting_of_zero_trees_is_not_a_plan() -> None:
         PlantTrees(tree_count=0)
 
 
+def test_a_misspelled_field_is_refused_rather_than_silently_dropped() -> None:
+    """F18: `Plan` is the model an LLM emits, so it needs `extra="forbid"` the most - a
+    typo'd `tree_counts` used to parse as "no trees specified" (both units omitted) rather
+    than as the actually-provided count nobody read."""
+    with pytest.raises(ValidationError, match="tree_counts"):
+        PlantTrees(tree_counts=5_000)  # type: ignore[call-arg]
+
+
+def test_plan_itself_refuses_an_unknown_field() -> None:
+    with pytest.raises(ValidationError, match="extra"):
+        Plan(name="x", actions=[PlantTrees(tree_count=100)], cost=5)  # type: ignore[call-arg]
+
+
 def test_emission_removal_must_be_a_fraction() -> None:
     assert RestrictVehicles(emission_fraction_removed=1.0).emission_fraction_removed == 1.0
     with pytest.raises(ValidationError):

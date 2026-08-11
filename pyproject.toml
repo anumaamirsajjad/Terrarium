@@ -10,8 +10,11 @@ dependencies = [
     # --- API layer ---
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
-    "pydantic>=2.9",
-    "pydantic-settings>=2.6",
+    # F8: capped below 3 - `planetary-computer` uses class-based `config`, removed in
+    # Pydantic V3, so an unbounded pin breaks every ingest path with an import error the
+    # day V3 ships.
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.6,<3",
     # --- State Cube: geospatial ingest + array storage ---
     "xarray>=2024.10",
     "odc-stac>=0.3.10",
@@ -101,20 +104,6 @@ ignore = ["ANN401"]  # allow typing.Any where genuinely needed
 # third-party signatures they stand in for.
 "**/test_*.py" = ["ANN001", "ANN002", "ANN003", "ANN201", "ANN202"]
 "scripts/*.py" = ["ANN001"]
-# The Urdu half of the rule parser (Phase 11) is written in Urdu: its patterns, its
-# examples and the sentence it refuses with all contain Arabic script and Eastern
-# Arabic-Indic digits. RUF001-003 flag those as characters that "look like" ASCII, which
-# is the right warning for a stray Cyrillic 'а' in an English identifier and the wrong one
-# for text that is deliberately not English.
-"src/terrarium/dsl/planner.py" = ["RUF001", "RUF002", "RUF003"]
-"src/terrarium/dsl/test_planner.py" = ["RUF001", "RUF002", "RUF003"]
-# Phase C put Urdu into the other half of the DSL: `llm.py` carries the digit-folding
-# table (۰-۹, ٠-٩) that the faithfulness guard depends on, and `test_llm.py` asserts on
-# whole Urdu sentences. Same reasoning as the parser above — RUF001-003 are the right
-# warning for a stray Cyrillic 'а' in an English identifier and the wrong one for text
-# that is deliberately not English.
-"src/terrarium/dsl/llm.py" = ["RUF001", "RUF002", "RUF003"]
-"src/terrarium/dsl/test_llm.py" = ["RUF001", "RUF002", "RUF003"]
 
 [tool.mypy]
 python_version = "3.12"

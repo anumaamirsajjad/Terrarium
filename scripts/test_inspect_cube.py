@@ -100,9 +100,7 @@ def test_a_cube_missing_a_class_refuses_to_compute(capsys: pytest.CaptureFixture
     A tile that is genuinely all built-up should say the number is not computable rather
     than report a difference against an empty set.
     """
-    inspect_cube._print_contrast(
-        _cube(landcover_classes=(BUILT_UP_CLASS,)), list(WINDOWS)
-    )
+    inspect_cube._print_contrast(_cube(landcover_classes=(BUILT_UP_CLASS,)), list(WINDOWS))
 
     out = capsys.readouterr().out
     assert "not computable" in out

@@ -51,9 +51,7 @@ class PlanRequest(BaseModel):
             "parser otherwise — the response says which."
         ),
     )
-    preset: str | None = Field(
-        default=None, description="Slug from `GET /plan/presets`"
-    )
+    preset: str | None = Field(default=None, description="Slug from `GET /plan/presets`")
     plan: Plan | None = Field(
         default=None, description="A DSL plan built client-side. Validated like any other."
     )

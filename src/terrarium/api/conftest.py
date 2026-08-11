@@ -58,9 +58,7 @@ def synthetic_cube() -> xr.Dataset:
     # lobes, so every intermediate value is populated somewhere on the tile.
     ys = np.linspace(0.0, 1.0, height)[:, None]
     xs = np.linspace(0.0, 1.0, width)[None, :]
-    greenness = 0.5 * (ys + xs) / 2.0 + 0.35 * np.sin(3.0 * np.pi * ys) * np.cos(
-        2.0 * np.pi * xs
-    )
+    greenness = 0.5 * (ys + xs) / 2.0 + 0.35 * np.sin(3.0 * np.pi * ys) * np.cos(2.0 * np.pi * xs)
     greenness = np.clip((greenness - greenness.min()) / np.ptp(greenness), 0.0, 1.0)
 
     # Land cover follows the field rather than contradicting it, so "tree cover" really
@@ -111,9 +109,7 @@ def synthetic_cube() -> xr.Dataset:
         coords={
             "y": grid.y_coords(),
             "x": grid.x_coords(),
-            "time": np.array(
-                ["2024-05-16", "2024-12-16"], dtype="datetime64[ns]"
-            ),
+            "time": np.array(["2024-05-16", "2024-12-16"], dtype="datetime64[ns]"),
             "window": ("time", np.array(WINDOWS, dtype="<U32")),
             "season": ("time", np.array(SEASONS, dtype="<U16")),
         },

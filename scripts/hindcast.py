@@ -99,11 +99,13 @@ def _split(
 def _print_sites(field: ChangeField, grid: Grid, top: int) -> None:
     _banner("CHANGE DETECTION")
     print(f"  median tile-wide NDVI drift   {field.median_drift:+.4f}")
-    print(f"  threshold beyond that drift   {field.threshold:.4f}"
-          f"  ({DEFAULT_SIGMA:.0f} robust sigma)")
+    print(
+        f"  threshold beyond that drift   {field.threshold:.4f}  ({DEFAULT_SIGMA:.0f} robust sigma)"
+    )
     print(f"  cells over threshold          {field.n_changed:,}")
-    print(f"  cells inside a site           {field.n_in_sites:,}"
-          f"  (patches >= {MIN_SITE_CELLS} cells)")
+    print(
+        f"  cells inside a site           {field.n_in_sites:,}  (patches >= {MIN_SITE_CELLS} cells)"
+    )
     print(f"  sites found                   {len(field.sites)}")
 
     if not field.sites:
@@ -121,8 +123,10 @@ def _print_sites(field: ChangeField, grid: Grid, top: int) -> None:
     for site in field.sites[:top]:
         lon, lat = to_wgs84(site.centre_x, site.centre_y)
         kind = "greening" if site.greening else "browning"
-        print(f"    {kind:<9} {site.n_cells:>6,} {site.mean_ndvi_change:>+8.3f} "
-              f" {lat:>11.4f}, {lon:>10.4f}")
+        print(
+            f"    {kind:<9} {site.n_cells:>6,} {site.mean_ndvi_change:>+8.3f} "
+            f" {lat:>11.4f}, {lon:>10.4f}"
+        )
 
 
 def _print_report(report: HindcastReport) -> None:
@@ -174,8 +178,10 @@ def _print_report(report: HindcastReport) -> None:
         f"changed cells had a control"
     )
     if matched.unmatched_cells:
-        print(f"    {matched.unmatched_cells:,} changed cells had no comparable control "
-              "and are excluded")
+        print(
+            f"    {matched.unmatched_cells:,} changed cells had no comparable control "
+            "and are excluded"
+        )
     print("    Quote the matched column. Land that greens starts low-NDVI and often")
     print("    urban-fringe, so the raw column compares it against a tile it differs")
     print("    from in exactly the ways that predict temperature.")
@@ -226,9 +232,7 @@ def main(argv: list[str] | None = None) -> int:
     for label, variable, fraction in rejected:
         print(f"  SKIPPED   {label}: {variable} only {fraction:.1%} valid")
 
-    field = detect_change(
-        cube, before, after, sigma=args.sigma, min_site_cells=args.min_site_cells
-    )
+    field = detect_change(cube, before, after, sigma=args.sigma, min_site_cells=args.min_site_cells)
     _print_sites(field, grid, args.top)
 
     if not field.sites:

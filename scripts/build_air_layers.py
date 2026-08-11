@@ -77,8 +77,9 @@ def _wind_direction(settings, grid, windows: list[str], existing: np.ndarray | N
     for i, label in enumerate(windows):
         window = _window_for(label)
         if window is None:
-            logger.warning("%s is not a window label this build understands; keeping %s",
-                           label, values[i])
+            logger.warning(
+                "%s is not a window label this build understands; keeping %s", label, values[i]
+            )
             continue
         try:
             arrays, _ = _ingest_meteorology(None, settings, grid, window)
@@ -101,9 +102,7 @@ def main() -> int:
     parser.add_argument(
         "--zarr", type=Path, default=settings.serve_zarr_store, help="cube to add layers to"
     )
-    parser.add_argument(
-        "--out", type=Path, default=None, help="where to write (default: in place)"
-    )
+    parser.add_argument("--out", type=Path, default=None, help="where to write (default: in place)")
     args = parser.parse_args()
 
     if not args.zarr.exists():
@@ -140,8 +139,11 @@ def main() -> int:
     for label, value in zip(labels, directions, strict=True):
         print(f"  {DIRECTION} [{label}]: {value:.0f}")
     if not np.isfinite(directions).all():
-        print("\n  WARNING: some windows have no wind direction; the air core cannot run "
-              "on those. See the log above.", file=sys.stderr)
+        print(
+            "\n  WARNING: some windows have no wind direction; the air core cannot run "
+            "on those. See the log above.",
+            file=sys.stderr,
+        )
         return 1
     return 0
 

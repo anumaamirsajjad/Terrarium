@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from typing import Literal
 
@@ -55,8 +56,10 @@ class ParsedPlan(BaseModel):
 # ------------------------------------------------------------------ rule parser ---
 
 # "5,000 trees", "5000 trees", "5k trees", "two thousand" is deliberately not supported:
-# spelled-out numerals are a rabbit hole and a demo types digits.
-_TREES = re.compile(r"(\d[\d,\s]*(?:\.\d+)?)\s*(k|thousand)?\s*(?:more\s+)?(?:trees?)")
+# spelled-out numerals are a rabbit hole and a demo types digits. Capped at 15 digits
+# (a quadrillion) - well past any tree count anybody would type, and short enough that
+# `float()` never produces `inf`, which `round()` cannot convert (F14).
+_TREES = re.compile(r"(\d[\d,\s]{0,14}(?:\.\d+)?)\s*(k|thousand)?\s*(?:more\s+)?(?:trees?)")
 # A percentage near a greenery word, either order: "30% canopy" and "canopy by 30%".
 _CANOPY_FIRST = re.compile(
     r"(\d+(?:\.\d+)?)\s*(?:%|per\s*cent)[^.]{0,24}?(canopy|tree|shade|green)"
@@ -87,6 +90,10 @@ def _number(raw: str, multiplier: str | None) -> int:
     value = float(raw.replace(",", "").replace(" ", ""))
     if multiplier:
         value *= 1_000
+    if not math.isfinite(value):
+        # A long enough digit run overflows `float()` to `inf`, which `round()` cannot
+        # convert - a bare `OverflowError` out of a rule parser, not a refusal (F14).
+        raise PlanParseError("that is not a number of trees anybody can plant")
     return round(value)
 
 

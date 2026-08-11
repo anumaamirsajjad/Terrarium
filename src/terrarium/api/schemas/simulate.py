@@ -35,6 +35,11 @@ class SimulateRequest(BaseModel):
         default=0.30,
         ge=0.0,
         le=1.0,
+        # F22: `NaN`/`Infinity` fail `ge`/`le` anyway (every comparison with NaN is
+        # False), but FastAPI's 422 echoes the rejected input - and `NaN` has no JSON
+        # spelling, so that echo itself failed to serialise and turned a 422 into a 500.
+        # Refusing it here means the error never has a non-finite float to echo.
+        allow_inf_nan=False,
         description=(
             "Canopy cover to add, as a fraction of cell area. Capped per cell against "
             "what is actually still plantable there, so the requested figure is a "
@@ -45,6 +50,7 @@ class SimulateRequest(BaseModel):
         default=0.0,
         ge=0.0,
         le=1.0,
+        allow_inf_nan=False,
         description=(
             "Share of road and kiln PM2.5 emissions removed inside the polygon — a "
             "low-emission zone. 0.0, the default, means the plan says nothing about "

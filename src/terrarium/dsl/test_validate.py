@@ -92,6 +92,11 @@ def test_a_restriction_plants_nothing() -> None:
 def test_a_planting_says_it_will_not_move_the_air() -> None:
     resolved = resolve(_trees(10), ROOMY)
     assert any("thermal instrument" in note for note in resolved.notes)
+    # F19: the naming rule applies here too - "air quality" unqualified is never the
+    # phrase, because this project's air core is not what a monitor reads.
+    joined = " ".join(resolved.notes)
+    assert "locally-generated PM2.5" in joined
+    assert "air quality" not in joined
 
 
 def test_a_combined_plan_carries_both_levers_and_neither_note() -> None:

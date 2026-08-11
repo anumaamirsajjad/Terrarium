@@ -162,9 +162,7 @@ def test_an_empty_groq_completion_is_unavailable_not_an_empty_plan(
     Returned as-is it would parse as a plan with nothing in it, which is a silent wrong
     answer rather than a fallback to the rule parser.
     """
-    monkeypatch.setattr(
-        urllib.request, "urlopen", lambda *_, **__: _Response(_choice(""))
-    )
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_, **__: _Response(_choice("")))
     with pytest.raises(LLMUnavailable, match="empty completion"):
         GroqAdapter(api_key="secret").complete_json(system="s", user="u")
 
@@ -190,13 +188,11 @@ class _Dead:
         raise LLMUnavailable("401 Invalid API Key")
 
 
-
 class _Live:
     name = "live:provider"
 
     def complete_json(self, **_: object) -> str:
         return '{"from": "text"}'
-
 
 
 def test_a_dead_primary_does_not_shadow_a_working_secondary() -> None:
@@ -430,6 +426,43 @@ def test_thousands_separators_do_not_count_as_a_new_number() -> None:
     assert llm._numbers_are_faithful(source="180905 trees", rewritten="180,905 trees")
 
 
+# --- F16: the guard must catch a swapped unit or an inverted direction, not just a new
+# numeral. Each case below passed the old bare-digit `_numbers_are_faithful` check.
+
+
+@pytest.mark.parametrize(
+    ("source", "rewritten"),
+    [
+        ("cools 0.16 degC", "warms 0.16 degF"),
+        ("an area of 16.7 km2", "an area of 16.7 m2"),
+        ("removes 4.20 ug/m3 of PM2.5", "removes 4.20 million ug/m3 of PM2.5"),
+        ("about 6.2 million residents", "about 6.2 billion residents"),
+    ],
+)
+def test_a_swapped_unit_or_magnitude_word_is_not_faithful(source: str, rewritten: str) -> None:
+    assert not llm._numbers_are_faithful(source=source, rewritten=rewritten)
+
+
+def test_the_same_unit_reformatted_is_still_faithful() -> None:
+    """The guard must not fire on the normal case: same figure, same unit, different
+    whitespace - or every real rewrite would be rejected."""
+    assert llm._numbers_are_faithful(source="cools 0.16 degC", rewritten="0.16  degC cooler")
+
+
+def test_an_inverted_direction_is_not_faithful_even_with_the_same_number_and_unit() -> None:
+    """The case unit-tokenising alone cannot catch: same figure, same unit, opposite
+    claim. `_numbers_are_faithful` alone would accept this - `_direction_is_faithful` is
+    the second guard that has to run beside it."""
+    assert llm._numbers_are_faithful(source="cools 0.16 degC", rewritten="warms 0.16 degC")
+    assert not llm._direction_is_faithful(source="cools 0.16 degC", rewritten="warms 0.16 degC")
+
+
+def test_a_direction_word_with_no_opposite_in_the_source_is_left_to_the_numeral_guard() -> None:
+    """A source silent on direction (a tree count, an area) is not a contradiction just
+    because the rewrite happens to use a warming or cooling word."""
+    assert llm._direction_is_faithful(source="4.20 km2 of new canopy", rewritten="warms nothing")
+
+
 def test_malformed_json_keeps_the_template(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _narrate_with(monkeypatch, "I'm afraid I can't do that.").source == "template"
 
@@ -541,4 +574,3 @@ def test_history_reaches_the_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert result is not None
     assert "how big is the area" in _Capturing.seen
-

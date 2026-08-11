@@ -55,9 +55,7 @@ def test_a_layer_round_trips_the_actual_values(
 ) -> None:
     payload = client.get("/cube/layer/lst_c", params={"window": "2024-summer"}).json()
 
-    expected = np.asarray(
-        select_window(synthetic_runtime.cube, "2024-summer")["lst_c"].values
-    )
+    expected = np.asarray(select_window(synthetic_runtime.cube, "2024-summer")["lst_c"].values)
     assert np.allclose(decode(payload), expected, equal_nan=True)
 
 

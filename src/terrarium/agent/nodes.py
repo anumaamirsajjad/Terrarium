@@ -227,9 +227,7 @@ class SearchContext:
 
         calls = state.get("llm_calls", 0) + 1
         try:
-            raw = adapter.complete_json(
-                system=PROPOSE_SYSTEM, user=self._propose_prompt(state)
-            )
+            raw = adapter.complete_json(system=PROPOSE_SYSTEM, user=self._propose_prompt(state))
             payload = json.loads(raw)
             ids = tuple(str(value) for value in payload["region_ids"])
             plan = Plan.model_validate(payload["plan"])
@@ -240,8 +238,7 @@ class SearchContext:
                 "step": state_step,
                 "llm_calls": calls,
                 "stopped_because": (
-                    f"{adapter.name} stopped producing usable proposals "
-                    f"({type(exc).__name__})"
+                    f"{adapter.name} stopped producing usable proposals ({type(exc).__name__})"
                 ),
             }
 
@@ -455,6 +452,7 @@ class SearchContext:
         if time.monotonic() - state.get("started_at", 0.0) >= self.budget.wall_clock_s:
             return f"the {self.budget.wall_clock_s:.0f} s time budget ran out"
         return "the search ran out of regions to try"
+
     # -------------------------------------------------------------------- report ---
 
     def report(self, state: SearchState) -> SearchState:

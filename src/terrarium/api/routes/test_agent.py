@@ -119,9 +119,7 @@ def test_a_search_streams_events_and_ends_with_a_result(
     assert {a["proposer"] for a in result["tried"]} <= {"model", "greedy"}
 
 
-def test_a_finished_search_is_readable_by_id(
-    client: TestClient, with_model: Configure
-) -> None:
+def test_a_finished_search_is_readable_by_id(client: TestClient, with_model: Configure) -> None:
     with_model(_script(client))
 
     response = client.post("/agent/search", json={"goal": "cool this tile", "budget": BUDGET})

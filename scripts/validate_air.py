@@ -115,8 +115,9 @@ def fetch_stations(settings, window: SeasonWindow) -> tuple[list[dict], list[str
             "limit": 100,
         }
     )
-    payload = _get(f"{settings.openaq_url}/locations?{query}", settings.openaq_key,
-                   settings.http_timeout_s)
+    payload = _get(
+        f"{settings.openaq_url}/locations?{query}", settings.openaq_key, settings.http_timeout_s
+    )
     locations = payload.get("results", [])
     logger.info("OpenAQ lists %d location(s) in the tile", len(locations))
 
@@ -153,8 +154,7 @@ def fetch_stations(settings, window: SeasonWindow) -> tuple[list[dict], list[str
             values = [
                 float(result["value"])
                 for result in measured.get("results", [])
-                if result.get("value") is not None
-                and float(result["value"]) >= MIN_PLAUSIBLE_UGM3
+                if result.get("value") is not None and float(result["value"]) >= MIN_PLAUSIBLE_UGM3
             ]
             if len(values) < MIN_DAYS_IN_WINDOW:
                 dropped.append(
@@ -200,9 +200,7 @@ def main() -> int:
     labels = window_labels(cube)
     # Winter by default: the inversion season is when Lahore's monitors read high enough
     # for a local increment to be distinguishable from the noise on the background.
-    label = args.window or next(
-        (w for w in reversed(labels) if w.endswith("winter")), labels[-1]
-    )
+    label = args.window or next((w for w in reversed(labels) if w.endswith("winter")), labels[-1])
     window = select_window(cube, label)
 
     # Derived from the label rather than from `settings.windows`, which only covers
@@ -270,8 +268,10 @@ def main() -> int:
         return 1
 
     print(f"\n  scale x{report.scale:.1f}   background {report.background_ugm3:.0f} ug/m3")
-    print(f"  leave-one-out MAE {report.mae:.1f} ug/m3   null (mean of others) "
-          f"{report.null_mae:.1f} ug/m3")
+    print(
+        f"  leave-one-out MAE {report.mae:.1f} ug/m3   null (mean of others) "
+        f"{report.null_mae:.1f} ug/m3"
+    )
     print(f"  beats the null model: {report.beats_null}")
     print(
         f"\n  Read this honestly. The observations are each station's median over {label} "
