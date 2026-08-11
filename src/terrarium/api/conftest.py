@@ -12,8 +12,9 @@ on, which is exactly the kind of break that would reach production silently.
 
 from __future__ import annotations
 
+import importlib
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -57,9 +58,7 @@ def synthetic_cube() -> xr.Dataset:
     # lobes, so every intermediate value is populated somewhere on the tile.
     ys = np.linspace(0.0, 1.0, height)[:, None]
     xs = np.linspace(0.0, 1.0, width)[None, :]
-    greenness = 0.5 * (ys + xs) / 2.0 + 0.35 * np.sin(3.0 * np.pi * ys) * np.cos(
-        2.0 * np.pi * xs
-    )
+    greenness = 0.5 * (ys + xs) / 2.0 + 0.35 * np.sin(3.0 * np.pi * ys) * np.cos(2.0 * np.pi * xs)
     greenness = np.clip((greenness - greenness.min()) / np.ptp(greenness), 0.0, 1.0)
 
     # Land cover follows the field rather than contradicting it, so "tree cover" really
@@ -110,9 +109,7 @@ def synthetic_cube() -> xr.Dataset:
         coords={
             "y": grid.y_coords(),
             "x": grid.x_coords(),
-            "time": np.array(
-                ["2024-05-16", "2024-12-16"], dtype="datetime64[ns]"
-            ),
+            "time": np.array(["2024-05-16", "2024-12-16"], dtype="datetime64[ns]"),
             "window": ("time", np.array(WINDOWS, dtype="<U32")),
             "season": ("time", np.array(SEASONS, dtype="<U16")),
         },
@@ -176,6 +173,57 @@ def synthetic_runtime() -> Runtime:
         cube_path=Path("<synthetic>"),
         model_path=Path("<synthetic>"),
     )
+
+
+class ScriptedAdapter:
+    """A stand-in for a configured provider. Answers each call from a script.
+
+    The AI layer requires a key, so the routes that use it cannot be tested against a
+    keyless app any more — but no test may touch the network either. This is the seam that
+    resolves both: `resolve_adapter` is patched to return one of these, which satisfies
+    `require_model` and answers deterministically.
+
+    Repeats its last reply rather than raising when the script runs out: the graph decides
+    how many times to ask, and a test that ran dry would fail with a `StopIteration`
+    describing the fixture instead of the behaviour under test.
+
+    A reply may be a **callable taking the prompt**, which lets a test's script react to
+    what the prompt actually contains rather than hardcoding an answer that has to stay in
+    sync with it by hand.
+    """
+
+    name = "scripted:test"
+
+    def __init__(self, replies: Sequence[str | Callable[[str], str]]) -> None:
+        self.replies = list(replies)
+        self.prompts: list[str] = []
+
+    def complete_json(self, *, system: str, user: str) -> str:
+        self.prompts.append(user)
+        reply = self.replies[min(len(self.prompts) - 1, len(self.replies) - 1)]
+        return reply(user) if callable(reply) else reply
+
+
+@pytest.fixture
+def with_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[Sequence[str | Callable[[str], str]]], ScriptedAdapter]:
+    """Configure a scripted model everywhere `resolve_adapter` is reached from.
+
+    Patched per *importing module* rather than at the source, because each of them does
+    `from terrarium.dsl.llm import resolve_adapter` and therefore holds its own reference.
+    A single patch on `dsl.llm` would leave every one of them pointing at the real one.
+    """
+
+    def configure(replies: Sequence[str | Callable[[str], str]]) -> ScriptedAdapter:
+        adapter = ScriptedAdapter(replies)
+        for module in ("terrarium.api.deps", "terrarium.agent.nodes"):
+            monkeypatch.setattr(
+                importlib.import_module(module), "resolve_adapter", lambda *_a, **_k: adapter
+            )
+        return adapter
+
+    return configure
 
 
 @pytest.fixture(scope="session")

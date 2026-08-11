@@ -11,42 +11,62 @@
  * no caveat attached — the thermal figure carries the 2.5x hindcast correction and the air
  * figure carries a different qualification in each season. Ordering is the cheapest way to
  * say which number the project stands behind.
+ *
+ * **Floating over the map costs the map.** At `lg` and up there is room either side of it
+ * for that to be free. On a phone there is not: the chrome that reads as a light dusting on
+ * a 1440 px desktop covered the top half of a 390 px viewport, and the top half of the map
+ * is where a user taps to draw. Every polygon drawn on a phone came out with two of its
+ * four vertices missing, because two of the four taps landed on a glass panel. So the
+ * narrow layout is not the wide one reflowed — it is a different arrangement with the same
+ * parts: one merged bar at the top, a compact legend under it, the levers and the toolbar
+ * at the bottom, and the results in a sheet that is summoned rather than always present.
  */
 
 import { AnimatePresence, motion } from "motion/react";
 import {
+  BookOpen,
   Check,
   ChevronDown,
   PenLine,
   Play,
   Printer,
   Search,
+  Sparkles,
   Trash2,
   Undo2,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import {
+  type Attempt,
+  type Candidate,
+  type ChatTurn,
   type CubeSummaryResponse,
   type HealthResponse,
+  type Plan,
   type PlanResponse,
   type Preset,
+  type SearchResult,
   type SimulateResponse,
+  type SpatialExplanation,
   api,
+  searchStream,
 } from "./api/client";
 import { type LoadedLayer, loadLayer, useCubeLayer } from "./hooks/useCubeLayer";
 import MapView, { type RasterOverlay } from "./map/MapView";
 import { type Position, useDrawnPolygon } from "./map/useDrawnPolygon";
 import { GLIDE, SNAP } from "./motion/springs";
 import Legend from "./panels/Legend";
+import AgentPanel from "./panels/AgentPanel";
 import AirPanel from "./panels/AirPanel";
+import PatternPanel from "./panels/PatternPanel";
 import BriefDocument from "./panels/BriefDocument";
-import BriefPanel from "./panels/BriefPanel";
 import CommandPalette from "./panels/CommandPalette";
 import EquityPanel from "./panels/EquityPanel";
 import FloatingPanel from "./panels/FloatingPanel";
 import PlainPanel from "./panels/PlainPanel";
+import ResultChatPanel from "./panels/ResultChatPanel";
 import ResultPanel from "./panels/ResultPanel";
 import { decodeLayer } from "./raster/decode";
 import { toCanvas } from "./raster/canvas";
@@ -59,7 +79,7 @@ import {
   splitRasters,
 } from "./raster/image";
 import { DIVERGING, HEAT, rampForVariable, symmetricDomain } from "./raster/ramp";
-import { plainVariableBlurb, plainVariableLabel } from "./units";
+import { plainVariableLabel } from "./units";
 import "./App.css";
 
 /**
@@ -146,11 +166,46 @@ export default function App() {
   const [splitFraction, setSplitFraction] = useState(0.5);
   const [scenarioBase, setScenarioBase] = useState<LoadedLayer | null>(null);
   const [presets, setPresets] = useState<Preset[]>([]);
-  const [planner, setPlanner] = useState("rules");
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [planning, setPlanning] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /**
+   * Is the results sheet up? Narrow layout only — at `lg` and up the results are a rail
+   * beside the map and there is nothing to open or shut.
+   *
+   * A sheet rather than a permanent panel because on a phone the two cannot both win: a
+   * panel tall enough to hold the brief is a panel that hides the field it describes. It
+   * opens itself when a run lands, since that is what the user just asked for, and the
+   * chip in the top cluster puts it back.
+   */
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  // --- the search agent (Phase A). Everything here is inert until the panel is opened. ---
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [trace, setTrace] = useState<Attempt[]>([]);
+  const [searchStatus, setSearchStatus] = useState<string | null>(null);
+  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  /** Regions the agent is evaluating right now, highlighted on the lattice overlay. */
+  const [litRegions, setLitRegions] = useState<string[]>([]);
+  const searchAbort = useRef<AbortController | null>(null);
+
+  // --- where it landed (Phase E). Re-runs the core, so it is opt-in rather than on
+  //     every /simulate: a second model call on the main endpoint would cost every user
+  //     latency for a panel most of them never open. ---
+  const [pattern, setPattern] = useState<SpatialExplanation | null>(null);
+  const [patternBusy, setPatternBusy] = useState(false);
+  const [patternError, setPatternError] = useState<string | null>(null);
+
+  // --- ask about this result. Grounded in the current brief, not the repository, so the
+  //     conversation resets the moment a new /simulate result replaces it. ---
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatTurn[]>([]);
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   /**
    * Swapping windows refetches a 40,602-cell raster, decodes it and re-colourises it.
@@ -195,7 +250,6 @@ export default function App() {
       .then((response) => {
         if (cancelled) return;
         setPresets(response.presets);
-        setPlanner(response.planner);
       })
       .catch(() => {
         if (!cancelled) setPresets([]);
@@ -259,7 +313,7 @@ export default function App() {
    * is adopted rather than the picker's — and the picker moves to show it.
    */
   const buildPlan = useCallback(
-    async (body: { preset?: string; text?: string }) => {
+    async (body: { preset?: string; text?: string; plan?: Plan }) => {
       if (!draw.geometry) return;
 
       setPlanning(true);
@@ -306,6 +360,11 @@ export default function App() {
             },
       );
       setResult(response);
+      setSheetOpen(true);
+      // A new result is a new conversation. A question answered from the run this replaces
+      // would be a stale answer wearing a fresh one's shape.
+      setChatMessages([]);
+      setChatError(null);
       // Land on whichever result the plan actually produced. A traffic-only plan changes
       // no temperature, so opening on ΔLST would show an empty map for a run that worked.
       setView(response.air && response.stats.n_cells_changed === 0 ? "air" : "delta");
@@ -327,6 +386,195 @@ export default function App() {
     [draw],
   );
 
+  // -------------------------------------------------------- the search agent ---
+
+  /**
+   * Run one search, rendering the trace as it arrives.
+   *
+   * The lattice is fetched on the first search rather than at boot: it is 121 polygons and
+   * a full grid pass server-side, and most sessions never open this panel. Once fetched it
+   * stays, keyed to nothing — the blocks are the grid's, not a window's.
+   */
+  const runSearch = useCallback(
+    async (goal: string) => {
+      const controller = new AbortController();
+      searchAbort.current = controller;
+
+      setSearching(true);
+      setSearchError(null);
+      setSearchResult(null);
+      setTrace([]);
+      setSearchStatus("starting the search");
+
+      try {
+        if (candidates.length === 0) {
+          const lattice = await api.candidates(selectedWindow ?? undefined);
+          setCandidates(lattice.candidates);
+        }
+
+        await searchStream(
+          { goal, window: selectedWindow },
+          (event) => {
+            setSearchStatus(event.message);
+            if (event.attempt) {
+              setTrace((current) => [...current, event.attempt!]);
+              setLitRegions(event.attempt.region_ids);
+            }
+            if (event.result) setSearchResult(event.result);
+          },
+          controller.signal,
+        );
+      } catch (error) {
+        // An abort is the user pressing Stop, not a failure worth a red panel.
+        if ((error as Error).name !== "AbortError") {
+          setSearchError((error as Error).message);
+        }
+      } finally {
+        setSearching(false);
+        setSearchStatus(null);
+        setLitRegions([]);
+        searchAbort.current = null;
+      }
+    },
+    [candidates.length, selectedWindow],
+  );
+
+  const stopSearch = useCallback(() => searchAbort.current?.abort(), []);
+
+  /**
+   * Hide the search panel and drop its run, rather than leaving a stale trace behind a
+   * closed door. `runSearch` already clears these at the *start* of the next search, but
+   * that left a hidden-then-reopened panel still showing the previous run for as long as
+   * nobody searched again.
+   */
+  const hideSearch = useCallback(() => {
+    stopSearch();
+    setAgentOpen(false);
+    setTrace([]);
+    setSearchResult(null);
+    setSearchStatus(null);
+    setSearchError(null);
+    setLitRegions([]);
+  }, [stopSearch]);
+
+  /**
+   * Take the search's winner into the ordinary flow: its polygon becomes the drawn one and
+   * its levers become the sliders.
+   *
+   * Deliberately *not* a second result path. The search's own numbers came from the same
+   * cores, but the user then has a polygon they can edit, re-run, compare and print — which
+   * is the product, and a search result that could only be looked at would be a dead end.
+   */
+  const applySearchPlan = useCallback(
+    (attempt: Attempt) => {
+      const regions = new Map(candidates.map((region) => [region.region_id, region]));
+      const chosen = attempt.region_ids
+        .map((id) => regions.get(id))
+        .filter((region): region is Candidate => region !== undefined);
+      if (chosen.length === 0) return;
+
+      // One region applies exactly. Several are a MultiPolygon server-side, which this
+      // hand-rolled single-ring draw state cannot hold — so the first is applied and the
+      // panel says so rather than silently dropping the rest.
+      draw.setPolygon(chosen[0]!.geometry.coordinates[0] as Position[]);
+
+      const planting = attempt.plan.actions.find((action) => action.kind === "plant_trees");
+      const restriction = attempt.plan.actions.find(
+        (action) => action.kind === "restrict_vehicles",
+      );
+      if (planting && "canopy_fraction_added" in planting && planting.canopy_fraction_added) {
+        setCanopy(planting.canopy_fraction_added);
+      }
+      setEmissions(restriction ? restriction.emission_fraction_removed : 0);
+      setPlan(null);
+      setPlanError(null);
+      setAgentOpen(false);
+    },
+    [candidates, draw],
+  );
+
+  // ----------------------------------------------------------- where it landed ---
+
+  /**
+   * Explain the pattern of the run currently on screen.
+   *
+   * Posts the *same body* `/simulate` was given, because the route re-runs the core: the
+   * pattern being described has to be the pattern being looked at, and the only way to
+   * guarantee that without trusting a client-supplied delta field is to send the request
+   * again rather than the result.
+   */
+  const explainPattern = useCallback(async () => {
+    if (!draw.geometry || !result) return;
+
+    setPatternBusy(true);
+    setPatternError(null);
+    try {
+      // The same 121 blocks the explanation is keyed to, so hovering a row can light one
+      // up on the map. Fetched once and reused, exactly as the agent panel does.
+      if (candidates.length === 0) {
+        setCandidates((await api.candidates(result.window)).candidates);
+      }
+      setPattern(
+        await api.explainSpatial(
+          plan
+            ? { ...plan.simulate_request, window: result.window }
+            : {
+                geometry: draw.geometry,
+                canopy_fraction_added: canopy,
+                emission_fraction_removed: emissions,
+                window: result.window,
+              },
+        ),
+      );
+    } catch (error) {
+      setPatternError((error as Error).message);
+      setPattern(null);
+    } finally {
+      setPatternBusy(false);
+    }
+  }, [draw.geometry, result, plan, canopy, emissions, candidates.length]);
+
+  // ------------------------------------------------------ ask about this result ---
+
+  /**
+   * Send one question, with every earlier turn of this conversation riding along.
+   *
+   * The user's turn is appended before the request goes out, not after it comes back, so a
+   * slow or failed answer still leaves the question visible in the transcript rather than
+   * looking like it was never asked.
+   */
+  const askResultChat = useCallback(
+    async (question: string) => {
+      if (!result) return;
+      const asked: ChatTurn = { role: "user", content: question };
+      const history = chatMessages;
+      setChatMessages((current) => [...current, asked]);
+      setChatBusy(true);
+      setChatError(null);
+      try {
+        const response = await api.chat({
+          brief: result.brief,
+          window: result.window,
+          season: result.season,
+          plan_name: plan?.plan.name,
+          history,
+          question,
+        });
+        setChatMessages((current) => [
+          ...current,
+          { role: "assistant", content: response.answer },
+        ]);
+      } catch (error) {
+        // The message already carries the server's own reason, including when it refused
+        // rather than invent a figure the brief did not contain.
+        setChatError((error as Error).message);
+      } finally {
+        setChatBusy(false);
+      }
+    },
+    [result, plan, chatMessages],
+  );
+
   const resetScenario = useCallback(() => {
     draw.clear();
     setResult(null);
@@ -334,6 +582,10 @@ export default function App() {
     setPlan(null);
     setPlanError(null);
     setView("baseline");
+    setSheetOpen(false);
+    setChatOpen(false);
+    setChatMessages([]);
+    setChatError(null);
   }, [draw]);
 
   const clearPlan = useCallback(() => {
@@ -491,7 +743,7 @@ export default function App() {
         <p>{boot.message}</p>
         <p className="muted">
           Start it with <code>uv run terrarium-api</code>, then reload. If it is running
-          but has no cube, it serves <code>/health</code> only — check its startup log.
+          but has no cube, it serves <code>/health</code> only: check its startup log.
         </p>
       </main>
     );
@@ -523,20 +775,31 @@ export default function App() {
         dividerLongitude={dividerLongitude}
         onSplitChange={setSplitFraction}
         onMapClick={handleMapClick}
+        // Only while something is using it. The lattice is scaffolding — for a search, or
+        // for a pattern breakdown whose rows highlight blocks — and leaving 121 outlines on
+        // the map afterwards would clutter the field they describe.
+        candidates={agentOpen || pattern ? candidates : undefined}
+        highlightedRegions={litRegions}
       />
 
       {/* ------------------------------------------------------------ top cluster --- */}
-      {/* Below `sm` these four stack in normal flow instead of floating independently:
-          brand (top-left), the window/layer pill (top-centre) and the results rail
-          (top-right) are all wide enough, and close enough together, that a phone-width
-          viewport had nowhere to put all three without overlap. `sm:contents` drops this
-          wrapper from the box model at the desktop breakpoint, so each child's own
-          `sm:absolute` positions it exactly where it always sat, pixel for pixel. */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col gap-3 p-4 sm:contents">
-        {/* brand, top left */}
-        <div className="glass noise pointer-events-auto z-10 self-start px-4 py-3 sm:absolute sm:top-5 sm:left-5">
-          <h1 className="font-mono text-sm tracking-tight text-white">Terrarium</h1>
-          <p className="mt-0.5 font-mono text-[0.65rem] text-white/40">
+      {/* Below `lg` the brand, the pickers, the view switcher and the legend are one
+          column pinned to the top edge; `lg:contents` drops this wrapper from the box model
+          at the desktop breakpoint so each child's own `lg:absolute` puts it back exactly
+          where it always sat. The wrapper takes no pointer events, so only the cards
+          themselves are ever between a tap and the map — which is why the legend below is
+          as short as it is, and why the results are not in here at all. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col gap-2 p-3 lg:contents">
+        {/* brand + pickers. One card on a phone, two on a desktop: at `lg` the brand
+            detaches to the top-left corner and the pickers to the top centre, which is
+            what `lg:absolute` on each of them does. Merged, because two cards stacked with
+            a gap cost 40 px of map for one line of text. */}
+        <div className="glass noise pointer-events-auto z-10 flex items-center gap-3 px-3 py-2
+                        lg:absolute lg:top-5 lg:left-5 lg:block lg:px-4 lg:py-3">
+          <h1 className="font-mono text-sm tracking-tight whitespace-nowrap text-white">
+            Terrarium
+          </h1>
+          <p className="truncate font-mono text-[0.6rem] text-white/40 lg:mt-0.5 lg:text-[0.65rem]">
             {health.tile.name}, {health.tile.country} · {summary.shape[0]}×{summary.shape[1]} @{" "}
             {summary.resolution_m}&nbsp;m
           </p>
@@ -547,13 +810,17 @@ export default function App() {
           animate={{ opacity: pending ? 0.45 : 1 }}
           transition={SNAP}
           aria-busy={pending}
-          className="glass pointer-events-auto z-10 px-3 py-2 sm:absolute sm:top-5 sm:left-1/2 sm:-translate-x-1/2"
+          className="glass pointer-events-auto z-10 px-3 py-2 lg:absolute lg:top-5 lg:left-1/2 lg:-translate-x-1/2"
         >
-          <div className="flex flex-wrap items-center gap-2">
+          {/* `w-auto` on both, and no wrap. App.css gives every `select` `width: 100%`,
+              which is invisible while this card is shrink-to-fit at `lg` and up — and made
+              each picker claim a full row the moment the card went full-width on a phone,
+              turning a 40 px bar into a 100 px one. */}
+          <div className="flex items-center gap-2">
             <select
               value={selectedWindow ?? ""}
               onChange={(event) => selectWindow(event.target.value)}
-              className="bg-transparent font-mono text-xs text-white outline-none"
+              className="w-auto shrink-0 bg-transparent font-mono text-xs text-white outline-none"
               aria-label="Seasonal window"
             >
               {summary.windows.map((label) => (
@@ -562,11 +829,11 @@ export default function App() {
                 </option>
               ))}
             </select>
-            <span className="h-4 w-px bg-white/10" />
+            <span className="h-4 w-px shrink-0 bg-white/10" />
             <select
               value={variable}
               onChange={(event) => setVariable(event.target.value)}
-              className="max-w-56 bg-transparent font-mono text-xs text-white/70 outline-none"
+              className="w-auto min-w-0 flex-1 bg-transparent font-mono text-xs text-white/70 outline-none lg:max-w-56 lg:flex-none"
               aria-label="Base layer"
             >
               {summary.variables
@@ -578,16 +845,16 @@ export default function App() {
                 ))}
             </select>
           </div>
-          {/* The window is part of the answer, not a detail: the same planting cools about
-              four times more in summer than in winter. */}
-          <p className="mt-1 max-w-md text-[0.62rem] leading-snug text-white/35">
-            {baseline.loading || pending
-              ? "Loading…"
-              : (baseline.error ?? plainVariableBlurb(variable))}
-          </p>
+          {baseline.error && (
+            <p className="mt-1 max-w-md text-[0.62rem] leading-snug text-white/35">
+              {baseline.error}
+            </p>
+          )}
         </motion.div>
 
-        {/* view switcher, under the pill, once there is something to switch between */}
+        {/* view switcher, under the pill, once there is something to switch between.
+            `overflow-x-auto` on a phone: four labels plus a split slider is wider than
+            390 px, and a switcher that clips its last tab has lost a view. */}
         <AnimatePresence>
           {result && (
             <motion.div
@@ -595,9 +862,29 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={GLIDE}
-              className="glass pointer-events-auto z-10 flex flex-wrap items-center gap-1
-                         self-start p-1 sm:absolute sm:top-[6.2rem] sm:left-1/2 sm:-translate-x-1/2"
+              className="glass pointer-events-auto z-10 flex items-center gap-1 overflow-x-auto p-1
+                         lg:absolute lg:top-[6.4rem] lg:left-1/2 lg:flex-wrap lg:overflow-visible
+                         lg:-translate-x-1/2"
             >
+              {/* Phone only, and first in the row rather than last: this is what puts the
+                  results sheet back after it has been shut, and the row scrolls
+                  horizontally — an `ml-auto` chip at the end of it is a control nobody can
+                  see. There is no room for a permanent rail at this width, so the result
+                  needs a door rather than a wall. */}
+              <button
+                type="button"
+                onClick={() => setSheetOpen((open) => !open)}
+                aria-expanded={sheetOpen}
+                className="mr-1 flex shrink-0 items-center gap-1 rounded-md bg-emerald-400/10
+                           px-2.5 py-1.5 font-mono text-[0.68rem] text-emerald-200 lg:hidden"
+              >
+                Brief
+                <ChevronDown
+                  aria-hidden="true"
+                  className={`size-3 transition-transform ${sheetOpen ? "" : "rotate-180"}`}
+                />
+              </button>
+
               {views
                 .filter((entry) => entry.show)
                 .map((entry) => (
@@ -605,7 +892,7 @@ export default function App() {
                     key={entry.key}
                     type="button"
                     onClick={() => setView(entry.key)}
-                    className={`rounded-md px-3 py-1.5 font-mono text-[0.68rem] transition-colors ${
+                    className={`shrink-0 rounded-md px-3 py-1.5 font-mono text-[0.68rem] whitespace-nowrap transition-colors ${
                       view === entry.key
                         ? "bg-white/12 text-white"
                         : "text-white/45 hover:text-white/80"
@@ -616,7 +903,7 @@ export default function App() {
                 ))}
 
               {view === "compare" && (
-                <label className="ml-2 flex items-center gap-2 pr-2">
+                <label className="ml-2 flex shrink-0 items-center gap-2 pr-2">
                   {/* Kept and focusable rather than deleted: the grip on the map is a mouse
                       affordance, and the split has to stay keyboard-operable without it. */}
                   <span className="sr-only">Split position</span>
@@ -627,83 +914,22 @@ export default function App() {
                     step={0.01}
                     value={splitFraction}
                     onChange={(event) => setSplitFraction(Number(event.target.value))}
-                    className="w-28 accent-white/70"
+                    className="w-24 accent-white/70 lg:w-28"
                   />
                 </label>
               )}
+
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* results, right rail. Capped to 50vh in the stacked mobile flow so it can never
-            push the toolbar and legend off screen; the full-height scroll returns once it
-            is its own floating rail at `sm` and up. */}
-        <div
-          className="pointer-events-auto z-10 flex max-h-[50vh] flex-col gap-3
-                     overflow-x-hidden overflow-y-auto sm:absolute sm:top-5 sm:right-5
-                     sm:max-h-[calc(100vh-2.5rem)] sm:w-96"
-        >
-          <AnimatePresence mode="popLayout">
-            {result && (
-              <FloatingPanel key="plain">
-                <PlainPanel brief={result.brief} />
-
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg
-                             border border-white/12 py-2 text-xs text-white/70
-                             hover:bg-white/10"
-                >
-                  <Printer className="size-3.5" />
-                  Save the full brief as PDF
-                </button>
-              </FloatingPanel>
-            )}
-
-            {/* Everything below is the technical read, collapsed by default.
-                `<details>` rather than a `useState` toggle: the browser already ships the
-                open/closed state, the keyboard handling, the ARIA expanded semantics and
-                find-in-page opening the section to reveal a match. None of that is worth
-                re-implementing, and the print stylesheet can force it open with one rule. */}
-            {result && (
-              <FloatingPanel key="detail">
-                <details className="group">
-                  <summary
-                    className="flex cursor-pointer list-none items-center justify-between
-                               text-xs text-white/55 hover:text-white/80"
-                  >
-                    <span>Show the technical detail</span>
-                    <ChevronDown
-                      aria-hidden="true"
-                      className="size-3.5 transition-transform group-open:rotate-180"
-                    />
-                  </summary>
-
-                  <div className="mt-4 space-y-5 border-t border-white/8 pt-4">
-                    <ResultPanel result={result} />
-                    <EquityPanel equity={result.equity} />
-                    {result.air && (
-                      <AirPanel
-                        air={result.air}
-                        window={result.window}
-                        season={result.season}
-                      />
-                    )}
-                    <BriefPanel brief={result.brief} />
-                  </div>
-                </details>
-              </FloatingPanel>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* legend + opacity. In the mobile stack it flows below the results rail; at `sm`
-            and up it pops back out to its usual floating spot, bottom left. It used to be
-            pinned there unconditionally, which put it directly under the toolbar pill on
-            any narrow screen — same bottom offset, overlapping horizontal range, so the
-            draw/run/clear buttons rendered half-hidden behind it. */}
-        <div className="glass noise pointer-events-auto z-10 p-4 sm:absolute sm:bottom-6 sm:left-5 sm:w-80">
+        {/* legend + opacity. Bottom left at `lg` and up; in the narrow column it follows
+            the pickers, because the bottom edge of a phone already carries the levers, the
+            toolbar and the basemap's own attribution and controls. Compact there: the ramp
+            and the opacity slider share a row, and the D9 sentence — which must appear
+            wherever the temperature does, so it is never the thing that gets dropped —
+            sits under them at the smallest size this design uses. */}
+        <div className="glass noise pointer-events-auto z-10 px-3 py-2.5 lg:absolute lg:bottom-6 lg:left-5 lg:w-80 lg:p-4">
           {legend ? (
             <Legend
               ramp={legend.ramp}
@@ -715,7 +941,7 @@ export default function App() {
             <p className="text-xs text-white/40">No layer loaded.</p>
           )}
 
-          <label className="mt-3 flex items-center gap-3">
+          <label className="mt-2 flex items-center gap-3 lg:mt-3">
             <span className="font-mono text-[0.62rem] whitespace-nowrap text-white/40">
               opacity
             </span>
@@ -729,17 +955,130 @@ export default function App() {
               className="w-full accent-white/70"
             />
           </label>
-
-          {/* D9: this label must appear wherever the temperature does. Worded as a
-              statement about lst_c and ΔLST specifically, because it sits under a layer
-              picker that can be showing NDVI. */}
-          <p className="mt-3 border-t border-white/10 pt-3 text-[0.62rem] leading-relaxed text-white/35">
-            <strong className="text-white/55">lst_c</strong> and{" "}
-            <strong className="text-white/55">ΔLST</strong> are mid-morning land surface
-            temperature (~10:30 local, Landsat ST_B10) — the radiating surface, not air
-            temperature, and not the afternoon peak.
-          </p>
         </div>
+      </div>
+
+      {/* ------------------------------------------------------ results, rail or sheet --- */}
+      {/* One tree, two placements. At `lg` and up it is the floating rail down the right
+          hand side it has always been. Below that it is a sheet against the bottom edge,
+          over everything, dismissible — because a phone cannot show a brief and the field
+          the brief is about at the same time, and pretending otherwise is what produced a
+          results column with 50vh of scroll inside a 100vh viewport. */}
+      <div
+        className={`pointer-events-auto z-30 flex flex-col gap-3 overflow-x-hidden
+                    overflow-y-auto lg:absolute lg:inset-x-auto lg:top-5 lg:right-5 lg:bottom-auto
+                    lg:z-10 lg:max-h-[calc(100dvh-2.5rem)] lg:w-96 ${
+                      (result || agentOpen || chatOpen) && sheetOpen
+                        ? "absolute inset-x-0 bottom-0 max-h-[78dvh] rounded-t-2xl bg-[#0a0d12]/80 p-3 backdrop-blur-xl lg:rounded-none lg:bg-transparent lg:p-0 lg:backdrop-blur-none"
+                        : "max-lg:hidden"
+                    }`}
+      >
+        {/* The sheet's own handle. `lg:hidden` because the rail is never in the way. */}
+        <button
+          type="button"
+          onClick={() => setSheetOpen(false)}
+          className="sticky top-0 -mt-1 flex w-full shrink-0 justify-center py-1 lg:hidden"
+          aria-label="Hide the brief"
+        >
+          <span className="h-1 w-10 rounded-full bg-white/25" />
+        </button>
+
+        <AnimatePresence mode="popLayout">
+          {/* First in the rail while it is open: the search is what the user just asked
+              for, and it is also the thing that produces the polygon everything below
+              describes. */}
+          {agentOpen && (
+            <FloatingPanel key="agent">
+              <AgentPanel
+                trace={trace}
+                status={searchStatus}
+                result={searchResult}
+                running={searching}
+                error={searchError}
+                onSearch={(goal) => void runSearch(goal)}
+                onStop={stopSearch}
+                onApply={applySearchPlan}
+              />
+            </FloatingPanel>
+          )}
+
+          {chatOpen && result && (
+            <FloatingPanel key="chat">
+              <ResultChatPanel
+                messages={chatMessages}
+                busy={chatBusy}
+                error={chatError}
+                onAsk={(question) => void askResultChat(question)}
+              />
+            </FloatingPanel>
+          )}
+
+
+          {result && (
+            <FloatingPanel key="plain">
+              <PlainPanel brief={result.brief} />
+
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg
+                           border border-white/12 py-2 text-xs text-white/70
+                           hover:bg-white/10"
+              >
+                <Printer className="size-3.5" />
+                Save the full brief as PDF
+              </button>
+            </FloatingPanel>
+          )}
+
+          {/* Everything below is the technical read, collapsed by default.
+              `<details>` rather than a `useState` toggle: the browser already ships the
+              open/closed state, the keyboard handling, the ARIA expanded semantics and
+              find-in-page opening the section to reveal a match. None of that is worth
+              re-implementing, and the print stylesheet can force it open with one rule. */}
+          {result && (
+            <FloatingPanel key="detail">
+              <details className="group">
+                <summary
+                  className="flex cursor-pointer list-none items-center justify-between
+                             text-xs text-white/55 hover:text-white/80"
+                >
+                  <span>Show the technical detail</span>
+                  <ChevronDown
+                    aria-hidden="true"
+                    className="size-3.5 transition-transform group-open:rotate-180"
+                  />
+                </summary>
+
+                <div className="mt-4 space-y-5 border-t border-white/8 pt-4">
+                  <ResultPanel result={result} />
+                  {/* Offered only where there is a cooling pattern to explain. "none" and
+                      "marginal" mean the tile barely moved; "unrated" is an air-only plan,
+                      which changes no temperature at all — the panel breaks the result down
+                      by *cooling*, so all three would send someone to click a button that
+                      comes back with nothing, which reads as broken rather than quiet. */}
+                  {!["none", "marginal", "unrated"].includes(result.brief.plain.verdict) && (
+                    <PatternPanel
+                      explanation={pattern}
+                      busy={patternBusy}
+                      error={patternError}
+                      onExplain={() => void explainPattern()}
+                      onHighlight={setLitRegions}
+                    />
+                  )}
+                  <EquityPanel equity={result.equity} />
+                  {result.air && (
+                    <AirPanel
+                      air={result.air}
+                      window={result.window}
+                      season={result.season}
+                    />
+                  )}
+                </div>
+              </details>
+            </FloatingPanel>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* ------------------------------------------------------- levers, above toolbar --- */}
@@ -750,10 +1089,11 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 12 }}
             transition={GLIDE}
-            className="glass noise absolute bottom-24 left-1/2 z-10 w-[min(36rem,calc(100vw-3rem))]
-                       -translate-x-1/2 p-4"
+            className="glass noise absolute bottom-[4.75rem] left-1/2 z-10 max-h-[38dvh]
+                       w-[min(36rem,calc(100vw-1.5rem))] -translate-x-1/2 overflow-y-auto p-3
+                       lg:bottom-60 lg:max-h-none lg:w-[min(36rem,calc(100vw-3rem))] lg:p-4 xl:bottom-24"
           >
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-3 lg:grid-cols-2 lg:gap-4">
               <label className="block">
                 <span className="font-mono text-[0.65rem] text-white/55">
                   Canopy added <strong className="text-white">{(canopy * 100).toFixed(0)}%</strong>
@@ -771,7 +1111,7 @@ export default function App() {
                   className="mt-1.5 w-full accent-emerald-400"
                 />
                 <span className="mt-1 block text-[0.6rem] leading-snug text-white/35">
-                  A ceiling, not a promise — each cell is capped at what is still plantable
+                  A ceiling, not a promise: each cell is capped at what is still plantable
                   there, and water is never planted.
                 </span>
               </label>
@@ -794,7 +1134,7 @@ export default function App() {
                   className="mt-1.5 w-full accent-violet-400"
                 />
                 <span className="mt-1 block text-[0.6rem] leading-snug text-white/35">
-                  1.0 means the traffic is gone, not electrified — brake, tyre and road wear
+                  1.0 means the traffic is gone, not electrified: brake, tyre and road wear
                   are roughly half of road PM2.5 and stay until the vehicles do. At 0 the
                   plan says nothing about traffic and no air result comes back.
                 </span>
@@ -809,11 +1149,14 @@ export default function App() {
       </AnimatePresence>
 
       {/* ------------------------------------------------------ toolbar, bottom centre --- */}
+      {/* MapLibre puts its attribution across the bottom edge and its zoom puck and scale
+          bar in the bottom-right corner. At `lg` the toolbar is centred and clears both;
+          at 390 px it sat directly on the attribution line, so it is lifted clear here. */}
       <motion.div
         layout
         transition={GLIDE}
-        className="glass absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center
-                   gap-1 p-1.5"
+        className="glass absolute bottom-9 left-1/2 z-20 flex -translate-x-1/2 items-center
+                   gap-1 p-1.5 lg:bottom-6"
       >
         {/* `popLayout` matters: without it the exiting button holds its slot while the
             entering one appears beside it, and the pill visibly stutters. */}
@@ -825,6 +1168,25 @@ export default function App() {
               label="Draw zone"
               primary
               onClick={draw.startDrawing}
+            />
+          )}
+
+          {/* The search agent needs no polygon — that is D26's whole point — so this sits
+              beside "Draw zone" rather than behind it: the two are alternative ways in, not
+              a sequence. */}
+          {!draw.drawing && (
+            <ToolButton
+              key="agent"
+              icon={Sparkles}
+              label={agentOpen ? "Hide search" : "Search the tile"}
+              onClick={() => {
+                if (agentOpen) {
+                  hideSearch();
+                  return;
+                }
+                setAgentOpen(true);
+                setSheetOpen(true);
+              }}
             />
           )}
 
@@ -876,27 +1238,31 @@ export default function App() {
               onClick={() => void runSimulation()}
             />
           )}
+          {/* Only once there is a result to talk about — the chat is grounded in its
+              brief, so there is nothing for it to answer before one exists. */}
+          {!draw.drawing && result && (
+            <ToolButton
+              key="chat"
+              icon={BookOpen}
+              label={chatOpen ? "Hide chat" : "Ask about this result"}
+              onClick={() => {
+                setChatOpen((open) => !open);
+                setSheetOpen(true);
+              }}
+            />
+          )}
+
           {(draw.complete || draw.drawing) && (
             <ToolButton key="clear" icon={Trash2} label="Clear" onClick={resetScenario} />
           )}
         </AnimatePresence>
       </motion.div>
 
-      {!draw.complete && !draw.drawing && (
-        <p
-          className="pointer-events-none absolute bottom-2 left-1/2 z-10 -translate-x-1/2
-                     font-mono text-[0.6rem] tracking-[0.18em] text-white/25 uppercase"
-        >
-          press / for the plan palette
-        </p>
-      )}
-
       {/* The palette owns its own shortcut, so it is mounted whether or not it is open. */}
       <CommandPalette
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
         presets={presets}
-        planner={planner}
         hasPolygon={draw.complete}
         plan={plan}
         error={planError}
@@ -904,6 +1270,11 @@ export default function App() {
         onPreset={(slug) => void buildPlan({ preset: slug })}
         onText={(text) => void buildPlan({ text })}
         onClear={clearPlan}
+        onOpenSearch={() => {
+          setPaletteOpen(false);
+          setAgentOpen(true);
+          setSheetOpen(true);
+        }}
       />
 
       {/* Hidden on screen, and the only thing on the page when printed. Rendered here

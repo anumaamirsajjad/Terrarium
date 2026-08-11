@@ -148,9 +148,9 @@ def test_groq_sends_a_user_agent_and_a_bearer_token(monkeypatch: pytest.MonkeyPa
     headers = {k.lower(): v for k, v in captured["headers"].items()}
     assert headers["authorization"] == "Bearer secret"
     assert "python-urllib" not in headers["user-agent"].lower()
-    # Reasoning off, or Groq's own json_object validator rejects the <think> prefix and
-    # returns an empty completion.
-    assert captured["body"]["reasoning_effort"] == "none"
+    # No reasoning_effort: Groq now 400s on the field for a non-reasoning model, and
+    # `content` comes back clean JSON on a reasoning model without it too.
+    assert "reasoning_effort" not in captured["body"]
     assert captured["body"]["response_format"] == {"type": "json_object"}
 
 
@@ -162,9 +162,7 @@ def test_an_empty_groq_completion_is_unavailable_not_an_empty_plan(
     Returned as-is it would parse as a plan with nothing in it, which is a silent wrong
     answer rather than a fallback to the rule parser.
     """
-    monkeypatch.setattr(
-        urllib.request, "urlopen", lambda *_, **__: _Response(_choice(""))
-    )
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_, **__: _Response(_choice("")))
     with pytest.raises(LLMUnavailable, match="empty completion"):
         GroqAdapter(api_key="secret").complete_json(system="s", user="u")
 
@@ -190,13 +188,11 @@ class _Dead:
         raise LLMUnavailable("401 Invalid API Key")
 
 
-
 class _Live:
     name = "live:provider"
 
     def complete_json(self, **_: object) -> str:
         return '{"from": "text"}'
-
 
 
 def test_a_dead_primary_does_not_shadow_a_working_secondary() -> None:
@@ -233,6 +229,24 @@ def test_gemini_answers_when_only_it_has_a_key() -> None:
 
     resolved = resolve_adapter(_Settings())
     assert resolved is not None and resolved.name == "gemini:gemini-3.6-flash"
+
+
+def test_chat_gets_the_reasoning_model_not_the_planner_s() -> None:
+    """A follow-up question is the other place working out the answer is the whole job,
+    same as the search agent's proposal step - so it gets the same Groq model, not the
+    instruction-tuned default every other caller of `chat_model` gets."""
+
+    class _Settings:
+        groq_api_key = "g"
+        groq_model = "llama-3.3-70b-versatile"
+        groq_agent_model = "openai/gpt-oss-120b"
+        gemini_api_key = None
+
+    chat = llm.chat_model(_Settings(), task="chat")
+    plain = llm.chat_model(_Settings(), task=None)
+
+    assert llm._model_name(chat) == "openai/gpt-oss-120b"
+    assert llm._model_name(plain) == "llama-3.3-70b-versatile"
 
 
 def test_no_keys_at_all_resolves_to_nothing() -> None:
@@ -278,15 +292,16 @@ def _plain() -> PlainSummary:
 def _narrate_with(monkeypatch: pytest.MonkeyPatch, text: str) -> PlainSummary:
     """Run `narrate` against a real LCEL chain whose model answers with `text`."""
     model = FakeListChatModel(responses=[text])
-    monkeypatch.setattr(llm, "_chat_model", lambda _settings: model)
+    monkeypatch.setattr(llm, "chat_model", lambda _settings, **_kw: model)
     return llm.narrate(_plain(), settings=object())
 
 
-def test_no_key_returns_the_template_untouched() -> None:
-    """The keyless deployment is the default one, and it must cost nothing."""
+def test_no_key_keeps_the_narrator_s_template() -> None:
+    """`narrate` degrades silently, and correctly so: it is a cosmetic rewrite of prose
+    the reader could already read, so the template costs them nothing they asked for."""
     plain = _plain()
 
-    # `_chat_model` returns None for a settings object with no keys on it at all.
+    # `chat_model` returns None for a settings object with no keys on it at all.
     assert llm.narrate(plain, settings=object()) is plain
 
 
@@ -411,6 +426,43 @@ def test_thousands_separators_do_not_count_as_a_new_number() -> None:
     assert llm._numbers_are_faithful(source="180905 trees", rewritten="180,905 trees")
 
 
+# --- F16: the guard must catch a swapped unit or an inverted direction, not just a new
+# numeral. Each case below passed the old bare-digit `_numbers_are_faithful` check.
+
+
+@pytest.mark.parametrize(
+    ("source", "rewritten"),
+    [
+        ("cools 0.16 degC", "warms 0.16 degF"),
+        ("an area of 16.7 km2", "an area of 16.7 m2"),
+        ("removes 4.20 ug/m3 of PM2.5", "removes 4.20 million ug/m3 of PM2.5"),
+        ("about 6.2 million residents", "about 6.2 billion residents"),
+    ],
+)
+def test_a_swapped_unit_or_magnitude_word_is_not_faithful(source: str, rewritten: str) -> None:
+    assert not llm._numbers_are_faithful(source=source, rewritten=rewritten)
+
+
+def test_the_same_unit_reformatted_is_still_faithful() -> None:
+    """The guard must not fire on the normal case: same figure, same unit, different
+    whitespace - or every real rewrite would be rejected."""
+    assert llm._numbers_are_faithful(source="cools 0.16 degC", rewritten="0.16  degC cooler")
+
+
+def test_an_inverted_direction_is_not_faithful_even_with_the_same_number_and_unit() -> None:
+    """The case unit-tokenising alone cannot catch: same figure, same unit, opposite
+    claim. `_numbers_are_faithful` alone would accept this - `_direction_is_faithful` is
+    the second guard that has to run beside it."""
+    assert llm._numbers_are_faithful(source="cools 0.16 degC", rewritten="warms 0.16 degC")
+    assert not llm._direction_is_faithful(source="cools 0.16 degC", rewritten="warms 0.16 degC")
+
+
+def test_a_direction_word_with_no_opposite_in_the_source_is_left_to_the_numeral_guard() -> None:
+    """A source silent on direction (a tree count, an area) is not a contradiction just
+    because the rewrite happens to use a warming or cooling word."""
+    assert llm._direction_is_faithful(source="4.20 km2 of new canopy", rewritten="warms nothing")
+
+
 def test_malformed_json_keeps_the_template(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _narrate_with(monkeypatch, "I'm afraid I can't do that.").source == "template"
 
@@ -454,7 +506,71 @@ def test_a_provider_that_raises_keeps_the_template(monkeypatch: pytest.MonkeyPat
     )
     assert _narrate_with(monkeypatch, faithful).source.startswith("langchain:")
 
-    monkeypatch.setattr(llm, "_chat_model", lambda _settings: _Exploding(responses=[faithful]))
+    monkeypatch.setattr(
+        llm, "chat_model", lambda _settings, **_kw: _Exploding(responses=[faithful])
+    )
 
     assert llm.narrate(_plain(), settings=object()).source == "template"
 
+
+# --- answer_result_question -----------------------------------------------------------
+
+
+def _ask(monkeypatch: pytest.MonkeyPatch, text: str) -> tuple[str, str] | None:
+    model = FakeListChatModel(responses=[text])
+    monkeypatch.setattr(llm, "chat_model", lambda _settings, **_kw: model)
+    return llm.answer_result_question(
+        facts="expected cooling: 0.41 degC\narea: 4.0 km2",
+        history=(),
+        question="why did it cool that much?",
+        settings=object(),
+    )
+
+
+def test_no_key_refuses_rather_than_answering() -> None:
+    """Unlike `narrate`, there is no template to fall back to: a question either gets a
+    grounded answer or nothing, never a silent substitute."""
+    assert (
+        llm.answer_result_question(
+            facts="expected cooling: 0.41 degC", history=(), question="why?", settings=object()
+        )
+        is None
+    )
+
+
+def test_a_faithful_answer_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    answer_text = "It cooled by 0.41 degC because of the added canopy."
+    result = _ask(monkeypatch, json.dumps({"answer": answer_text}))
+    assert result is not None
+    answer, source = result
+    assert "0.41" in answer
+    assert source.startswith("langchain:")
+
+
+def test_an_invented_figure_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The whole guard: a number not in the facts must not reach the reader."""
+    result = _ask(monkeypatch, json.dumps({"answer": "It cooled by 1.9 degC."}))
+    assert result is None
+
+
+def test_history_reaches_the_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A follow-up question is answered with the earlier turn visible to the model."""
+
+    class _Capturing(FakeListChatModel):
+        seen: str = ""
+
+        def invoke(self, input: Any, *args: Any, **kwargs: Any) -> Any:
+            type(self).seen = str(input)
+            return super().invoke(input, *args, **kwargs)
+
+    scripted = _Capturing(responses=[json.dumps({"answer": "Yes, still 4.0 km2."})])
+    monkeypatch.setattr(llm, "chat_model", lambda _settings, **_kw: scripted)
+
+    result = llm.answer_result_question(
+        facts="area: 4.0 km2",
+        history=(("user", "how big is the area?"), ("assistant", "4.0 km2.")),
+        question="is that the same as before?",
+        settings=object(),
+    )
+    assert result is not None
+    assert "how big is the area" in _Capturing.seen

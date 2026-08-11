@@ -45,7 +45,10 @@ class PlantTrees(BaseModel):
     there is no honest rule for which wins.
     """
 
-    model_config = ConfigDict(frozen=True)
+    # F18: `PlanRequest`/`SimulateRequest` already do this; `Plan` is the model an LLM
+    # emits, so it needs it most - a misspelled `tree_counts` should 422, not silently
+    # parse as "no trees specified".
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["plant_trees"] = "plant_trees"
 
@@ -61,6 +64,7 @@ class PlantTrees(BaseModel):
         default=None,
         gt=0.0,
         le=1.0,
+        allow_inf_nan=False,  # F22: NaN fails gt/le anyway, but has no JSON spelling to echo
         description=(
             "Canopy cover to add as a fraction of cell area, if the plan is expressed "
             "that way. A ceiling: the thermal core caps each cell at its own headroom."
@@ -87,13 +91,17 @@ class RestrictVehicles(BaseModel):
     data and inventing one would be inventing a physical link.
     """
 
-    model_config = ConfigDict(frozen=True)
+    # F18: `PlanRequest`/`SimulateRequest` already do this; `Plan` is the model an LLM
+    # emits, so it needs it most - a misspelled `tree_counts` should 422, not silently
+    # parse as "no trees specified".
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["restrict_vehicles"] = "restrict_vehicles"
 
     emission_fraction_removed: float = Field(
         gt=0.0,
         le=1.0,
+        allow_inf_nan=False,  # F22: NaN fails gt/le anyway, but has no JSON spelling to echo
         description=(
             "Share of road and kiln PM2.5 removed inside the polygon. 1.0 means the "
             "vehicles are gone, not electrified: brake, tyre and road wear are roughly "
@@ -114,7 +122,10 @@ class Plan(BaseModel):
     front door, and the door is not where correctness lives.
     """
 
-    model_config = ConfigDict(frozen=True)
+    # F18: `PlanRequest`/`SimulateRequest` already do this; `Plan` is the model an LLM
+    # emits, so it needs it most - a misspelled `tree_counts` should 422, not silently
+    # parse as "no trees specified".
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str = Field(
         min_length=1,

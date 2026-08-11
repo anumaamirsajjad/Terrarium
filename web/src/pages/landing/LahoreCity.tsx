@@ -580,6 +580,21 @@ const CAMERA_REST: [number, number, number] = [560, 300, 760];
 const CAMERA_DIVE: [number, number, number] = [96, 34, 150];
 
 /**
+ * The same shot, reframed for a tall viewport.
+ *
+ * `fov` in three.js is *vertical*, so a portrait frame does not crop the sky the way a
+ * landscape one does — it adds more of it. At the landscape rest position the horizon sits
+ * about six degrees above the frame's centre, which on a 16:9 monitor is a band of warm
+ * haze and on a phone is a third of the screen with nothing in it. Standing the camera
+ * higher steepens the look-down past the half-angle, so the horizon leaves the top of the
+ * frame entirely and the city fills it; the wider fov puts back the ground a narrow frame
+ * would otherwise lose.
+ */
+const CAMERA_REST_PORTRAIT: [number, number, number] = [360, 400, 520];
+const FOV_LANDSCAPE = 40;
+const FOV_PORTRAIT = 52;
+
+/**
  * The CTA's fly-through: the camera drops out of the oblique aerial and into the streets.
  *
  * Exponential damping rather than a tween, so it is frame-rate independent and leaves at
@@ -590,13 +605,13 @@ const CAMERA_DIVE: [number, number, number] = [96, 34, 150];
  * The route change is the caller's, on a timer, not this component's: a camera move that
  * navigates would fire whether or not anyone clicked anything.
  */
-function FlyThrough({ flying }: { flying: boolean }) {
+function FlyThrough({ flying, rest }: { flying: boolean; rest: [number, number, number] }) {
   const { camera } = useThree();
   const target = useMemo(() => new THREE.Vector3(), []);
   const focus = useMemo(() => new THREE.Vector3(0, 60, 0), []);
 
   useFrame((_, delta) => {
-    target.set(...(flying ? CAMERA_DIVE : CAMERA_REST));
+    target.set(...(flying ? CAMERA_DIVE : rest));
     if (camera.position.distanceToSquared(target) < 1) return;
 
     camera.position.lerp(target, 1 - Math.exp(-1.5 * Math.min(delta, 0.05)));
@@ -611,11 +626,13 @@ function Scene({
   animate,
   flying,
   lowPower,
+  rest,
 }: {
   plant: MotionValue<number>;
   animate: boolean;
   flying: boolean;
   lowPower: boolean;
+  rest: [number, number, number];
 }) {
   const data = useLoader(JsonLoader, "/lahore.json") as unknown as LahoreExtract;
   const group = useRef<THREE.Group>(null);
@@ -704,7 +721,7 @@ function Scene({
         <Buildings data={data} occupancy={occupancy} plant={plant} animate={animate} />
         <Trees data={data} occupancy={occupancy} plant={plant} />
       </group>
-      <FlyThrough flying={flying} />
+      <FlyThrough flying={flying} rest={rest} />
 
       {/**
        * Two passes, and only two.
@@ -771,6 +788,15 @@ export default function LahoreCity({
     [],
   );
 
+  // Checked once at mount for the same reason as `lowPower`: this is a shot, not a layout.
+  // A phone rotated mid-scroll gets the frame it started in, which is the cheaper wrong
+  // answer than remounting a 3D scene on an orientation change.
+  const portrait = useMemo(
+    () => typeof window !== "undefined" && window.innerHeight > window.innerWidth,
+    [],
+  );
+  const rest = portrait ? CAMERA_REST_PORTRAIT : CAMERA_REST;
+
   return (
     <Canvas
       className="absolute inset-0"
@@ -781,7 +807,12 @@ export default function LahoreCity({
       // Low and close, like an oblique aerial rather than a satellite. The façades carry
       // storey lines and window bays now, and from 2 km up none of that resolves — the
       // detail only pays for itself if the camera is near enough to read it.
-      camera={{ position: [560, 300, 760], fov: 40, near: 5, far: 12000 }}
+      camera={{
+        position: rest,
+        fov: portrait ? FOV_PORTRAIT : FOV_LANDSCAPE,
+        near: 5,
+        far: 12000,
+      }}
       // Uncapped DPR quadruples the pixels on a retina panel for no visible gain on flat
       // shaded boxes. 1.6 is where the edges stop looking stepped — and where there's no
       // budget for it at all, 1 is the floor.
@@ -798,7 +829,13 @@ export default function LahoreCity({
           has to be inside the geometry for the city to end in haze instead of at an edge. */}
       <fog attach="fog" args={[HAZE_HEX, 1100, 3200]} />
       <Suspense fallback={null}>
-        <Scene plant={plant} animate={animate} flying={flying} lowPower={lowPower} />
+        <Scene
+          plant={plant}
+          animate={animate}
+          flying={flying}
+          lowPower={lowPower}
+          rest={rest}
+        />
       </Suspense>
     </Canvas>
   );

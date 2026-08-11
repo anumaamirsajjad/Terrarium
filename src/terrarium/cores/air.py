@@ -419,6 +419,17 @@ def simulate(
         raise ValueError(
             f"intervention mask {intervention.mask.shape} != cube grid {emissions.shape}"
         )
+    if not np.any(emissions[intervention.mask] > 0):
+        # Zero is a legitimate value elsewhere in this cube (a cell with no road really
+        # does emit nothing), but zero across the *whole* polygon is indistinguishable
+        # from an OSM ingest that never reached this area - and answering either as "no
+        # effect" is a wrong answer dressed as a modelled one (F25). `_air` already
+        # catches this and serves `air: null` with the reason logged, not a zero delta.
+        raise ValueError(
+            f"{EMISSION_VARIABLE} is entirely zero inside the intervention polygon - "
+            "refusing to report an emission removal against an inventory that has "
+            "nothing in it here"
+        )
 
     params = model if model is not None else AirParameters.for_season(season_of(cube))
     resolution_m = float(abs(np.diff(np.asarray(cube["x"].values)[:2])[0]))
@@ -450,12 +461,20 @@ def simulate(
     speed = _scalar(cube, "wind_speed_ms")
     direction = _scalar(cube, "wind_direction_deg")
     baseline = concentration(
-        emissions, canopy, params,
-        wind_speed_ms=speed, wind_direction_deg=direction, resolution_m=resolution_m,
+        emissions,
+        canopy,
+        params,
+        wind_speed_ms=speed,
+        wind_direction_deg=direction,
+        resolution_m=resolution_m,
     )
     scenario = concentration(
-        scenario_emissions, scenario_canopy, params,
-        wind_speed_ms=speed, wind_direction_deg=direction, resolution_m=resolution_m,
+        scenario_emissions,
+        scenario_canopy,
+        params,
+        wind_speed_ms=speed,
+        wind_direction_deg=direction,
+        resolution_m=resolution_m,
     )
 
     delta = (scenario - baseline).astype("float32")

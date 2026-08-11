@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import lightgbm as lgb
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
+import terrarium.cores.thermal.simulate as simulate_module
 from terrarium.cores.base import CoreResult, Intervention
 from terrarium.cores.thermal.features import (
     FEATURE_NAMES,
@@ -193,3 +195,76 @@ def test_mask_shape_is_validated(fitted: tuple[xr.Dataset, lgb.Booster]) -> None
 
     with pytest.raises(ValueError, match="mask"):
         simulate(cube, bad, model)
+
+
+# --- F7/F12: meteorology cancels within one call, and is not additive across calls -----
+
+
+def test_meteorology_is_held_identical_between_baseline_and_scenario(
+    fitted: tuple[xr.Dataset, lgb.Booster], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The plumbing property, and the one worth locking down: `simulate` must build the
+    baseline and scenario feature frames from the *same* meteorology mapping. A refactor
+    that read the scenario's weather from a different place would break this silently -
+    it would still produce a plausible-looking delta, just not this one."""
+    seen: list[dict[str, float]] = []
+    real = simulate_module.features_from_arrays
+
+    def spy(arrays: object, meteorology: dict[str, float]) -> object:
+        seen.append(dict(meteorology))
+        return real(arrays, meteorology)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(simulate_module, "features_from_arrays", spy)
+    cube, model = fitted
+    plant(cube, model)
+
+    assert len(seen) == 2, "one call for the baseline frame, one for the scenario frame"
+    assert seen[0] == seen[1]
+
+
+def _cube_with_weather(air_temp_c: float, *, lst_offset: float) -> xr.Dataset:
+    cube = synthetic_cube()
+    cube["air_temp_c"] = ((), np.float32(air_temp_c))
+    cube["lst_c"] = cube["lst_c"] + lst_offset
+    return cube
+
+
+@pytest.fixture(scope="module")
+def meteorology_sensitive_model() -> lgb.Booster:
+    """A booster trained across several synthetic windows whose `air_temp_c` and LST move
+    together - the pooled-window setup CLAUDE.md describes, where `air_temp_c` acts as a
+    window identifier rather than a physical driver of any one prediction."""
+    frames = []
+    targets = []
+    for temp, offset in ((28.0, -4.0), (34.0, 0.0), (40.0, 4.0)):
+        window = _cube_with_weather(temp, lst_offset=offset)
+        frame, valid = build_features(window)
+        rows = valid.reshape(-1)
+        frames.append(frame[rows])
+        targets.append(target_from_cube(window)[rows])
+    pooled = pd.concat(frames, ignore_index=True)
+    return train(pooled, np.concatenate(targets), num_boost_round=150)
+
+
+def test_meteorology_changes_the_delta_though_it_cancels_within_one_call(
+    meteorology_sensitive_model: lgb.Booster,
+) -> None:
+    """The sensitivity property, and the one CLAUDE.md used to get wrong (F12): holding
+    meteorology fixed *within* a single `simulate` call does not make the intervention's
+    scale independent of *which* window's weather that call used, because a GBDT is not
+    additive. If this ever starts failing because the two deltas converge, that is the
+    model becoming meteorology-invariant (F12's approach C landing), which is information
+    worth seeing, not a bug to silence.
+    """
+    mask = np.zeros(SHAPE, dtype=bool)
+    mask[40:50, 40:50] = True
+    intervention = Intervention(mask=mask, canopy_fraction_added=0.4)
+
+    cool = simulate(
+        _cube_with_weather(28.0, lst_offset=-4.0), intervention, meteorology_sensitive_model
+    )
+    hot = simulate(
+        _cube_with_weather(40.0, lst_offset=4.0), intervention, meteorology_sensitive_model
+    )
+
+    assert cool.stats.mean_delta_inside != pytest.approx(hot.stats.mean_delta_inside, abs=1e-6)

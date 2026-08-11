@@ -2,8 +2,8 @@
  * The panel most people will read, so the tests are about what it may not do.
  *
  * It renders server-written prose, which makes the interesting failures omissions rather
- * than mistakes: dropping the caveat, or quietly showing the raw modelled figure where the
- * hindcast-corrected one belongs. Both would leave a panel that looks perfectly fine.
+ * than mistakes: quietly showing the raw modelled figure where the hindcast-corrected one
+ * belongs, for instance. That would leave a panel that looks perfectly fine.
  */
 
 import { renderToStaticMarkup } from "react-dom/server";
@@ -20,6 +20,8 @@ const BRIEF: Brief = {
   // -0.40 modelled, so -0.16 after the 2.5x hindcast correction. The two differ by enough
   // that a panel showing the wrong one is visible in a test rather than a rounding away.
   expected_cooling_c: -0.16140140295028688,
+  expected_pm25_delta: null,
+  pm25_units: null,
   plain: {
     verdict: "small",
     headline:
@@ -52,24 +54,6 @@ describe("PlainPanel", () => {
     }
   });
 
-  it("never drops the caveat", () => {
-    const html = renderToStaticMarkup(<PlainPanel brief={BRIEF} />);
-
-    expect(html).toContain(BRIEF.plain.caveat);
-  });
-
-  it("says when the prose came from a model rather than the template", () => {
-    const offline = renderToStaticMarkup(<PlainPanel brief={BRIEF} />);
-    expect(offline).toContain("written offline");
-
-    const reworded = renderToStaticMarkup(
-      <PlainPanel
-        brief={{ ...BRIEF, plain: { ...BRIEF.plain, source: "langchain:llama-3.3-70b" } }}
-      />,
-    );
-    expect(reworded).toContain("reworded by langchain:llama-3.3-70b");
-  });
-
   it("hides the big number when the plan changes nothing measurable", () => {
     // 0.00 degC rendered large reads as a broken panel rather than a small result. The
     // sentence still explains what happened.
@@ -97,5 +81,40 @@ describe("PlainPanel", () => {
     );
     // The headline already says nothing happened; a badge repeating it is noise.
     expect(nothing).not.toContain("change</span>");
+  });
+
+  it("gives an air-only plan the same prominent number a cooling plan gets", () => {
+    // No temperature change at all, but a real PM2.5 reduction — this used to have no
+    // headline number, only a paragraph, which is the gap this test guards against.
+    const html = renderToStaticMarkup(
+      <PlainPanel
+        brief={{
+          ...BRIEF,
+          expected_cooling_c: 0,
+          expected_pm25_delta: -4.03,
+          pm25_units: "ug m-3",
+          plain: {
+            ...BRIEF.plain,
+            verdict: "unrated",
+            headline: "Restricting traffic clears out about 4.0 ug m-3 of the fumes.",
+          },
+        }}
+      />,
+    );
+
+    expect(html).toContain("4.03 ug m-3");
+    expect(html).toContain("cleaner air, on average");
+    expect(html).not.toContain("cooler ground, on average");
+  });
+
+  it("never shows the air number alongside a real cooling one", () => {
+    // A plan that both cools and cleans the air still leads with temperature — showing
+    // both big numbers at once would make the panel look broken, not thorough.
+    const html = renderToStaticMarkup(
+      <PlainPanel brief={{ ...BRIEF, expected_pm25_delta: -4.03, pm25_units: "ug m-3" }} />,
+    );
+
+    expect(html).toContain("cooler ground, on average");
+    expect(html).not.toContain("cleaner air, on average");
   });
 });

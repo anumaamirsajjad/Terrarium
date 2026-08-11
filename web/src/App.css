@@ -12,9 +12,13 @@
    absolutely-positioned child of this stacking context — which is also why the print rule
    at the bottom of this file is written as "hide every child except the document" rather
    than naming the two it used to know about. */
+/* `dvh`, not `vh`. On a phone `100vh` is the viewport with the browser's own chrome
+   retracted, which it is not when the page loads — so the toolbar pinned to the bottom
+   edge started life underneath the address bar, and the map was a scroll's worth taller
+   than the screen it was told to fill. */
 .app {
   position: relative;
-  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -129,20 +133,12 @@ button.primary {
   font-size: 0.8125rem;
 }
 
-select,
-input[type="range"] {
-  font: inherit;
-  width: 100%;
-}
-
-select {
-  font-size: 0.8125rem;
-  padding: 0.4375rem 0.5rem;
-  border-radius: 0.375rem;
-  border: 1px solid var(--border);
-  background: var(--badge-bg);
-  color: var(--fg);
-}
+/* The element selectors that used to live here — `select`, `input[type="range"]` — are
+   gone with the sidebar they were written for. Both survivors are in `App.tsx` and carry
+   their own utilities, and an unlayered `select { width: 100% }` beats every one of them:
+   cascade layers put Tailwind's utilities *below* plain CSS, so `w-auto` on the window
+   picker silently did nothing and each picker claimed a full row on a phone. A bare
+   element selector in this file is a trap for anything written against the tokens. */
 
 /* --------------------------------------------------------------- legend --- */
 
@@ -457,6 +453,16 @@ code {
   font-size: 0.6875rem;
 }
 
+.scenario__link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--fg);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .scenario__text {
   display: flex;
   flex-direction: column;
@@ -486,6 +492,243 @@ code {
 .scenario__headline {
   margin: 0;
   font-size: 0.8125rem;
+}
+
+/* ------------------------------------------------------- the search agent --- */
+
+.agent__goal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.25rem 0 0;
+}
+
+.agent__goal input[type="text"] {
+  padding: 0.4375rem 0.5rem;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+}
+
+.agent__status {
+  margin: 0.625rem 0 0;
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+/* The trace. Capped and scrolled rather than allowed to grow: a twenty-step search inside
+   a phone's results sheet would push the result itself off the bottom, and the result is
+   what the trace exists to justify. */
+.agent__trace {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  max-height: 15rem;
+  overflow-y: auto;
+  margin: 0.625rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent__attempt {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.125rem 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-left: 2px solid var(--border);
+  font-size: 0.6875rem;
+  line-height: 1.4;
+}
+
+/* A refusal is information, not an error: it carries the arithmetic the next proposal was
+   conditioned on. Coloured as a note so it reads that way. */
+.agent__attempt.is-refused {
+  border-left-color: var(--warn, #d9a441);
+}
+
+.agent__attempt.is-control {
+  border-left-color: var(--ok);
+}
+
+.agent__regions {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+}
+
+.agent__proposer {
+  justify-self: end;
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.45;
+}
+
+.agent__reason {
+  grid-column: 1 / -1;
+  margin: 0;
+  opacity: 0.8;
+}
+
+.agent__result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.agent__headline {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+/* Shown whichever way the comparison went. A loss is a finding worth publishing, so it is
+   styled as a statement rather than as a failure. */
+.agent__control {
+  margin: 0;
+  padding: 0.4375rem 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.agent__control.is-win {
+  border-color: var(--ok);
+}
+
+.agent__apply {
+  padding: 0.4375rem 0.625rem;
+  font: inherit;
+  font-size: 0.75rem;
+  border-radius: 0.375rem;
+}
+
+/* ------------------------------------------------- where it landed --- */
+
+.pattern__prose {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin: 0.75rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.pattern__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pattern__row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 0.125rem 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  cursor: default;
+}
+
+.pattern__row:hover {
+  background: var(--badge-bg);
+}
+
+.pattern__region {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+}
+
+.pattern__cooling {
+  font-variant-numeric: tabular-nums;
+  color: var(--ok);
+}
+
+.pattern__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  justify-content: flex-end;
+}
+
+.pattern__tag {
+  padding: 0 0.25rem;
+  font-size: 0.5625rem;
+  font-style: normal;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 0.1875rem;
+  background: var(--badge-bg);
+  opacity: 0.7;
+}
+
+/* The one users report as a bug. Marked, not explained twice. */
+.pattern__tag.is-spillover {
+  color: var(--ok);
+  opacity: 0.9;
+}
+
+.pattern__detail {
+  grid-column: 1 / -1;
+  opacity: 0.6;
+}
+
+/* ------------------------------------------------------ ask about this result --- */
+
+.chat__messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+  max-height: 20rem;
+  overflow-y: auto;
+}
+
+.chat__message {
+  padding: 0.4375rem 0.625rem;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  border-radius: 0.5rem;
+  white-space: pre-wrap;
+}
+
+.chat__message.is-user {
+  align-self: flex-end;
+  max-width: 85%;
+  background: var(--badge-bg);
+}
+
+.chat__message.is-assistant {
+  opacity: 0.85;
+}
+
+.chat__ask {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.25rem 0 0;
+}
+
+.chat__ask input[type="text"] {
+  padding: 0.4375rem 0.5rem;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
 }
 
 /* ---------------------------------------------------------------- brief --- */

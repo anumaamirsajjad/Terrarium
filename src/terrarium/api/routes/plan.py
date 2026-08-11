@@ -6,8 +6,8 @@ The refusals are the validator's and the sentences are the DSL's; this file only
 which HTTP status each one deserves.
 
 `GET /plan/presets` deliberately takes no runtime dependency. A deployment whose cube failed
-to load still has a costed intervention library to show, and 503-ing a static list because
-a Zarr store is missing would be answering the wrong question.
+to load still has an intervention library to show, and 503-ing a static list because a
+Zarr store is missing would be answering the wrong question.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from terrarium.api.schemas.simulate import SimulateRequest
 from terrarium.config import Settings, get_settings
 from terrarium.dsl.library import PRESETS, preset
 from terrarium.dsl.llm import resolve_adapter
-from terrarium.dsl.planner import PlanParseError, plan_from_text
+from terrarium.dsl.planner import plan_from_text
 from terrarium.dsl.schema import Plan
 from terrarium.dsl.validate import PlanError, resolve
 from terrarium.state.cube import select_window
@@ -50,7 +50,7 @@ def _planner_name(settings: Settings) -> str:
 @router.get(
     "/presets",
     response_model=PresetsResponse,
-    summary="The costed intervention library",
+    summary="The intervention library",
 )
 async def list_presets(
     settings: Annotated[Settings, Depends(get_settings)],
@@ -82,7 +82,10 @@ def _plan_and_source(
     adapter = resolve_adapter(settings)
     try:
         parsed = plan_from_text(request.text, adapter=adapter)
-    except PlanParseError as exc:
+    except ValueError as exc:
+        # `PlanParseError` *is* a `ValueError`; caught by the base class as defence in
+        # depth (F14) so the next arithmetic surprise inside the parser is a 422 rather
+        # than a 500, even if it forgets to wrap itself in `PlanParseError`.
         # 422, not 400: the request was well formed and the sentence was not understood.
         # The message lists the vocabulary that *is* understood, which is the only useful
         # thing to say to someone who just typed something into a box.
@@ -125,7 +128,7 @@ def _resolve_window(runtime: Runtime, request: PlanRequest, plan: Plan) -> str:
 @router.post(
     "",
     response_model=PlanResponse,
-    summary="Validate and cost an intervention before running it",
+    summary="Validate an intervention before running it",
 )
 async def build_plan(
     request: PlanRequest,
@@ -166,7 +169,6 @@ async def build_plan(
         tree_count=resolved.tree_count,
         max_trees=resolved.max_trees,
         canopy_utilisation=resolved.canopy_utilisation,
-        cost=resolved.cost,
         notes=resolved.notes,
         warnings=warnings,
         basis=resolved.basis,

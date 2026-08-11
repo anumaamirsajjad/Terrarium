@@ -35,6 +35,29 @@ export interface PolygonDraw {
   completePolygon: () => void;
   undoVertex: () => void;
   clear: () => void;
+  /**
+   * Replace the ring wholesale with one that was not drawn by hand.
+   *
+   * The search agent's "Apply this plan" writes its winning region here, so the polygon
+   * the user then edits, re-runs and prints is the same one the search scored. Arrives
+   * complete, because a region that came back from the API is by definition closed —
+   * dropping the user into a half-drawn state would invite an undo that loses it.
+   *
+   * A duplicated closing vertex is stripped: GeoJSON repeats the first position as the
+   * last, and this hook's `vertices` are the distinct corners. Keeping the repeat would
+   * show a phantom vertex on the map and let one `undoVertex` appear to do nothing.
+   */
+  setPolygon: (vertices: Position[]) => void;
+}
+
+/** Drop GeoJSON's repeated closing position, if there is one. */
+export function openRing(ring: Position[]): Position[] {
+  const last = ring.at(-1);
+  const first = ring[0];
+  if (ring.length > 1 && first && last && first[0] === last[0] && first[1] === last[1]) {
+    return ring.slice(0, -1);
+  }
+  return [...ring];
 }
 
 /**
@@ -86,6 +109,13 @@ export function useDrawnPolygon(): PolygonDraw {
     setDrawing(false);
   }, []);
 
+  const setPolygon = useCallback((next: Position[]) => {
+    const opened = openRing(next);
+    setVertices(opened);
+    setComplete(opened.length >= MIN_VERTICES);
+    setDrawing(false);
+  }, []);
+
   const geometry = useMemo(() => (complete ? toGeoJson(vertices) : null), [complete, vertices]);
 
   return {
@@ -99,5 +129,6 @@ export function useDrawnPolygon(): PolygonDraw {
     completePolygon,
     undoVertex,
     clear,
+    setPolygon,
   };
 }

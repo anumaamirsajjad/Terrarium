@@ -98,6 +98,21 @@ def test_scalar_series_are_written_without_spatial_chunking(
     assert reopened["air_temp_c"].dims == ("time",)
 
 
+def test_crs_survives_two_full_write_open_cycles(
+    tmp_path: Path, cube: xr.Dataset, grid: Grid
+) -> None:
+    """F9: `open_cube` moves the CRS out of `attrs` into `spatial_ref` (a coordinate,
+    not an attr), and `write_cube` used to drop `spatial_ref` without ever copying the
+    CRS back into `attrs` — so a cube survived its first write intact and lost the CRS on
+    its second, which is exactly the write→open→write→open sequence this test runs.
+    """
+    once = open_cube(write_cube(cube, tmp_path / "once.zarr", grid=grid))
+    assert once.rio.crs is not None
+
+    twice = open_cube(write_cube(once, tmp_path / "twice.zarr", grid=grid))
+    assert twice.rio.crs == once.rio.crs == grid.crs
+
+
 def test_catalogue_records_the_windows_a_build_covered(
     tmp_path: Path, cube: xr.Dataset, grid: Grid, windows: tuple[SeasonWindow, ...]
 ) -> None:

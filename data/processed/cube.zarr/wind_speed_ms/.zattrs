@@ -1,0 +1,10 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "time"
+    ],
+    "coordinates": "season window",
+    "description": "10 m wind speed at the ~10:30 local overpass hour, window median (Open-Meteo ERA5 archive)",
+    "resampling": "none",
+    "source_collection": "open-meteo",
+    "units": "m s-1"
+}

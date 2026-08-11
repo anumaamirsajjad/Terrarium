@@ -40,7 +40,7 @@ from terrarium.cores.thermal.simulate import (
     tree_built_contrast,
 )
 from terrarium.dsl.explain import AirInputs, Brief, BriefInputs, EquityInputs, brief_for
-from terrarium.dsl.library import estimate_cost, trees_for_canopy
+from terrarium.dsl.library import trees_for_canopy
 from terrarium.dsl.llm import narrate
 from terrarium.state.cube import select_window
 
@@ -133,9 +133,7 @@ def _air(
         ),
         mixing_height_m=params.mixing_height_m,
         wind_speed_ms=float(np.asarray(window["wind_speed_ms"].values).reshape(-1)[0]),
-        wind_direction_deg=float(
-            np.asarray(window["wind_direction_deg"].values).reshape(-1)[0]
-        ),
+        wind_direction_deg=float(np.asarray(window["wind_direction_deg"].values).reshape(-1)[0]),
         emission_fraction_removed=intervention.emission_fraction_removed,
         delta=build_layer(
             result.delta,
@@ -183,9 +181,8 @@ def _brief(
 ) -> Brief:
     """Write the narrative block from the numbers already computed. No new physics.
 
-    Costed from the canopy that was *actually* added rather than what was asked for: the
-    core caps each cell at its own headroom, so the requested fraction is a ceiling and
-    billing for it would price trees the plan cannot plant.
+    Tree count is from the canopy that was *actually* added rather than what was asked for:
+    the core caps each cell at its own headroom, so the requested fraction is a ceiling.
 
     The plain-language block is then offered to the narrator (D24), which either rewords
     it or hands it straight back. `narrate` cannot raise, so there is nothing to catch and
@@ -194,10 +191,6 @@ def _brief(
     """
     area_km2 = area_m2 / 1_000_000.0
     tree_count = trees_for_canopy(context.mean_canopy_added, area_m2)
-    cost = estimate_cost(
-        tree_count=tree_count,
-        restricted_area_km2=area_km2 if request.emission_fraction_removed > 0 else 0.0,
-    )
 
     brief = brief_for(
         BriefInputs(
@@ -206,7 +199,6 @@ def _brief(
             season=season,
             area_km2=area_km2,
             tree_count=tree_count,
-            cost_total_usd=cost.total_usd,
             mean_delta_inside=stats.mean_delta_inside,
             mean_delta_spillover=stats.mean_delta_spillover,
             spillover_cells=stats.spillover_cells,
@@ -243,7 +235,8 @@ def _brief(
             ),
         )
     )
-    return brief.model_copy(update={"plain": narrate(brief.plain, settings=settings)})
+    plain = narrate(brief.plain, settings=settings)
+    return brief.model_copy(update={"plain": plain})
 
 
 @router.post(
@@ -321,6 +314,20 @@ async def run_simulation(
     equity = _equity(result.delta, runtime)
     air = _air(window, intervention, runtime, label)
 
+    brief = _brief(
+        request=request,
+        label=label,
+        season=season,
+        # The drawn polygon, not the planted cells: an intervention that only
+        # restricts traffic plants nothing, and `n_cells_changed` is zero for it.
+        area_m2=float(mask.sum()) * float(runtime.grid.resolution_m) ** 2,
+        stats=stats_response,
+        context=context,
+        equity=equity,
+        air=air,
+        settings=settings,
+    )
+
     return SimulateResponse(
         equity=equity,
         variable=result.variable,
@@ -329,19 +336,7 @@ async def run_simulation(
         season=season,
         stats=stats_response,
         context=context,
-        brief=_brief(
-            request=request,
-            label=label,
-            season=season,
-            # The drawn polygon, not the planted cells: an intervention that only
-            # restricts traffic plants nothing, and `n_cells_changed` is zero for it.
-            area_m2=float(mask.sum()) * float(runtime.grid.resolution_m) ** 2,
-            stats=stats_response,
-            context=context,
-            equity=equity,
-            air=air,
-            settings=settings,
-        ),
+        brief=brief,
         delta=build_layer(
             result.delta,
             variable=result.variable,

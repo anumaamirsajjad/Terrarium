@@ -108,6 +108,18 @@ def load_runtime(settings: Settings) -> Runtime:
     except ValueError as exc:
         raise StartupError(f"cube at {cube_path} is not servable: {exc}") from exc
 
+    if cube.rio.crs is None:
+        # F9: an open/write cycle through `state.store` can drop the CRS silently (fixed
+        # at the source in `write_cube`/`open_cube`) - this is the artefact check that
+        # catches a cube built before that fix, or written by anything else. Checked here
+        # rather than in `validate_windows`, which every pure-core test's synthetic cube
+        # also runs through and never carries a CRS at all - a property nothing in
+        # `cores/` reads.
+        raise StartupError(
+            f"cube at {cube_path} carries no CRS (rio.crs is None) - reopen it with "
+            "state.store.open_cube rather than a bare xr.open_zarr, or rebuild it."
+        )
+
     grid = grid_for_tile(settings.tile)
     model = lgb.Booster(model_file=str(model_path))
     _check_model_features(model, model_path)

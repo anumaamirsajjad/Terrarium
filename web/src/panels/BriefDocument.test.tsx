@@ -67,6 +67,17 @@ const RESULT = {
     ],
     confidence: "moderate",
     expected_cooling_c: -0.106,
+    expected_pm25_delta: null,
+    pm25_units: null,
+    // The plain-language block the printed brief now carries as its own section, so a
+    // resident gets the half they can read.
+    plain: {
+      verdict: "small",
+      headline: "Street trees here would make the ground about 0.11 degC cooler.",
+      points: ["About 626,000 people live across this tile."],
+      caveat: "This is a model, not a measurement.",
+      source: "template",
+    },
   },
 } as unknown as SimulateResponse;
 
@@ -74,7 +85,6 @@ const PLAN = {
   plan: { name: "Street trees", actions: [] },
   tree_count: 38_280,
   max_trees: 137_305,
-  cost: { planting_usd: 574_200, restriction_usd: 0, total_usd: 574_200, basis: "", calibrated: false },
 } as unknown as PlanResponse;
 
 function render(plan: PlanResponse | null = PLAN): string {
@@ -120,13 +130,8 @@ describe("BriefDocument", () => {
     expect(html).toContain("not a measurement of what happened");
   });
 
-  it("says costs are not calibrated", () => {
-    expect(render()).toContain("not calibrated");
-  });
-
   it("renders without a plan — /simulate can be driven by the sliders alone", () => {
     const html = render(null);
     expect(html).toContain("Modelled intervention");
-    expect(html).not.toContain("Indicative cost");
   });
 });

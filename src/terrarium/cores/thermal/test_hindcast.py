@@ -292,9 +292,7 @@ def test_matching_leaves_a_genuine_effect_alone() -> None:
     field = detect_change(cube, WINDOWS[:-1], WINDOWS[-1:])
     report = run_hindcast(cube, WINDOWS[:-1], WINDOWS[-1], field, num_boost_round=200)
 
-    assert report.matched_effect_error.value == pytest.approx(
-        report.change_effect_error, abs=1.0
-    )
+    assert report.matched_effect_error.value == pytest.approx(report.change_effect_error, abs=1.0)
 
 
 def test_a_stratum_with_no_control_is_counted_not_silently_dropped() -> None:

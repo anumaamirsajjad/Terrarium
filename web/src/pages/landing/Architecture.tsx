@@ -30,7 +30,7 @@ const LAYERS = [
     tier: "2",
     name: "Physics core",
     modules: "cores/",
-    body: "Pure functions. No file reads, no network, no global state — everything a simulator needs arrives as an argument, including its trained model. Given the same inputs it returns the same outputs, always.",
+    body: "Pure functions. No file reads, no network, no global state: everything a simulator needs arrives as an argument, including its trained model. Given the same inputs it returns the same outputs, always.",
     tint: "from-shoal/18",
     edge: "border-shoal/25",
   },
@@ -127,8 +127,8 @@ export default function Architecture() {
   const tilt = useTransform(depart, [0, 1], [0, 38]);
 
   return (
-    <section ref={section} className="mx-auto max-w-[92rem] px-8 py-32">
-      <div className="grid gap-16 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+    <section ref={section} className="mx-auto max-w-[92rem] px-5 py-20 sm:px-8 sm:py-32">
+      <div className="grid gap-10 sm:gap-16 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
         <div className="lg:sticky lg:top-32 lg:self-start">
           <Eyebrow>Three layers</Eyebrow>
           <h2 className="mt-6 font-mono text-4xl leading-[0.95] tracking-tight text-white">

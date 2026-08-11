@@ -47,10 +47,11 @@ WORLDCOVER_LEGEND = {
 def _print_variables(ds, summary, label: str) -> None:
     """Per-variable value ranges for one cube (whole, or a single window's slice)."""
     print(f"  {label}")
-    print(f"  {'variable':<22} {'units':<8} {'dtype':<8} {'valid':>7} "
-          f"{'min':>10} {'p50':>10} {'mean':>10} {'max':>10}")
-    print(f"  {'-' * 22} {'-' * 8} {'-' * 8} {'-' * 7} "
-          f"{'-' * 10} {'-' * 10} {'-' * 10} {'-' * 10}")
+    print(
+        f"  {'variable':<22} {'units':<8} {'dtype':<8} {'valid':>7} "
+        f"{'min':>10} {'p50':>10} {'mean':>10} {'max':>10}"
+    )
+    print(f"  {'-' * 22} {'-' * 8} {'-' * 8} {'-' * 7} {'-' * 10} {'-' * 10} {'-' * 10} {'-' * 10}")
 
     for spec in CUBE_VARIABLES:
         var = next(v for v in summary.variables if v.name == spec.name)
@@ -104,9 +105,11 @@ def _print_contrast(ds, labels: list[str]) -> None:
             print(f"    {label:<16} {'no LST for this window':>32}")
             continue
         print(f"    {label:<16} {tree_median:>10.2f} {built_median:>10.2f} {contrast:>10.2f}")
-    print("\n    Phase 2's single Apr-Jun composite gave 2.60 degC. A higher number here\n"
-          "    means per-window compositing recovered contrast that the wider composite\n"
-          "    averaged away; a similar one means it did not, and the pitch should say so.\n")
+    print(
+        "\n    Phase 2's single Apr-Jun composite gave 2.60 degC. A higher number here\n"
+        "    means per-window compositing recovered contrast that the wider composite\n"
+        "    averaged away; a similar one means it did not, and the pitch should say so.\n"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -136,8 +139,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{'=' * 78}")
     print(f"  CRS          {summary.crs}")
     print(f"  resolution   {summary.resolution_m} m")
-    print(f"  shape        {summary.shape[0]} x {summary.shape[1]} (y, x) "
-          f"= {summary.shape[0] * summary.shape[1]:,} pixels")
+    print(
+        f"  shape        {summary.shape[0]} x {summary.shape[1]} (y, x) "
+        f"= {summary.shape[0] * summary.shape[1]:,} pixels"
+    )
     print(f"  bounds       {ds.attrs.get('bounds')}")
     print(f"  dims         {dict(ds.sizes)}")
     print(f"  windows      {len(labels)}: {', '.join(labels)}")
@@ -181,9 +186,11 @@ def main(argv: list[str] | None = None) -> int:
         finite = people[np.isfinite(people)]
         # The tile total is the number to sanity-check against: this bbox covers most of
         # Lahore proper, whose metro population is on the order of 11-13 million.
-        print(f"  population    {finite.sum():,.0f} residents on the tile "
-              f"({(finite > 0).mean():.1%} of cells inhabited, "
-              f"max {finite.max():,.0f} per 1 ha cell)\n")
+        print(
+            f"  population    {finite.sum():,.0f} residents on the tile "
+            f"({(finite > 0).mean():.1%} of cells inhabited, "
+            f"max {finite.max():,.0f} per 1 ha cell)\n"
+        )
 
     if settings.duckdb_path.exists():
         with connect_catalog(settings.duckdb_path) as conn:
@@ -203,8 +210,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"    {rows[0][0]}  at {rows[0][1]}  ({duration})")
             for _, _, _, window, coll, found, kept, comp in rows:
                 label = window or "(static)"
-                print(f"    {label:<14} {coll:<24} found={found:<4} "
-                      f"cloud-ok={kept:<4} composited={comp}")
+                print(
+                    f"    {label:<14} {coll:<24} found={found:<4} "
+                    f"cloud-ok={kept:<4} composited={comp}"
+                )
             print()
 
     return 0

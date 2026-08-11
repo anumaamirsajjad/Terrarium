@@ -10,8 +10,11 @@ dependencies = [
     # --- API layer ---
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
-    "pydantic>=2.9",
-    "pydantic-settings>=2.6",
+    # F8: capped below 3 - `planetary-computer` uses class-based `config`, removed in
+    # Pydantic V3, so an unbounded pin breaks every ingest path with an import error the
+    # day V3 ships.
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.6,<3",
     # --- State Cube: geospatial ingest + array storage ---
     "xarray>=2024.10",
     "odc-stac>=0.3.10",
@@ -47,6 +50,13 @@ dependencies = [
     "langchain-core>=0.3",
     "langchain-groq>=0.2",
     "langchain-google-genai>=2.0",
+    # --- Intelligence: the intervention search agent (D17 reopened, D25) ---
+    # D17 refused LangGraph for the *planner* and that reasoning is untouched: parse then
+    # validate is two nodes with no cycle. The search agent is the case D17 named as its
+    # own reopening condition - propose, check, run, score, decide, and an edge back to
+    # propose when the validator refuses. `langgraph.graph` is imported directly by
+    # `agent/graph.py`. Nothing else in the tree uses it.
+    "langgraph>=0.2",
 ]
     
 [project.optional-dependencies]
@@ -94,14 +104,6 @@ ignore = ["ANN401"]  # allow typing.Any where genuinely needed
 # third-party signatures they stand in for.
 "**/test_*.py" = ["ANN001", "ANN002", "ANN003", "ANN201", "ANN202"]
 "scripts/*.py" = ["ANN001"]
-# The Urdu half of the rule parser (Phase 11) is written in Urdu: its patterns, its
-# examples and the sentence it refuses with all contain Arabic script and Eastern
-# Arabic-Indic digits. RUF001-003 flag those as characters that "look like" ASCII, which
-# is the right warning for a stray Cyrillic 'а' in an English identifier and the wrong one
-# for text that is deliberately not English.
-"src/terrarium/dsl/planner.py" = ["RUF001", "RUF002", "RUF003"]
-"src/terrarium/dsl/test_planner.py" = ["RUF001", "RUF002", "RUF003"]
-"src/terrarium/dsl/observe.py" = ["RUF002"]
 
 [tool.mypy]
 python_version = "3.12"

@@ -36,7 +36,7 @@ export default function ResultPanel({ result }: ResultPanelProps) {
       </div>
 
       <p className="result__ceiling">
-        against a <strong>{context.tree_built_contrast_c.toFixed(2)} °C</strong> ceiling —
+        against a <strong>{context.tree_built_contrast_c.toFixed(2)} °C</strong> ceiling:
         this window&rsquo;s own observed gap between built-up and tree-cover pixels. No
         planting on this tile can beat that.
       </p>
@@ -79,7 +79,7 @@ export default function ResultPanel({ result }: ResultPanelProps) {
             {context.ratio_to_linear !== null ? (
               <span className="muted"> · ratio {context.ratio_to_linear.toFixed(2)}</span>
             ) : (
-              <span className="muted"> · ratio not shown — contrast too small</span>
+              <span className="muted"> · ratio not shown, contrast too small</span>
             )}
           </dd>
         </div>
@@ -94,12 +94,7 @@ export default function ResultPanel({ result }: ResultPanelProps) {
       )}
 
       <p className="result__caveat">
-        Modelled, not measured — and measured against reality it runs <strong>hot</strong>.
-        Hindcasting nine summers of real greening across this tile, the emulator implies
-        about 2.5&times; the cooling that actually materialised (−1.18 °C modelled against
-        −0.47 °C observed, over-predicting in 12 of 12 test configurations). Read the
-        figure above as an upper bound: the realised change is likely nearer{" "}
-        <strong>{signed(stats.mean_delta_inside / 2.5, 2)} °C</strong>.
+        Runs hot by about <strong>2.5&times;</strong> against measured plantings.
       </p>
     </div>
   );

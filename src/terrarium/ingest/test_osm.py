@@ -107,6 +107,13 @@ def test_the_road_lands_where_it_was_drawn(grid: Grid) -> None:
     assert field[20, 20] == pytest.approx(field[20, 25] / 2, rel=0.1)
 
 
+def test_an_empty_payload_is_refused_rather_than_answered_as_zero(grid: Grid) -> None:
+    """F25: a 200-with-nothing (a timed-out or misconfigured Overpass query) is a fault
+    upstream, not a finding that this tile has no roads."""
+    with pytest.raises(ValueError, match="no elements"):
+        emission_grid({"elements": []}, grid)
+
+
 def test_untagged_and_unknown_ways_contribute_nothing(grid: Grid) -> None:
     field = emission_grid(
         _payload(

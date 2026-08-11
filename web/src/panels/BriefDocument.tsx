@@ -81,22 +81,33 @@ export default function BriefDocument({ result, plan, tile, producedAt }: BriefD
               </tr>
             )}
             {plan && (
-              <>
-                <tr>
-                  <th scope="row">Trees</th>
-                  <td>
-                    {plan.tree_count.toLocaleString()} of {plan.max_trees.toLocaleString()} the
-                    area can hold
-                  </td>
-                </tr>
-                <tr>
-                  <th scope="row">Indicative cost</th>
-                  <td>${plan.cost.total_usd.toLocaleString()} (not calibrated)</td>
-                </tr>
-              </>
+              <tr>
+                <th scope="row">Trees</th>
+                <td>
+                  {plan.tree_count.toLocaleString()} of {plan.max_trees.toLocaleString()} the
+                  area can hold
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
+      </section>
+
+      {/* The plain-language version, printed alongside the technical one rather than
+          instead of it. It is the half a resident reads. */}
+      <section className="doc__section">
+        <h2>In plain words</h2>
+        <div>
+          <p>{brief.plain.headline}</p>
+          <ul>
+            {brief.plain.points.map((point) => (
+              <li key={point}>{point}</li>
+            ))}
+          </ul>
+        </div>
+        {/* Always English: the server never sends the caveat to a model, in either
+            direction, because it is the one sentence a rewrite has already damaged. */}
+        <p className="doc__note">{brief.plain.caveat}</p>
       </section>
 
       <section className="doc__section">
@@ -132,7 +143,7 @@ export default function BriefDocument({ result, plan, tile, producedAt }: BriefD
             </tbody>
           </table>
           <p className="doc__note">
-            Stratified by {equity.stratified_by}, not by deprivation — no free, keyless
+            Stratified by {equity.stratified_by}, not by deprivation: no free, keyless
             deprivation layer exists for this city.
           </p>
         </section>
@@ -147,7 +158,7 @@ export default function BriefDocument({ result, plan, tile, producedAt }: BriefD
         </ul>
         <p className="doc__note">
           Confidence: <strong>{brief.confidence}</strong>. Terrarium never reports high
-          confidence — the thermal emulator is hindcast-corrected and the air core has never
+          confidence: the thermal emulator is hindcast-corrected and the air core has never
           been calibrated against a monitoring station.
         </p>
       </section>

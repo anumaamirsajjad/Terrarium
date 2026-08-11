@@ -233,8 +233,9 @@ def test_removing_emissions_cleans_the_air_around_the_zone() -> None:
 
     mask = np.zeros((81, 81), dtype=bool)
     mask[30:50, 30:40] = True
-    result = simulate(cube, Intervention(mask=mask, canopy_fraction_added=0.0,
-                                         emission_fraction_removed=1.0))
+    result = simulate(
+        cube, Intervention(mask=mask, canopy_fraction_added=0.0, emission_fraction_removed=1.0)
+    )
 
     assert result.variable == "pm25_ugm3"
     # Negative is cleaner, everywhere, and strongest inside.
@@ -365,13 +366,15 @@ def test_water_is_not_plantable_here_either() -> None:
     emissions = np.zeros((41, 41))
     emissions[20, 20] = 0.01
     cube = _cube(emissions=emissions)
-    dry = simulate(cube, Intervention(mask=np.ones((41, 41), dtype=bool),
-                                      canopy_fraction_added=1.0))
+    dry = simulate(
+        cube, Intervention(mask=np.ones((41, 41), dtype=bool), canopy_fraction_added=1.0)
+    )
 
     # Same tile, now a lake everywhere except the tree row the proxy calibrates against.
     cube["landcover"].values[:-1, :] = WATER_CLASS
-    flooded = simulate(cube, Intervention(mask=np.ones((41, 41), dtype=bool),
-                                          canopy_fraction_added=1.0))
+    flooded = simulate(
+        cube, Intervention(mask=np.ones((41, 41), dtype=bool), canopy_fraction_added=1.0)
+    )
 
     assert dry.stats.mean_delta_inside < 0
     assert flooded.stats.mean_delta_inside == 0.0, "planted on open water"
@@ -381,13 +384,19 @@ def test_season_is_read_from_the_cube_not_assumed() -> None:
     emissions = _point_source(strength=0.05)
     summer = simulate(
         _cube(emissions=emissions, season="summer"),
-        Intervention(mask=np.ones((81, 81), dtype=bool), canopy_fraction_added=0.0,
-                     emission_fraction_removed=1.0),
+        Intervention(
+            mask=np.ones((81, 81), dtype=bool),
+            canopy_fraction_added=0.0,
+            emission_fraction_removed=1.0,
+        ),
     )
     winter = simulate(
         _cube(emissions=emissions, season="winter"),
-        Intervention(mask=np.ones((81, 81), dtype=bool), canopy_fraction_added=0.0,
-                     emission_fraction_removed=1.0),
+        Intervention(
+            mask=np.ones((81, 81), dtype=bool),
+            canopy_fraction_added=0.0,
+            emission_fraction_removed=1.0,
+        ),
     )
     assert abs(winter.stats.min_delta) > 3 * abs(summer.stats.min_delta)
 
@@ -397,6 +406,25 @@ def test_an_unpopulated_inventory_is_refused() -> None:
     cube = _cube(emissions=np.full((41, 41), np.nan))
     with pytest.raises(ValueError, match="unpopulated"):
         simulate(cube, Intervention(mask=np.ones((41, 41), dtype=bool), canopy_fraction_added=0.0))
+
+
+def test_an_all_zero_inventory_inside_the_mask_is_refused() -> None:
+    """F25: zero is finite, so the NaN check above does not catch this.
+
+    A polygon whose whole inventory is zero is indistinguishable from an OSM ingest that
+    never reached this area, and answering it with a zero delta reads as "checked, no
+    effect" rather than "could not be answered".
+    """
+    cube = _cube(emissions=np.zeros((41, 41)))
+    with pytest.raises(ValueError, match="entirely zero"):
+        simulate(
+            cube,
+            Intervention(
+                mask=np.ones((41, 41), dtype=bool),
+                canopy_fraction_added=0.0,
+                emission_fraction_removed=1.0,
+            ),
+        )
 
 
 def test_unknown_season_has_no_parameters() -> None:
@@ -498,9 +526,7 @@ def test_a_window_with_no_wind_is_refused_not_answered_with_zero() -> None:
         with pytest.raises(ValueError, match="no direction or speed"):
             simulate(
                 cube,
-                Intervention(
-                    mask=mask, canopy_fraction_added=0.0, emission_fraction_removed=1.0
-                ),
+                Intervention(mask=mask, canopy_fraction_added=0.0, emission_fraction_removed=1.0),
             )
 
 
@@ -512,6 +538,9 @@ def test_a_north_up_cube_is_refused() -> None:
     with pytest.raises(ValueError, match="ascend"):
         simulate(
             flipped,
-            Intervention(mask=np.ones((41, 41), dtype=bool), canopy_fraction_added=0.0,
-                         emission_fraction_removed=1.0),
+            Intervention(
+                mask=np.ones((41, 41), dtype=bool),
+                canopy_fraction_added=0.0,
+                emission_fraction_removed=1.0,
+            ),
         )

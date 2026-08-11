@@ -19,6 +19,7 @@ import { useMarginNote } from "./marginNote";
 import PlumeViz from "./PlumeViz";
 import ThermalViz from "./ThermalViz";
 import { Counter, Eyebrow, InlineCaveat } from "./primitives";
+import { useIsWide } from "./useIsWide";
 
 const PANES = [
   {
@@ -34,7 +35,7 @@ const PANES = [
     Viz: ThermalViz,
     margin: {
       subject: "Blocked cross-validation proves generalisation across space, not across change.",
-      body: "It says the emulator predicts an unseen part of the tile. It says nothing about whether it predicts the effect of an intervention — which is what the hindcast was built to answer, and the hindcast says it over-predicts.",
+      body: "It says the emulator predicts an unseen part of the tile. It says nothing about whether it predicts the effect of an intervention, which is what the hindcast was built to answer, and the hindcast says it over-predicts.",
     },
   },
   {
@@ -42,7 +43,7 @@ const PANES = [
     module: "cores/air.py",
     title: "Air dispersion",
     body: "Simulates locally-generated PM2.5 via OSM and seasonal FFT dispersion. Winter inversion captures 6–9× the concentration of identical summer sources.",
-    note: "A uniform wind across a 20 km tile makes superposition a convolution, so the whole tile resolves in one FFT. Scored against 53 OpenAQ monitors it beats the null model in winter — MAE 40.6 against 51.0, correlation +0.53.",
+    note: "A uniform wind across a 20 km tile makes superposition a convolution, so the whole tile resolves in one FFT. Scored against 53 OpenAQ monitors it beats the null model in winter: MAE 40.6 against 51.0, correlation +0.53.",
     figures: [
       { value: 40.6, decimals: 1, suffix: "", label: "winter MAE vs null 51.0" },
       { value: 53, decimals: 0, suffix: "", label: "monitors, leave-one-out" },
@@ -58,7 +59,7 @@ const PANES = [
     module: "cores/equity.py",
     title: "Equity core",
     body: "Measures person-degrees, not just pixels. Because a plan that cools an empty riverbank fails the city.",
-    note: "Population is resampled by sum and never interpolated — on the real WorldPop raster, bilinear loses 26 % of this tile's residents, and every figure this core produces divides by that number.",
+    note: "Population is resampled by sum and never interpolated: on the real WorldPop raster, bilinear loses 26 % of this tile's residents, and every figure this core produces divides by that number.",
     figures: [
       { value: 66, decimals: 0, suffix: " %", label: "to three deciles, canal plan" },
       { value: 0, decimals: 1, suffix: " %", label: "to the most crowded decile" },
@@ -91,16 +92,30 @@ export default function Simulators() {
   // never be on screen at once — so a note attached to the track would never once fire.
   const pane = useMarginNote<HTMLDivElement>(`simulator-${PANES[active]!.key}`, PANES[active]!.margin);
 
+  const wide = useIsWide();
+
+  /**
+   * Below `lg` the cross-fade is not narrowed, it is dropped.
+   *
+   * The pin is what makes one spot able to hold three panes, and a pinned full-height pane
+   * has no room on a phone for the copy, the figures and an aspect-square visualisation at
+   * once. Without the pin the 320vh track collapses to roughly the height of one pane, so
+   * `active` cycled 0→1→2 across about two hundred pixels of scroll: the copy changed
+   * under the reader mid-sentence, and two of the three simulators were never on screen
+   * long enough to read. Stacked, all three are simply three sections, each with its own
+   * visualisation, which is what a narrow column is for.
+   */
+  const stacked = !wide;
+
   return (
     <section>
-      {/* Same fix as `Alignment`: the 320vh track and the `h-screen` pin it drives exist so
-          the three panes can cross-fade in one fixed spot while the reader scrolls. Below
-          `lg` a pinned full-height pane has no room left for the copy, the figures and a
-          full aspect-square visualisation at once — so below `lg` this is a normal block,
-          the pin drops, and a short viewport scrolls it instead of clipping it. */}
       <div ref={track} className="relative lg:h-[320vh]">
-        <div ref={pane} className="flex flex-col overflow-hidden py-20 lg:sticky lg:top-0 lg:h-screen lg:flex-row lg:items-center lg:py-0">
-          <div className="mx-auto grid w-full max-w-[92rem] items-center gap-12 px-8 lg:grid-cols-2">
+        <div
+          ref={pane}
+          className="flex flex-col py-16 sm:py-20 lg:sticky lg:top-0 lg:h-screen
+                     lg:flex-row lg:items-center lg:overflow-hidden lg:py-0"
+        >
+          <div className="mx-auto grid w-full max-w-[92rem] items-center gap-12 px-5 sm:px-8 lg:grid-cols-2">
             <div className="relative">
               {/* A continuous progress rail beside the copy: three panes, one scroll. */}
               <div className="absolute top-0 -left-8 hidden h-full w-px bg-white/10 lg:block">
@@ -110,42 +125,54 @@ export default function Simulators() {
                 />
               </div>
 
-              <div className="relative min-h-[26rem]">
-                {PANES.map((pane, index) => (
+              <div className={stacked ? "space-y-20" : "relative min-h-[26rem]"}>
+                {PANES.map((pane, index) => {
+                  const on = stacked || active === index;
+                  return (
                   <motion.div
                     key={pane.key}
-                    animate={{
-                      opacity: active === index ? 1 : 0,
-                      y: active === index ? 0 : 20,
-                      filter: active === index ? "blur(0px)" : "blur(4px)",
-                    }}
+                    animate={
+                      stacked
+                        ? undefined
+                        : {
+                            opacity: active === index ? 1 : 0,
+                            y: active === index ? 0 : 20,
+                            filter: active === index ? "blur(0px)" : "blur(4px)",
+                          }
+                    }
                     transition={GLIDE}
-                    className={active === index ? "relative" : "pointer-events-none absolute inset-0"}
-                    aria-hidden={active !== index}
+                    className={
+                      stacked
+                        ? ""
+                        : active === index
+                          ? "relative"
+                          : "pointer-events-none absolute inset-0"
+                    }
+                    aria-hidden={!on}
                   >
                     <Eyebrow>{pane.module}</Eyebrow>
-                    <h2 className="mt-5 font-mono text-4xl tracking-tight text-white md:text-5xl">
+                    <h2 className="mt-4 font-mono text-3xl tracking-tight text-white sm:mt-5 sm:text-4xl md:text-5xl">
                       {pane.title}
                     </h2>
-                    <p className="mt-6 max-w-md text-lg leading-relaxed text-white/60">
+                    <p className="mt-5 max-w-md text-base leading-relaxed text-white/60 sm:mt-6 sm:text-lg">
                       {pane.body}
                     </p>
                     <p className="mt-4 max-w-md text-sm leading-relaxed text-white/35">
                       {pane.note}
                     </p>
 
-                    <dl className="mt-9 flex gap-10">
+                    <dl className="mt-7 flex gap-8 sm:mt-9 sm:gap-10">
                       {pane.figures.map((figure) => (
                         <div key={figure.label}>
-                          <dd className="text-shoal font-mono text-3xl tracking-tight">
-                            {active === index ? (
+                          <dd className="text-shoal font-mono text-2xl tracking-tight sm:text-3xl">
+                            {on ? (
                               <Counter
                                 to={figure.value}
                                 decimals={figure.decimals}
                                 suffix={figure.suffix}
                               />
                             ) : (
-                              "—"
+                              "-"
                             )}
                           </dd>
                           <dt className="mt-2 max-w-[9rem] text-[0.7rem] leading-snug text-white/35">
@@ -155,22 +182,40 @@ export default function Simulators() {
                       ))}
                     </dl>
 
+                    {/* Stacked, each pane carries its own visualisation directly: there is
+                        no second column to cross-fade one into, and a single shared box at
+                        the bottom of three sections would illustrate whichever one the
+                        scroll last touched. */}
+                    {/* Taller than a square, and full-bleed to the gutters. These three
+                        were drawn for a ~34rem pane in the wide layout; at a phone's
+                        column width a square crops the last caveat off the bottom of two
+                        of them, and a caveat that only fits on a desktop is not a caveat
+                        this project ships. */}
+                    {stacked && (
+                      <div className="glass noise -mx-5 mt-8 h-[32rem] overflow-hidden sm:mx-0">
+                        <pane.Viz active />
+                      </div>
+                    )}
+
                     <InlineCaveat note={pane.margin} />
                   </motion.div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
-            <div className="glass noise aspect-square w-full overflow-hidden">
-              {PANES.map(({ key, Viz }, index) => (
-                <div key={key} className={active === index ? "size-full" : "hidden"}>
-                  {/* Each visualisation handles reduced motion itself, by jumping to its
-                      end state rather than by not rendering. Gating it here left three
-                      blank panes for anyone with the preference set. */}
-                  <Viz active={active === index} />
-                </div>
-              ))}
-            </div>
+            {!stacked && (
+              <div className="glass noise aspect-square w-full overflow-hidden">
+                {PANES.map(({ key, Viz }, index) => (
+                  <div key={key} className={active === index ? "size-full" : "hidden"}>
+                    {/* Each visualisation handles reduced motion itself, by jumping to its
+                        end state rather than by not rendering. Gating it here left three
+                        blank panes for anyone with the preference set. */}
+                    <Viz active={active === index} />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -175,7 +175,7 @@ export interface PlainSummary {
    * model cannot talk a marginal plan up into a moderate one. `"unrated"` is an
    * air-only plan, whose magnitudes are uncalibrated.
    */
-  verdict: "large" | "moderate" | "small" | "marginal" | "unrated" | "none";
+  verdict: "large" | "moderate" | "small" | "marginal" | "unrated" | "none" | "warming";
   headline: string;
   points: string[];
   caveat: string;
@@ -191,6 +191,11 @@ export interface Brief {
   confidence: "low" | "moderate";
   /** Modelled cooling after the 2.5x hindcast correction — the number to quote. */
   expected_cooling_c: number;
+  /** Mean local PM2.5 change inside the polygon, negative for an improvement. `null`
+   * unless the plan removed emissions and the cube could answer it. */
+  expected_pm25_delta: number | null;
+  /** Units for `expected_pm25_delta`, carried alongside it rather than assumed. */
+  pm25_units: string | null;
 }
 
 export interface SimulateResponse {
@@ -232,15 +237,6 @@ export interface Plan {
   season?: "summer" | "winter" | null;
 }
 
-export interface CostEstimate {
-  planting_usd: number;
-  restriction_usd: number;
-  total_usd: number;
-  basis: string;
-  /** False everywhere. Literature unit costs, good for ranking plans, not a budget. */
-  calibrated: boolean;
-}
-
 export interface Preset {
   slug: string;
   label: string;
@@ -270,7 +266,6 @@ export interface PlanResponse {
   max_trees: number;
   /** Requested canopy over available canopy. Above 1.0 the core caps and delivers less. */
   canopy_utilisation: number;
-  cost: CostEstimate;
   notes: string[];
   warnings: string[];
   basis: string;
@@ -299,6 +294,180 @@ export interface SimulateRequest {
   /** 0 means the plan says nothing about traffic, and no air block comes back. */
   emission_fraction_removed?: number;
   window?: string | null;
+}
+
+// --------------------------------------------------- the search agent (Phase A) ---
+
+/**
+ * One block of the lattice the agent chooses from.
+ *
+ * The model never emits coordinates (D26) — it names a `region_id` from this list, and the
+ * geometry here is what the map draws and what "Apply this plan" posts to `/simulate`.
+ */
+export interface Candidate {
+  region_id: string;
+  row0: number;
+  row1: number;
+  col0: number;
+  col1: number;
+  cells: number;
+  area_m2: number;
+  /** Canopy this block can still take, from the thermal core's own per-cell headroom. */
+  plantable_canopy_m2: number;
+  max_trees: number;
+  /** Null where the block is entirely no-data. */
+  mean_lst_c: number | null;
+  /** Summed — population is extensive and is never averaged. */
+  population: number;
+  emission_g_s: number;
+  geometry: GeoJsonPolygon;
+}
+
+export interface CandidatesResponse {
+  window: string;
+  block_cells: number;
+  candidates: Candidate[];
+}
+
+export interface Objective {
+  metric: "cooling" | "person_degrees" | "pm25_reduction";
+  /** Compared against the hindcast-**corrected** figure, never the raw model output. */
+  target_cooling_c: number | null;
+  window: string | null;
+  description: string;
+}
+
+export interface Outcome {
+  /** Raw model output, negative for cooling. */
+  mean_delta_inside_c: number;
+  /** After the 2.5x hindcast correction, stated positive. The figure to quote. */
+  expected_cooling_c: number;
+  person_degrees: number;
+  people_reached: number;
+  tree_count: number;
+  area_km2: number;
+  delta_pm25: number | null;
+}
+
+/**
+ * One trip round the loop, kept whether it worked or not.
+ *
+ * A refused attempt matters more than a scored one for the trace: `reason` is the
+ * validator's own arithmetic, and it is what the next proposal was conditioned on.
+ */
+export interface Attempt {
+  step: number;
+  region_ids: string[];
+  plan: Plan;
+  status: "scored" | "refused";
+  /** Only two producers: the model, or the deterministic greedy control. */
+  proposer: "model" | "greedy";
+  reason: string | null;
+  score: number | null;
+  outcome: Outcome | null;
+}
+
+export interface SearchResult {
+  search_id: string;
+  goal: string;
+  objective: Objective;
+  window: string;
+  season: string;
+  best: Attempt | null;
+  /** The deterministic greedy control. **Not a fallback** — it is what the agent must beat. */
+  baseline: Attempt | null;
+  beat_baseline: boolean;
+  tried: Attempt[];
+  simulations_used: number;
+  llm_calls_used: number;
+  elapsed_s: number;
+  stopped_because: string;
+  /**
+   * The search narrated. **Empty when the model could not write it or drifted** — the
+   * numbers above came from the cores and are the result either way, so render them
+   * regardless.
+   */
+  report: string[];
+  /** The provider chain, or "unavailable". */
+  report_source: string;
+}
+
+/** What `GET /agent/search/{id}` returns. The stream is the primary interface. */
+export interface SearchResponse {
+  result: SearchResult;
+}
+
+export interface SearchEvent {
+  node: string;
+  message: string;
+  attempt: Attempt | null;
+  /** Present on the final event only. */
+  result: SearchResult | null;
+}
+
+export interface SearchBudget {
+  max_simulations: number;
+  max_llm_calls: number;
+  wall_clock_s: number;
+}
+
+export interface SearchRequest {
+  goal: string;
+  window?: string | null;
+  budget?: SearchBudget;
+}
+
+// --------------------------------------------- explain the map (Phase E) ---
+
+/**
+ * One block of the lattice, and what the cube says was in it.
+ *
+ * Every field is measured server-side. The description in `SpatialExplanation.summary` may
+ * only reorganise these figures into prose — a rewrite carrying a number that is not in
+ * this table is rejected before the response is built.
+ */
+export interface RegionExplanation {
+  region_id: string;
+  /** Hindcast-corrected and positive, like every other cooling figure the product ships. */
+  expected_cooling_c: number;
+  canopy_added: number;
+  headroom_km2: number;
+  residents: number;
+  /** 1 = least densely populated tenth of the tile's residents, 10 = most. Null if unknown. */
+  population_decile: number | null;
+  tree_cover_fraction: number;
+  water_fraction: number;
+  inside_polygon: boolean;
+  /**
+   * Changed without being drawn on. Real physics — the 500 m neighbourhood terms carry
+   * cooling past the polygon's edge — and the part of the map users most often call a bug.
+   */
+  spillover: boolean;
+}
+
+export interface SpatialExplanation {
+  window: string;
+  regions: RegionExplanation[];
+  /** Null when no model was reachable. The regions are still the answer. */
+  summary: string | null;
+  points: string[];
+  /** "table" when no model wrote the prose, which is a working deployment. */
+  source: string;
+}
+
+// ------------------------------------------------------------- ask about a result ---
+
+/** One turn of a conversation about a result — sent back with the next question. */
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/** An answer grounded in the brief's own figures, or a refusal to invent one. */
+export interface ResultChatResponse {
+  answer: string;
+  /** The provider chain that wrote it, e.g. "langchain:<model>". */
+  source: string;
 }
 
 /** An API error that carries the server's own explanation. */
@@ -360,13 +529,13 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  /** The costed intervention library. Answers even when the cube failed to load. */
+  /** The intervention library. Answers even when the cube failed to load. */
   presets: () => request<PresetsResponse>("/plan/presets"),
 
   /**
-   * Validate and cost a plan *before* running it. A refusal here — 422 with the
-   * arithmetic — is the point: a plan that cannot fit must not come back as a small
-   * delta that reads like a plan which merely worked badly.
+   * Validate a plan *before* running it. A refusal here — 422 with the arithmetic — is
+   * the point: a plan that cannot fit must not come back as a small delta that reads like
+   * a plan which merely worked badly.
    */
   plan: (body: PlanRequest) =>
     request<PlanResponse>("/plan", {
@@ -374,6 +543,100 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+
+  /**
+   * Where the cooling landed and what was there. Takes the same body as `/simulate` and
+   * re-runs the core, so the pattern explained is the pattern that was shown.
+   */
+  explainSpatial: (body: SimulateRequest) =>
+    request<SpatialExplanation>("/explain/spatial", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  /**
+   * A follow-up question about a result already in hand. Needs no cube: the brief the
+   * client already has is what gets reasoned over, and `history` carries the conversation
+   * held about it so far.
+   */
+  chat: (body: {
+    brief: Brief;
+    window: string;
+    season: string;
+    plan_name?: string;
+    history: ChatTurn[];
+    question: string;
+  }) =>
+    request<ResultChatResponse>("/simulate/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  /** The lattice the agent searches over, for the map overlay. */
+  candidates: (window?: string) =>
+    request<CandidatesResponse>(`/agent/candidates${query({ window })}`),
+
+  /** A finished search, by id. Held in memory server-side; 404 after a restart. */
+  search: (searchId: string) =>
+    request<SearchResponse>(`/agent/search/${searchId}`).then((body) => body.result),
 };
+
+/**
+ * Run one search, calling `onEvent` per node transition.
+ *
+ * Not `EventSource`: that only does GET, and the goal and budget belong in a body. This
+ * reads the `fetch` stream and splits SSE frames by hand, which is about fifteen lines and
+ * avoids encoding a 500-character goal into a query string.
+ *
+ * The search takes tens of seconds, and rendering the trace as it arrives is the feature —
+ * a 40-second spinner is the thing this is written to avoid. `signal` aborts it.
+ */
+export async function searchStream(
+  body: SearchRequest,
+  onEvent: (event: SearchEvent) => void,
+  signal?: AbortSignal,
+): Promise<SearchResult | null> {
+  const response = await fetch(`${API_BASE}/agent/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!response.ok) throw await parseError(response, "/agent/search");
+  if (!response.body) throw new ApiError(500, "the search returned no stream");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: SearchResult | null = null;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE frames are separated by a blank line. A partial frame stays in the buffer —
+    // splitting on every newline would parse half a JSON object roughly once a run.
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const data = frame
+        .split("\n")
+        .find((line) => line.startsWith("data: "))
+        ?.slice(6);
+      if (data) {
+        const event = JSON.parse(data) as SearchEvent;
+        if (event.result) result = event.result;
+        onEvent(event);
+      }
+      boundary = buffer.indexOf("\n\n");
+    }
+  }
+
+  return result;
+}
 
 export { API_BASE };

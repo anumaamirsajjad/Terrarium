@@ -3,8 +3,8 @@
  *
  * Three ways in — a preset button, a sentence, or the sliders below this panel — and all
  * three end up as the same three numbers. The panel's job is to make that visible: when a
- * plan resolves, it shows what the polygon can actually hold, what the plan costs, and
- * every note the validator attached, *before* anything is simulated.
+ * plan resolves, it shows what the polygon can actually hold and every note the validator
+ * attached, *before* anything is simulated.
  *
  * The refusal is the feature. A plan that cannot fit comes back as an error with the
  * arithmetic in it ("5,000 trees need 0.125 km² of crown; 0.031 km² is plantable"), and
@@ -18,8 +18,6 @@ import type { PlanResponse, Preset } from "../api/client";
 
 export interface ScenarioPanelProps {
   presets: Preset[];
-  /** What free text will be parsed with: a model, or the deterministic rule parser. */
-  planner: string;
   /** Null until a polygon is closed — a plan cannot be checked without one. */
   hasPolygon: boolean;
   plan: PlanResponse | null;
@@ -28,17 +26,12 @@ export interface ScenarioPanelProps {
   onPreset: (slug: string) => void;
   onText: (text: string) => void;
   onClear: () => void;
-}
-
-function usd(value: number): string {
-  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `$${(value / 1_000).toFixed(0)}k`;
-  return `$${value.toFixed(0)}`;
+  /** Switches to the no-polygon search flow. Undefined hides the cross-link. */
+  onOpenSearch?: () => void;
 }
 
 export default function ScenarioPanel({
   presets,
-  planner,
   hasPolygon,
   plan,
   error,
@@ -46,12 +39,10 @@ export default function ScenarioPanel({
   onPreset,
   onText,
   onClear,
+  onOpenSearch,
 }: ScenarioPanelProps) {
   const [text, setText] = useState("");
   const selected = plan?.plan.name;
-
-  // The transcript lands in the box rather than being sent: a recogniser that mishears
-  // should cost an edit, not a wrong simulation. That matters most in Urdu, where the
 
   return (
     <section className="control scenario" aria-labelledby="scenario-heading">
@@ -102,16 +93,18 @@ export default function ScenarioPanel({
             </button>
           )}
         </div>
-        <p className="hint">
-          Parsed by <code>{planner}</code>. Whatever reads it, the result is checked against
-          the tile before anything runs — the model is a front door, not the arbiter.
-        </p>
       </form>
 
       {!hasPolygon && (
         <p className="hint">
-          Draw a polygon first. Whether 5,000 trees fit is a question about a place, and
-          there is no answer without one.
+          Draw a polygon first.{" "}
+          {onOpenSearch ? (
+            <button type="button" className="scenario__link" onClick={onOpenSearch}>
+              Search the tile instead
+            </button>
+          ) : (
+            "Search the tile instead."
+          )}
         </p>
       )}
 
@@ -146,13 +139,6 @@ export default function ScenarioPanel({
                 <dd>{(plan.emission_fraction_removed * 100).toFixed(0)}%</dd>
               </div>
             )}
-            <div>
-              <dt>Indicative cost</dt>
-              <dd>
-                {usd(plan.cost.total_usd)}
-                <span className="muted"> · not calibrated</span>
-              </dd>
-            </div>
           </dl>
 
           {plan.warnings.map((warning) => (

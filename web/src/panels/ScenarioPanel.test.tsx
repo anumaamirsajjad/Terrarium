@@ -1,9 +1,8 @@
 /**
  * The DSL panel, rendered to a string.
  *
- * What is worth asserting here is what the panel refuses to hide: the validator's notes,
- * the refusal message with its arithmetic, and the fact that a cost figure is not
- * calibrated. Everything else is layout.
+ * What is worth asserting here is what the panel refuses to hide: the validator's notes
+ * and the refusal message with its arithmetic. Everything else is layout.
  */
 
 import { renderToStaticMarkup } from "react-dom/server";
@@ -44,13 +43,6 @@ const PLAN: PlanResponse = {
   tree_count: 75_240,
   max_trees: 210_000,
   canopy_utilisation: 0.36,
-  cost: {
-    planting_usd: 1_128_600,
-    restriction_usd: 0,
-    total_usd: 1_128_600,
-    basis: "Literature order-of-magnitude figures, not a quote for Lahore.",
-    calibrated: false,
-  },
   notes: ["Planting moves air quality by ~0.0003 µg/m3 at this scale."],
   warnings: [],
   basis: "One tree = 25 m2 of crown at maturity.",
@@ -68,7 +60,6 @@ function render(overrides: Partial<Parameters<typeof ScenarioPanel>[0]> = {}) {
   return renderToStaticMarkup(
     <ScenarioPanel
       presets={PRESETS}
-      planner="rules (no model configured)"
       hasPolygon
       plan={null}
       error={null}
@@ -89,12 +80,6 @@ describe("ScenarioPanel", () => {
     expect(html).toContain("Remove all vehicle PM2.5.");
   });
 
-  it("names the parser, including when there is no model", () => {
-    // A deployment with no key is a working deployment, and saying so beats implying a
-    // model read the sentence when a regex did.
-    expect(render()).toContain("rules (no model configured)");
-  });
-
   it("disables the buttons until a polygon exists", () => {
     // Whether 5,000 trees fit is a question about a place.
     expect(render({ hasPolygon: false })).toContain("disabled");
@@ -112,10 +97,6 @@ describe("ScenarioPanel", () => {
     expect(html).toContain("75,240");
     expect(html).toContain("210,000");
     expect(html).toContain("12.54 km²");
-  });
-
-  it("never presents a cost as calibrated", () => {
-    expect(render({ plan: PLAN })).toContain("not calibrated");
   });
 
   it("keeps the validator's notes", () => {

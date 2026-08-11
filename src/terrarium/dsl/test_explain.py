@@ -23,7 +23,6 @@ PLANTING = BriefInputs(
     season="summer",
     area_km2=4.2,
     tree_count=25_000,
-    cost_total_usd=375_000.0,
     mean_delta_inside=-0.51,
     mean_delta_spillover=-0.12,
     spillover_cells=980,
@@ -394,3 +393,49 @@ def test_a_traffic_plan_with_no_inventory_says_so_rather_than_reporting_no_effec
 
     assert plain.verdict == "none"
     assert "not a finding" in " ".join(plain.points)
+
+
+# --- F15: a warming result must be reported as warming, not as cooling or as nothing ---
+
+
+WARMING = PLANTING.model_copy(
+    update={
+        "mean_delta_inside": 5.25,
+        "min_delta": -0.3,
+        "equity": EquityInputs(
+            top_three_share=1.04,
+            densest_decile_share=1.04,
+            concentrated=True,
+            shares_reliable=True,
+            uninhabited_fraction=0.05,
+        ),
+    }
+)
+
+
+def test_a_warming_result_is_reported_as_warming_not_cooling() -> None:
+    brief = brief_for(WARMING)
+    assert "warm" in brief.headline.lower()
+    assert "cools" not in brief.headline.lower()
+    assert "5.25" in brief.headline
+
+
+def test_a_warming_result_does_not_read_as_no_measurable_change() -> None:
+    plain = brief_for(WARMING).plain
+    assert plain.verdict == "warming"
+    assert "does not change" not in plain.headline
+    assert "warm" in plain.headline.lower()
+
+
+def test_a_warming_result_withholds_ratio_to_linear_and_equity_shares() -> None:
+    brief = brief_for(WARMING)
+    joined = " ".join(brief.findings)
+    assert "slightly conservative" not in joined
+    assert "1.04" not in joined  # the 104% share that used to leak through
+    assert any("withheld" in f for f in brief.findings)
+
+
+def test_expected_cooling_c_keeps_its_sign_when_warming() -> None:
+    # Brief.expected_cooling_c was already the one field the audit found correct;
+    # nothing here should touch that.
+    assert brief_for(WARMING).expected_cooling_c == pytest.approx(5.25 / HINDCAST_OVERPREDICTION)

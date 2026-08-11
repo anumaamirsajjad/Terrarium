@@ -201,9 +201,7 @@ def _s2_offset_dn(result: SearchResult) -> float:
     Getting this wrong silently biases every index derived from the bands, so it is
     derived from item metadata rather than assumed from the date.
     """
-    baselines = {
-        float(item.properties.get("s2:processing_baseline", 0.0)) for item in result.items
-    }
+    baselines = {float(item.properties.get("s2:processing_baseline", 0.0)) for item in result.items}
     needs_offset = {b >= S2_OFFSET_BASELINE for b in baselines}
     if len(needs_offset) > 1:
         logger.warning(
@@ -248,9 +246,7 @@ def _ingest_sentinel2(
         physical = (value > 0) & (value <= REFLECTANCE_MAX)
         return value.where(physical).where(clear)
 
-    blue, red, nir, swir16, swir22 = (
-        reflectance(b) for b in ("B02", "B04", "B08", "B11", "B12")
-    )
+    blue, red, nir, swir16, swir22 = (reflectance(b) for b in ("B02", "B04", "B08", "B11", "B12"))
 
     ndvi = _collapse_time((nir - red) / (nir + red))
     ndbi = _collapse_time((swir16 - nir) / (swir16 + nir))
@@ -319,9 +315,7 @@ def _ingest_landsat(
     composite, depth = _composite_with_depth(lst_c)
     if depth is not None:
         depth_min, depth_p50 = depth
-        record = record.model_copy(
-            update={"obs_depth_min": depth_min, "obs_depth_p50": depth_p50}
-        )
+        record = record.model_copy(update={"obs_depth_min": depth_min, "obs_depth_p50": depth_p50})
         logger.info(
             "%s %s: clear looks per pixel min=%d median=%.0f over %d scenes",
             window.label,
@@ -536,9 +530,7 @@ def _download_once(url: str, path: Path, timeout_s: float) -> Path:
         # rather than letting a passing build imply a check that did not run. The read
         # in _ingest_population is the remaining net: a truncated GeoTIFF fails there,
         # inside the same retry wrapper.
-        logger.warning(
-            "%s served no Content-Length; cannot verify the download completed", url
-        )
+        logger.warning("%s served no Content-Length; cannot verify the download completed", url)
     elif written != int(declared):
         partial.unlink(missing_ok=True)
         raise OSError(f"truncated download: got {written} of {declared} bytes from {url}")
@@ -584,9 +576,7 @@ def _ingest_population(
     # loss and makes correct SUM resampling look broken in the build log. The honest
     # baseline is the unpadded bbox. Expect a small positive residual: the grid is
     # snapped outward, so it covers slightly more ground than the bbox does.
-    inside_bbox = float(
-        np.nansum(np.asarray(raw.rio.clip_box(west, south, east, north).values))
-    )
+    inside_bbox = float(np.nansum(np.asarray(raw.rio.clip_box(west, south, east, north).values)))
     warped_total = float(np.asarray(warped.values).sum())
     drift = 100 * (warped_total - inside_bbox) / inside_bbox if inside_bbox else 0.0
     logger.info(
@@ -648,9 +638,7 @@ def _newest_epoch(result: SearchResult) -> SearchResult:
 
     newest = max(years)
     items = [
-        item
-        for item in result.items
-        if item.datetime is not None and item.datetime.year == newest
+        item for item in result.items if item.datetime is not None and item.datetime.year == newest
     ]
     logger.info("%s: using epoch %d (%d tiles)", result.collection_id, newest, len(items))
     return result.model_copy(update={"items": items})
@@ -767,8 +755,7 @@ def _ingest_with_retries(
             # failed remote read does not raise until the array is computed - if that
             # happened outside this try, one dead collection would kill the whole build.
             aligned = {
-                name: _clean(array, VARIABLES_BY_NAME[name], grid)
-                for name, array in arrays.items()
+                name: _clean(array, VARIABLES_BY_NAME[name], grid) for name, array in arrays.items()
             }
         except Exception as exc:
             elapsed = time.perf_counter() - started
@@ -824,12 +811,8 @@ def _clean(source: xr.DataArray, spec: VariableSpec, grid: Grid) -> xr.DataArray
     else:
         data = np.asarray(source.transpose("y", "x").values)
         if data.shape != grid.shape:
-            raise ValueError(
-                f"{spec.name}: loaded shape {data.shape} != grid shape {grid.shape}"
-            )
-        aligned = xr.DataArray(
-            data.astype(spec.dtype), dims=("y", "x"), coords=grid.coords()
-        )
+            raise ValueError(f"{spec.name}: loaded shape {data.shape} != grid shape {grid.shape}")
+        aligned = xr.DataArray(data.astype(spec.dtype), dims=("y", "x"), coords=grid.coords())
 
     aligned, n_dropped = enforce_valid_range(aligned, spec)
     if n_dropped:

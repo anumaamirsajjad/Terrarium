@@ -144,7 +144,11 @@ def _plot_categorical(ax: Any, data: xr.DataArray, extent: list[float]) -> list[
     ax.imshow(indexed, extent=extent, origin="upper", cmap=cmap, norm=norm, interpolation="none")
     return [
         plt.Rectangle(
-            (0, 0), 1, 1, fc=WORLDCOVER_STYLE[c][0], ec="none",
+            (0, 0),
+            1,
+            1,
+            fc=WORLDCOVER_STYLE[c][0],
+            ec="none",
             label=f"{c}  {WORLDCOVER_STYLE[c][1]}",
         )
         for c in present
@@ -174,9 +178,7 @@ def _render_variable(
             fontsize=8,
             frameon=False,
         )
-        ax.set_title(
-            f"{spec.name}  [{spec.units}]  -  {window}\n{spec.description}", fontsize=9
-        )
+        ax.set_title(f"{spec.name}  [{spec.units}]  -  {window}\n{spec.description}", fontsize=9)
     else:
         finite = values[np.isfinite(values)]
         # Clip the display range to 2-98% so a handful of outliers cannot flatten the
@@ -345,8 +347,10 @@ def _print_summary(ds: xr.Dataset, grid: Grid, out_dir: Path) -> None:
     print(f"\n{'=' * 74}")
     print("  GEOGRAPHIC SUMMARY")
     print(f"{'=' * 74}")
-    print(f"  grid shape        {grid.shape[0]} x {grid.shape[1]} (y, x) = "
-          f"{grid.shape[0] * grid.shape[1]:,} pixels @ {grid.resolution_m} m")
+    print(
+        f"  grid shape        {grid.shape[0]} x {grid.shape[1]} (y, x) = "
+        f"{grid.shape[0] * grid.shape[1]:,} pixels @ {grid.resolution_m} m"
+    )
     print(f"  projected CRS     {grid.crs}")
     print(f"  projected bounds  {tuple(round(b) for b in grid.bounds)}\n")
 

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -m 5 \"http://127.0.0.1:8011/health\")",
+      "Bash(curl -s -m 20 \"http://127.0.0.1:8011/cube/summary\")",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('windows', d['windows'], 'default', d['default_window']\\)\")",
+      "Bash(echo \"exit=$?\")",
+      "Bash(PYTHONIOENCODING=utf-8 uv run --no-sync python -c ' *)",
+      "Bash(md5sum data/processed/thermal.txt __TRACKED_VAR__/thermal_pooled.txt __TRACKED_VAR__/thermal_a.txt)",
+      "Bash(awk '{print $5, $9}')"
+    ]
+  }
+}

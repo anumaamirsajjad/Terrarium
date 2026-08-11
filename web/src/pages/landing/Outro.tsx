@@ -6,8 +6,7 @@
  * and `confidence` has no "high" — nothing in this project has earned the word.
  */
 
-// lucide v1 dropped its brand icons, so the source link takes a generic code mark.
-import { ArrowUpRight, CodeXml, FileText } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { motion, useScroll, useTransform } from "motion/react";
 import { useRef } from "react";
 
@@ -15,11 +14,9 @@ import { RISE, STAGGER } from "../../motion/springs";
 import { useMarginNote } from "./marginNote";
 import { Eyebrow, InlineCaveat, Rule } from "./primitives";
 
-const REPO = "https://github.com/anumaamirsajjad/Terrarium";
-
 const NOTE = {
-  subject: "Costs rank plans. They do not budget one.",
-  body: "Every unit figure in the library is `calibrated=False` — literature values, in the same category as the air core's emission factors. Useful for saying which of two plans is dearer, and for nothing a council could sign.",
+  subject: 'The brief’s confidence never says "high."',
+  body: "`uncertainties` is never empty and `confidence` has no high tier: nothing in this project has earned the word.",
 };
 
 export default function Outro() {
@@ -38,7 +35,7 @@ export default function Outro() {
         initial="hidden"
         whileInView="show"
         viewport={{ once: true, amount: 0.25 }}
-        className="mx-auto grid max-w-[92rem] items-center gap-16 px-8 py-32 lg:grid-cols-2"
+        className="mx-auto grid max-w-[92rem] items-center gap-10 px-5 py-20 sm:gap-16 sm:px-8 sm:py-32 lg:grid-cols-2"
       >
         <motion.div variants={RISE}>
           <Eyebrow>dsl/explain.py</Eyebrow>
@@ -49,12 +46,21 @@ export default function Outro() {
           <p className="mt-6 max-w-md leading-relaxed text-white/55">
             One sheet with the modelled change, the hindcast correction, who receives the
             cooling, and every caveat that attaches to a figure on it. Written from
-            templates on the server — a generative explainer would occasionally restate a
+            templates on the server: a generative explainer would occasionally restate a
             number it was never given, and would smooth a caveat into a hedge.
           </p>
           <p className="mt-4 max-w-md leading-relaxed text-white/55">
             It prints through the browser&rsquo;s own print dialog. No rendering service, no
             font stack, no extra dependency: a button every browser already ships.
+          </p>
+          <p className="mt-4 max-w-md leading-relaxed text-white/55">
+            Not sure what to draw? <strong className="text-white/80">Search the tile</strong>{" "}
+            runs the same cores across a 2&nbsp;km lattice and scores each attempt against a
+            greedy baseline it has to beat. Once you have a result,{" "}
+            <strong className="text-white/80">Ask about this result</strong> answers
+            follow-up questions grounded only in that result&rsquo;s own brief, never the
+            wider web. Both need a free key configured on the server; without one, they say
+            so rather than guess.
           </p>
 
           <InlineCaveat note={NOTE} />
@@ -95,7 +101,6 @@ export default function Outro() {
           <ul className="mt-2 space-y-1.5 text-[0.7rem] leading-relaxed text-white/45">
             <li>· Surface temperature at ~10:30, not air temperature.</li>
             <li>· Modelled, and against reality it runs hot.</li>
-            <li>· Costs are literature figures, not calibrated.</li>
           </ul>
         </motion.div>
       </motion.section>
@@ -121,26 +126,6 @@ export default function Outro() {
                 Open the dashboard
                 <ArrowUpRight className="size-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
               </a>
-              <a
-                href={REPO}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded-full border border-white/10 px-5 py-2.5
-                           text-sm text-white/70 transition-colors hover:border-white/25 hover:text-white"
-              >
-                <CodeXml className="size-4" />
-                Source
-              </a>
-              <a
-                href={`${REPO}/blob/main/docs/IMPLEMENTATION_PLAN.md`}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded-full border border-white/10 px-5 py-2.5
-                           text-sm text-white/70 transition-colors hover:border-white/25 hover:text-white"
-              >
-                <FileText className="size-4" />
-                Documentation
-              </a>
             </nav>
           </div>
 
@@ -149,7 +134,7 @@ export default function Outro() {
           <p className="mt-14 border-t border-white/5 pt-8 text-xs leading-relaxed text-white/30">
             <span className="font-mono text-white/50">lst_c</span> and{" "}
             <span className="font-mono text-white/50">ΔLST</span> are mid-morning land
-            surface temperature (~10:30 local, Landsat ST_B10) — the radiating surface, not
+            surface temperature (~10:30 local, Landsat ST_B10): the radiating surface, not
             air temperature, and not the afternoon peak. PM2.5 figures are this tile&rsquo;s
             own locally-generated increment from its roads, quoted as a delta and never as a
             level: the regional background that dominates Lahore&rsquo;s absolute PM2.5 is

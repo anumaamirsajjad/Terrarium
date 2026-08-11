@@ -1,13 +1,13 @@
 """Request and response contracts for `POST /plan` and `GET /plan/presets`.
 
-`/plan` does not simulate. It answers one question — *can this polygon hold this plan, and
-what would it cost?* — and hands back the exact `/simulate` body to post next. Keeping the
-two apart is what makes the DSL visible: a refusal arrives before any physics runs, with the
-arithmetic that produced it, rather than as a small delta the user has to interpret.
+`/plan` does not simulate. It answers one question — *can this polygon hold this plan?* —
+and hands back the exact `/simulate` body to post next. Keeping the two apart is what makes
+the DSL visible: a refusal arrives before any physics runs, with the arithmetic that
+produced it, rather than as a small delta the user has to interpret.
 
-The DSL's own models (`Plan`, `CostEstimate`) cross the wire unchanged. They are frozen
-Pydantic models in the same layer, so mirroring them into a second set of near-identical
-schemas would create a seam that exists only to drift.
+The DSL's own models (`Plan`, `Preset`) cross the wire unchanged. They are frozen Pydantic
+models in the same layer, so mirroring them into a second set of near-identical schemas
+would create a seam that exists only to drift.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from terrarium.api.schemas.simulate import SimulateRequest
-from terrarium.dsl.library import CostEstimate, Preset
+from terrarium.dsl.library import Preset
 from terrarium.dsl.schema import Plan
 
 PlanSource = Literal["llm", "rules", "preset", "explicit"]
@@ -51,9 +51,7 @@ class PlanRequest(BaseModel):
             "parser otherwise — the response says which."
         ),
     )
-    preset: str | None = Field(
-        default=None, description="Slug from `GET /plan/presets`"
-    )
+    preset: str | None = Field(default=None, description="Slug from `GET /plan/presets`")
     plan: Plan | None = Field(
         default=None, description="A DSL plan built client-side. Validated like any other."
     )
@@ -75,7 +73,7 @@ class PlanRequest(BaseModel):
 
 
 class PlanResponse(BaseModel):
-    """A plan checked against a polygon: what it becomes, what it costs, what to run."""
+    """A plan checked against a polygon: what it becomes, what to run."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -112,7 +110,6 @@ class PlanResponse(BaseModel):
             "delivers less than asked; a tree count that would exceed it is refused outright."
         )
     )
-    cost: CostEstimate
     notes: tuple[str, ...] = Field(
         description="Non-fatal warnings from validation. The plan still runs; read them"
     )
@@ -129,7 +126,7 @@ class PlanResponse(BaseModel):
 
 
 class PresetsResponse(BaseModel):
-    """The costed intervention library.
+    """The intervention library.
 
     The fallback path the roadmap names, and a working product on its own: these buttons
     emit exactly the DSL a language model would, so the demo needs no key and no network.
