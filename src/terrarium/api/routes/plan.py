@@ -16,7 +16,7 @@ import logging
 from typing import Annotated
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from terrarium.api.deps import get_runtime
 from terrarium.api.geometry import GeometryError, mask_from_geojson
@@ -31,7 +31,12 @@ from terrarium.api.schemas.plan import (
 from terrarium.api.schemas.simulate import SimulateRequest
 from terrarium.config import Settings, get_settings
 from terrarium.dsl.library import PRESETS, preset
-from terrarium.dsl.llm import resolve_adapter
+from terrarium.dsl.llm import (
+    Language,
+    LLMUnavailable,
+    resolve_adapter,
+    translate_lines,
+)
 from terrarium.dsl.planner import PlanParseError, plan_from_text
 from terrarium.dsl.schema import Plan
 from terrarium.dsl.validate import PlanError, resolve
@@ -131,6 +136,17 @@ async def build_plan(
     request: PlanRequest,
     runtime: Annotated[Runtime, Depends(get_runtime)],
     settings: Annotated[Settings, Depends(get_settings)],
+    lang: Annotated[
+        Language,
+        Query(
+            description=(
+                "Language for `notes` and `warnings`. The rule parser already reads Urdu, "
+                "so a resident who typed Urdu should not be answered only in English. "
+                "All-or-nothing: a translation that drops or invents a figure returns the "
+                "English, because half a list in each language reads as a bug."
+            )
+        ),
+    ] = "en",
 ) -> PlanResponse:
     plan, source, warnings = _plan_and_source(request, settings)
     label = _resolve_window(runtime, request, plan)
@@ -154,6 +170,16 @@ async def build_plan(
         # but it stops a plan the same way.
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
+    try:
+        notes = translate_lines(resolved.notes, language=lang, settings=settings)
+        translated_warnings = translate_lines(warnings, language=lang, settings=settings)
+    except LLMUnavailable as exc:
+        # The plan itself is fine and fully costed; only the language could not be
+        # honoured. 503 rather than silently answering in English, for the reason
+        # `dsl.llm.translate` gives: a caller cannot tell an unsupported language from a
+        # missing key from a rejected translation if all three look like success.
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
     return PlanResponse(
         plan=resolved.plan,
         source=source,
@@ -167,8 +193,8 @@ async def build_plan(
         max_trees=resolved.max_trees,
         canopy_utilisation=resolved.canopy_utilisation,
         cost=resolved.cost,
-        notes=resolved.notes,
-        warnings=warnings,
+        notes=notes,
+        warnings=translated_warnings,
         basis=resolved.basis,
         simulate_request=SimulateRequest(
             geometry=request.geometry,

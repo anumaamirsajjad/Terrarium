@@ -28,6 +28,9 @@ Data flows strictly downward. Nothing in a lower layer imports from a higher one
 ┌──────────────────────────────────────────────────────────────┐
 │  3. INTELLIGENCE      api/          FastAPI, scenario diffs, │
 │                       dsl/          plan language + brief    │
+│                       agent/        search over the cores    │
+│                       evidence/     ask the repo's own docs  │
+│                       policy/       published plans → plans  │
 ├──────────────────────────────────────────────────────────────┤
 │  2. PHYSICS CORE      cores/        pure simulators:         │
 │                                     thermal, air, equity     │
@@ -160,11 +163,23 @@ Four rules govern this package:
 - **A tree count refuses where a canopy fraction warns.** Not an inconsistency — the two
   units already have different contracts. A fraction is documented as a ceiling the core
   caps per cell; a count is a quantity somebody would procure.
-- **The LLM lives in exactly one file** (`dsl/llm.py`, D18) and is optional. With no key,
-  `/plan` parses text with a deterministic regex parser and nothing else in the layer calls
-  out at all. Whatever produces a plan — a model, a button, a regex — it is re-validated as
-  a `Plan` and then against the tile before a core sees a number. That is the entire safety
-  argument for putting a free-tier model in front of a simulator.
+- **The model is reachable from exactly four modules** — `dsl/llm.py`, `agent/nodes.py`,
+  `evidence/answer.py`, `policy/extract.py` — **and every call site carries a post-check on
+  the model's own output** (D25, replacing D18). D18 said "one file", which was the cheap
+  way to enforce the rule that actually mattered while there was one caller; the rule was
+  never the file count, it was *the model's output is never trusted*. A new call site is a
+  new decision, and a call site with no post-check is a bug. The post-checks in place are
+  numeral faithfulness (narrate, translate, describe_pattern), `Plan` re-validation plus
+  `dsl.validate.resolve` (planner, agent), `Objective` schema validation (goal parsing),
+  citation resolution (evidence), and a verbatim-quote match (policy).
+
+  **The key is required for the AI layer and optional for everything else** (D27). With no
+  key, `/plan` still parses text with the deterministic rule parser and `/explain/spatial`
+  still returns its region table — those are the product, not substitutes for it — while
+  `/agent/search`, `/evidence/ask` and `?lang=ur` answer 503. Whatever produces a plan — a
+  model, a button, a regex — it is re-validated as a `Plan` and then against the tile
+  before a core sees a number. That is the entire safety argument for putting a free-tier
+  model in front of a simulator, and it is unaffected by whether a fallback exists.
 - **A model may reword a number; it may never source one** (D24). `dsl/llm.py` also holds
   `narrate`, a LangChain chain that rewrites `explain.plain_summary`'s jargon-free block
   into friendlier prose for the dashboard. What makes that safe is not the prompt:
@@ -205,8 +220,9 @@ the air core's emission factors. Good for ranking two plans, not a budget.
 worked; both were cut because they were the only features that could not be defended
 offline. The photo path was the single route in the project that *required* a key — no
 rule parser can read a photograph — and voice was the single feature no automated test
-could drive. Removing them makes the zero-budget claim unconditional: **every route now
-works with no key at all.** D19 and D20 are closed as withdrawn, not as failed; the
+could drive. Removing them made every route answer with no key at all — which held until
+**D27** required one for the AI layer on 2026-08-11; the *zero-budget* half of the claim is
+unaffected, since the keys are free and need no card. D19 and D20 are closed as withdrawn, not as failed; the
 reasoning they recorded is still the reason not to reintroduce them casually.
 
 The rule parser still reads **English and Urdu**. It outlived the voice capture it was
@@ -250,9 +266,12 @@ Three rules this layer earned the hard way:
 | Tabular / catalog  | **DuckDB**                                | Zero-server analytics over run metadata + zonal stats |
 | Emulator           | **LightGBM**                              | Fast to train, fast to infer, handles tabular pixel features well |
 | Array / tabular    | **numpy**, **pandas**, **scipy.ndimage**  | scipy only for the neighbourhood filters in `cores/thermal/features.py` |
+| Agent runtime      | **LangGraph**                             | D17 reopened on its own condition, and only for the search loop: a cycle, a conditional edge and a budget. The planner still has none |
+| PDF text           | **pypdf**                                 | Only to check an extracted quote against the document. Never to read meaning — the target PDF's text comes out shredded |
 | Frontend           | **React** + **Vite**                      | |
 | Map                | **MapLibre GL** + **deck.gl**             | MapLibre for basemap, deck.gl for the data overlays |
 | Basemap tiles      | **OpenFreeMap** Positron                  | Keyless and unmetered. See the zero-budget rule below |
+| Urdu type          | **@fontsource/noto-nastaliq-urdu**        | Self-hosted, like Geist. Geist has no Arabic coverage, so without it an Urdu brief prints as boxes — and a PDF has no system fallback to rescue it |
 
 ### Data source
 
@@ -341,12 +360,30 @@ terrarium/
 │   │   ├── planner.py      #   text -> Plan: model first, deterministic regex always.
 │   │   │                   #   English + Urdu, digits folded
 │   │   ├── explain.py      #   numbers -> brief. Templates, never a model
-│   │   └── llm.py          #   ← the ONLY file that talks to an LLM (D18). Optional
+│   │   └── llm.py          #   adapters, narrate, translate, describe_pattern (D25)
+│   ├── agent/              # the intervention search agent. Runs the cores in a loop
+│   │   ├── state.py        #   Objective, Candidate, Outcome, Attempt, SearchBudget
+│   │   ├── objective.py    #   pure scoring. Constraints are enforced, never traded off
+│   │   ├── evaluate.py     #   the cores, once, shared by the control and the graph
+│   │   ├── baseline.py     #   the greedy CONTROL. Not a fallback — the thing to beat
+│   │   ├── nodes.py        #   ← the only file here that talks to a model (D25)
+│   │   └── graph.py        #   LangGraph wiring, budget, SSE events. Only langgraph user
+│   ├── evidence/           # ask the repo's own markdown. BM25, no vector store
+│   │   ├── corpus.py       #   markdown -> citable sections + the decisions register
+│   │   ├── retrieve.py     #   BM25. Pure
+│   │   └── answer.py       #   ← model. An unresolvable citation rejects the answer
+│   ├── policy/             # published policy -> Plan, where the two levers can say it
+│   │   ├── schema.py       #   PolicyMeasure (verbatim quote), Coverage (the miss rate)
+│   │   ├── extract.py      #   ← model. Native PDF in, quote checked against the document
+│   │   ├── to_plan.py      #   the mapping. Returns None for most measures, and counts it
+│   │   └── make_fixture.py #   writes the committed test PDF, shredded like the real one
 │   └── api/
 │       ├── main.py         #   app factory, CORS, router wiring, loads the runtime
 │       ├── runtime.py      #   cube + model loaded ONCE; per-window validation
 │       ├── geometry.py     #   GeoJSON -> mask, lon/lat -> cell (D6). Only place doing this
 │       ├── measure.py      #   what the tile says a polygon can hold, for dsl/validate
+│       ├── candidates.py   #   the 2 km lattice the agent picks from (D26). No model
+│       ├── explain_spatial.py # delta field -> per-region table. Deterministic
 │       ├── deps.py         #   the runtime as a FastAPI dependency
 │       ├── routes/         #   HTTP endpoints (thin)
 │       └── schemas/        #   Pydantic request/response contracts
@@ -469,12 +506,28 @@ and Stadia are metered services — use OpenFreeMap) and **the LLM** (route thro
 tier, behind one adapter, so the provider never leaks into the agent logic). If a phase
 cannot be done free, the plan changes, not the budget.
 
-The LLM went one better than free: it is **optional**. `TERRARIUM_GEMINI_API_KEY` is unset
-and everything still works, because the DSL, the validators, the costs and the brief are
-all deterministic and the planner falls back to a regex parser. Keep it that way — the
-demo must never require a key that a rate limit can revoke mid-pitch. The single exception
-There is no longer any exception: the photo route that needed a key was removed, so a
-deployment with no key at all is a fully working deployment.
+**Zero budget, not zero configuration (D27).** The keys are still free-tier and still need
+no card, so the pitch's claim is intact — but the AI layer *requires* one as of
+2026-08-11, and the deterministic stand-ins that used to cover for its absence are deleted.
+Each of them was a different procedure returning the same response shape: a lattice sweep
+is not a search, the retrieved passages are not an answer, English is not a translation.
+Silently substituting one reported a number the feature had not produced, under field names
+saying it had.
+
+So the line runs between **a deterministic answer that is the product** and **a
+deterministic answer standing in for a missing one**:
+
+- **Still answer with no key**, because their output is the source of truth a model may
+  only reword: `/simulate`, `/plan` (the rule parser is Phase 11's and stays — a Lahore
+  resident typing Urdu should not get a 422), `/cube/*`, `/plan/presets`, and
+  `/explain/spatial`'s region table. `narrate` also still falls back silently, because
+  rewording prose the reader can already read costs them nothing they asked for.
+- **503 with the variable named**: `/agent/search`, `/evidence/ask`, and any `?lang=ur`
+  request. Answering those without a model means answering a different question.
+
+Do not reintroduce a stand-in for the second group. If one looks tempting, the test is
+whether it produces *the same kind of thing* — and a sweep, a passage dump and an English
+paragraph all fail it.
 
 Phase 11's **council brief PDF** is the browser's own print dialog, rather than WeasyPrint
 and a font stack, to reproduce a button every browser already ships.
@@ -499,6 +552,20 @@ uv run terrarium-api             # API on :8000, docs at /docs
                                  #                         + ΔPM2.5 when the request
                                  #                           removes emissions
                                  #                         + brief (findings + uncertainties)
+                                 #                         ?lang=ur for an Urdu brief;
+                                 #                           503, never silent English
+                                 #   GET  /agent/candidates the 2 km lattice (D26)
+                                 #   POST /agent/search     a goal -> the winning plan, as
+                                 #                         SSE, one event per node, with
+                                 #                         the greedy control beside it.
+                                 #                         503 without a key (D27)
+                                 #   GET  /agent/search/{id} read a finished search back
+                                 #   POST /explain/spatial  where the cooling landed, and
+                                 #                         what the cube says was there
+                                 #   POST /evidence/ask     ask the repo's own docs, with
+                                 #                         citations checked against what
+                                 #                         the model was shown. Needs no
+                                 #                         cube; needs a key (D27)
                                  #   serves TERRARIUM_SERVE_ZARR_STORE, not the build path
 uv run pytest                    # tests
 uv run ruff check src/ scripts/  # lint
@@ -527,6 +594,12 @@ uv run python scripts/build_air_layers.py # add pm25_emission_g_s + wind_directi
                                           #   --out a new path, then move serve_zarr_store
 uv run python scripts/validate_air.py     # OpenAQ leave-one-station-out. Needs
                                           #   TERRARIUM_OPENAQ_KEY (free, no card)
+uv run python scripts/ingest_policy.py    # download published policy PDFs, Content-Length
+                                          #   verified and .partial-renamed like WorldPop
+uv run python scripts/extract_policy.py   # measures + the coverage table. Needs
+                                          #   TERRARIUM_GEMINI_API_KEY — the one path with
+                                          #   no offline fallback, and a build step rather
+                                          #   than a route, so no deployment needs the key
 
 cd web && npm install && npm run dev      # frontend on :5173 (the API's CORS allowlist
                                           #   is 5173 only — do not accept Vite's

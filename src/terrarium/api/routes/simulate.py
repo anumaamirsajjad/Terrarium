@@ -12,7 +12,7 @@ from typing import Annotated
 
 import numpy as np
 import xarray as xr
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from terrarium.api.deps import get_runtime
 from terrarium.api.geometry import GeometryError, mask_from_geojson
@@ -41,7 +41,7 @@ from terrarium.cores.thermal.simulate import (
 )
 from terrarium.dsl.explain import AirInputs, Brief, BriefInputs, EquityInputs, brief_for
 from terrarium.dsl.library import estimate_cost, trees_for_canopy
-from terrarium.dsl.llm import narrate
+from terrarium.dsl.llm import Language, LLMUnavailable, narrate, translate
 from terrarium.state.cube import select_window
 
 logger = logging.getLogger(__name__)
@@ -180,6 +180,7 @@ def _brief(
     equity: EquityResponse | None,
     air: AirResponse | None,
     settings: Settings,
+    language: str,
 ) -> Brief:
     """Write the narrative block from the numbers already computed. No new physics.
 
@@ -191,6 +192,13 @@ def _brief(
     it or hands it straight back. `narrate` cannot raise, so there is nothing to catch and
     no branch here for the keyless case - which is the point: a deployment with no key
     produces the template prose and the same response shape.
+
+    **English first, then translated** (Phase C). The English `plain_summary` stays the
+    source of truth and `translate` is a rewrite of it under the same two guards, which is
+    what makes a translated brief as checkable as an English one. Narration is skipped for
+    a non-English request: rewording and then translating is two chances to drift where
+    one will do, and the template's prose is already the version the guards were written
+    against.
     """
     area_km2 = area_m2 / 1_000_000.0
     tree_count = trees_for_canopy(context.mean_canopy_added, area_m2)
@@ -243,7 +251,15 @@ def _brief(
             ),
         )
     )
-    return brief.model_copy(update={"plain": narrate(brief.plain, settings=settings)})
+    # `translate` raises when it cannot honour the language; `narrate` never does, because
+    # it is a rewrite of prose the reader could already read. The route turns the first
+    # into a 503 rather than quietly answering in English — see `dsl.llm.translate`.
+    plain = (
+        translate(brief.plain, language=language, settings=settings)
+        if language != "en"
+        else narrate(brief.plain, settings=settings)
+    )
+    return brief.model_copy(update={"plain": plain})
 
 
 @router.post(
@@ -255,6 +271,17 @@ async def run_simulation(
     request: SimulateRequest,
     runtime: Annotated[Runtime, Depends(get_runtime)],
     settings: Annotated[Settings, Depends(get_settings)],
+    lang: Annotated[
+        Language,
+        Query(
+            description=(
+                "Language for the plain-language block. 'ur' translates it through a "
+                "model under the same faithfulness guards the English narrator carries; "
+                "with no key configured, or if the translation invents a figure, the "
+                "English template comes back and `brief.plain.source` says so."
+            )
+        ),
+    ] = "en",
 ) -> SimulateResponse:
     try:
         label = runtime.resolve_window(request.window)
@@ -321,15 +348,8 @@ async def run_simulation(
     equity = _equity(result.delta, runtime)
     air = _air(window, intervention, runtime, label)
 
-    return SimulateResponse(
-        equity=equity,
-        variable=result.variable,
-        units=result.units,
-        window=label,
-        season=season,
-        stats=stats_response,
-        context=context,
-        brief=_brief(
+    try:
+        brief = _brief(
             request=request,
             label=label,
             season=season,
@@ -341,7 +361,24 @@ async def run_simulation(
             equity=equity,
             air=air,
             settings=settings,
-        ),
+            language=lang,
+        )
+    except LLMUnavailable as exc:
+        # Only reachable for `lang != "en"`. The physics all ran and the English brief is
+        # sitting right there, but the caller asked for a language and answering in
+        # another one is a different answer — so this says so instead of quietly
+        # substituting. 503, matching `require_model`: the fix is configuration.
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+    return SimulateResponse(
+        equity=equity,
+        variable=result.variable,
+        units=result.units,
+        window=label,
+        season=season,
+        stats=stats_response,
+        context=context,
+        brief=brief,
         delta=build_layer(
             result.delta,
             variable=result.variable,

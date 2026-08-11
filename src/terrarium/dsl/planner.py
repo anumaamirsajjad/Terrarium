@@ -25,7 +25,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from terrarium.config import Season
-from terrarium.dsl.llm import LLMAdapter, LLMUnavailable
+from terrarium.dsl.llm import LLMAdapter, LLMUnavailable, fold_digits
 from terrarium.dsl.schema import Plan, PlantTrees, RestrictVehicles
 
 logger = logging.getLogger(__name__)
@@ -63,11 +63,9 @@ class ParsedPlan(BaseModel):
 # Note the script is right-to-left and the digits are usually Eastern Arabic-Indic
 # (۰-۹), which no `\d` in a naive pattern matches. `_normalise` folds them to
 # ASCII before any pattern runs, which is why one set of number patterns serves both
-# languages.
-_URDU_DIGITS = {
-    **{chr(0x06F0 + i): str(i) for i in range(10)},  # Urdu ۰-۹
-    **{chr(0x0660 + i): str(i) for i in range(10)},  # Arabic ٠-٩
-}
+# languages. The table itself moved to `dsl/llm.py` in Phase C, where the faithfulness
+# guard needs the same fold to compare an Urdu rewrite's numerals against an English
+# template's — two tables would be one table and one bug waiting for the other to drift.
 _URDU_PERCENT = "٪"  # ٪
 # درخت tree, پودے saplings, شجرکاری afforestation
 _URDU_TREE_WORDS = r"درخت|پودے|پودوں|شجرکاری|شجر کاری"
@@ -120,7 +118,7 @@ def _normalise(text: str) -> str:
     sentence carrying ۵۰۰۰ parses as a plan with no quantity in it, which then reads as the
     parser not understanding Urdu at all rather than not understanding its digits.
     """
-    return "".join(_URDU_DIGITS.get(ch, ch) for ch in text).lower()
+    return fold_digits(text).lower()
 
 
 def _number(raw: str, multiplier: str | None) -> int:

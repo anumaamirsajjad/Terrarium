@@ -292,3 +292,28 @@ def test_unknown_field_is_rejected_rather_than_defaulted(client: TestClient) -> 
     )
     assert response.status_code == 422
     assert "canopy_fraction" in response.text
+
+
+# --- ?lang=ur (Phase C, key-required) ------------------------------------------------
+
+
+def test_english_needs_no_model(client: TestClient) -> None:
+    """The brief itself is templated by `explain.py` and always has been. Only the
+    *translation* is a model doing something, so English is unaffected by the key."""
+    response = client.post("/simulate", json={"geometry": PLANTABLE, "canopy_fraction_added": 0.3})
+
+    assert response.status_code == 200
+    assert response.json()["brief"]["plain"]["source"] == "template"
+
+
+def test_urdu_without_a_model_is_503_rather_than_english(client: TestClient) -> None:
+    """The change. Silently answering in English is the answer to a different question,
+    and a caller could not tell it from a working translation."""
+    response = client.post(
+        "/simulate",
+        params={"lang": "ur"},
+        json={"geometry": PLANTABLE, "canopy_fraction_added": 0.3},
+    )
+
+    assert response.status_code == 503
+    assert "could not be translated" in response.json()["detail"]

@@ -42,7 +42,15 @@ ALIASES = {
 
 # Declared inline in FastAPI's schema (a bare dict) rather than as a named model, so there
 # is nothing on the Python side to diff against.
-NOT_IN_OPENAPI = {"GeoJsonPolygon"}
+#
+# `SearchEvent` is the SSE frame body. `/agent/search` returns a `StreamingResponse`, whose
+# payload FastAPI cannot describe — so the wire shape is real and checkable in `test_agent`
+# but has no OpenAPI component for this diff to compare against.
+#
+# `EvidenceFailure` is the *error* body of `/evidence/ask` — the `detail` of a 502 or 422.
+# FastAPI describes error details as a bare object, so like the SSE frame it is a real,
+# tested wire shape with no named schema behind it. `test_evidence` asserts on it directly.
+NOT_IN_OPENAPI = {"GeoJsonPolygon", "SearchEvent", "EvidenceFailure"}
 
 # FastAPI's own error shapes. The client has no reason to mirror them.
 IGNORED_SCHEMAS = {"HTTPValidationError", "ValidationError"}

@@ -61,12 +61,35 @@ export interface MapViewProps {
   /** Called while the compare grip is dragged, with a fraction of the tile's width. */
   onSplitChange?: (fraction: number) => void;
   onMapClick: (position: Position) => void;
+  /**
+   * The search agent's lattice, drawn faintly so the live trace is legible: when the agent
+   * names `r03c05`, that block is already on screen for the highlight to land on.
+   */
+  candidates?: CandidateRegion[];
+  /** Region ids currently under evaluation, drawn bright against the faint lattice. */
+  highlightedRegions?: string[];
+}
+
+/** Just enough of the API's `Candidate` to draw it. */
+export interface CandidateRegion {
+  region_id: string;
+  geometry: { coordinates: [number, number][][] };
 }
 
 const DRAW_FILL: [number, number, number, number] = [56, 189, 248, 55];
 const DRAW_FILL_OPEN: [number, number, number, number] = [56, 189, 248, 12];
 const DRAW_LINE: [number, number, number, number] = [56, 189, 248, 255];
 const DIVIDER_COLOUR: [number, number, number, number] = [255, 255, 255, 200];
+
+/**
+ * The agent's lattice. Faint enough to read as scaffolding rather than data — the raster
+ * underneath is still the thing being looked at — and bright only where the agent is
+ * currently working, which is what makes the step trace and the map one story.
+ */
+const CANDIDATE_FILL: [number, number, number, number] = [148, 163, 184, 8];
+const CANDIDATE_LINE: [number, number, number, number] = [148, 163, 184, 40];
+const CANDIDATE_FILL_LIT: [number, number, number, number] = [251, 191, 36, 55];
+const CANDIDATE_LINE_LIT: [number, number, number, number] = [251, 191, 36, 230];
 
 /**
  * Metres. About two pixels at the tile's default zoom — visible as a wall, not a tower.
@@ -92,6 +115,8 @@ export default function MapView({
   dividerLongitude,
   onSplitChange,
   onMapClick,
+  candidates,
+  highlightedRegions,
 }: MapViewProps) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
@@ -274,6 +299,33 @@ export default function MapView({
           getTargetPosition: (d: { to: Position }) => d.to,
           getColor: DIVIDER_COLOUR,
           getWidth: 2,
+        }),
+      );
+    }
+
+    // Under the drawn polygon, so a hand-drawn ring is never hidden by the lattice.
+    if (candidates && candidates.length > 0) {
+      const lit = new Set(highlightedRegions ?? []);
+      layers.push(
+        new PolygonLayer({
+          id: "agent-candidates",
+          data: candidates,
+          getPolygon: (d: CandidateRegion) => d.geometry.coordinates[0]!,
+          getFillColor: (d: CandidateRegion) =>
+            lit.has(d.region_id) ? CANDIDATE_FILL_LIT : CANDIDATE_FILL,
+          getLineColor: (d: CandidateRegion) =>
+            lit.has(d.region_id) ? CANDIDATE_LINE_LIT : CANDIDATE_LINE,
+          getLineWidth: 1,
+          lineWidthUnits: "pixels",
+          filled: true,
+          stroked: true,
+          pickable: false,
+          // deck.gl caches accessor output; without this the highlight never moves as the
+          // agent walks the lattice, which is the one thing this layer exists to show.
+          updateTriggers: {
+            getFillColor: highlightedRegions,
+            getLineColor: highlightedRegions,
+          },
         }),
       );
     }

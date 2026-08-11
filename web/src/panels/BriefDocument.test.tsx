@@ -67,6 +67,15 @@ const RESULT = {
     ],
     confidence: "moderate",
     expected_cooling_c: -0.106,
+    // The plain-language block the printed brief now carries as its own section, so a
+    // resident gets the half they can read. `source` is what decides `dir="rtl"`.
+    plain: {
+      verdict: "small",
+      headline: "Street trees here would make the ground about 0.11 degC cooler.",
+      points: ["About 626,000 people live across this tile."],
+      caveat: "This is a model, not a measurement.",
+      source: "template",
+    },
   },
 } as unknown as SimulateResponse;
 

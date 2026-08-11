@@ -24,32 +24,43 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import {
+  BookOpen,
   Check,
   ChevronDown,
   PenLine,
   Play,
   Printer,
   Search,
+  Sparkles,
   Trash2,
   Undo2,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import {
+  type Answer,
+  type Attempt,
+  type Candidate,
   type CubeSummaryResponse,
   type HealthResponse,
   type PlanResponse,
   type Preset,
+  type SearchResult,
   type SimulateResponse,
+  type SpatialExplanation,
   api,
+  searchStream,
 } from "./api/client";
 import { type LoadedLayer, loadLayer, useCubeLayer } from "./hooks/useCubeLayer";
 import MapView, { type RasterOverlay } from "./map/MapView";
 import { type Position, useDrawnPolygon } from "./map/useDrawnPolygon";
 import { GLIDE, SNAP } from "./motion/springs";
 import Legend from "./panels/Legend";
+import AgentPanel from "./panels/AgentPanel";
 import AirPanel from "./panels/AirPanel";
+import EvidencePanel from "./panels/EvidencePanel";
+import PatternPanel from "./panels/PatternPanel";
 import BriefDocument from "./panels/BriefDocument";
 import BriefPanel from "./panels/BriefPanel";
 import CommandPalette from "./panels/CommandPalette";
@@ -171,6 +182,42 @@ export default function App() {
    */
   const [sheetOpen, setSheetOpen] = useState(false);
 
+  // --- the search agent (Phase A). Everything here is inert until the panel is opened. ---
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [trace, setTrace] = useState<Attempt[]>([]);
+  const [searchStatus, setSearchStatus] = useState<string | null>(null);
+  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  /** Regions the agent is evaluating right now, highlighted on the lattice overlay. */
+  const [litRegions, setLitRegions] = useState<string[]>([]);
+  const searchAbort = useRef<AbortController | null>(null);
+
+  /**
+   * Which language the brief comes back in (Phase C).
+   *
+   * The rule parser already reads Urdu, so a resident who typed Urdu was being answered
+   * only in English. This is a *request*, not a guarantee: the server returns the English
+   * template whenever no key is configured or the translation drifts, and the panel reads
+   * `brief.plain.source` rather than this to decide whether to set `dir="rtl"`.
+   */
+  const [lang, setLang] = useState<"en" | "ur">("en");
+
+  // --- where it landed (Phase E). Re-runs the core, so it is opt-in rather than on
+  //     every /simulate: a second model call on the main endpoint would cost every user
+  //     latency for a panel most of them never open. ---
+  const [pattern, setPattern] = useState<SpatialExplanation | null>(null);
+  const [patternBusy, setPatternBusy] = useState(false);
+  const [patternError, setPatternError] = useState<string | null>(null);
+
+  // --- ask the record (Phase B). Needs no cube, so it works on a broken deployment. ---
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [evidenceQuestion, setEvidenceQuestion] = useState("");
+  const [evidenceAnswer, setEvidenceAnswer] = useState<Answer | null>(null);
+  const [evidenceBusy, setEvidenceBusy] = useState(false);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+
   /**
    * Swapping windows refetches a 40,602-cell raster, decodes it and re-colourises it.
    *
@@ -284,7 +331,7 @@ export default function App() {
       setPlanning(true);
       setPlanError(null);
       try {
-        const response = await api.plan({ geometry: draw.geometry, ...body });
+        const response = await api.plan({ geometry: draw.geometry, ...body }, lang);
         setPlan(response);
         setCanopy(response.canopy_fraction_added);
         // Both levers, not just canopy. Adopting only the canopy left the emission slider
@@ -300,7 +347,7 @@ export default function App() {
         setPlanning(false);
       }
     },
-    [draw.geometry],
+    [draw.geometry, lang],
   );
 
   const runSimulation = useCallback(async () => {
@@ -323,6 +370,7 @@ export default function App() {
               emission_fraction_removed: emissions,
               window: selectedWindow,
             },
+        lang,
       );
       setResult(response);
       setSheetOpen(true);
@@ -335,7 +383,7 @@ export default function App() {
     } finally {
       setRunning(false);
     }
-  }, [draw.geometry, selectedWindow, canopy, emissions, plan]);
+  }, [draw.geometry, selectedWindow, canopy, emissions, plan, lang]);
 
   const handleMapClick = useCallback(
     (position: Position) => {
@@ -345,6 +393,173 @@ export default function App() {
       }
     },
     [draw],
+  );
+
+  // -------------------------------------------------------- the search agent ---
+
+  /**
+   * Run one search, rendering the trace as it arrives.
+   *
+   * The lattice is fetched on the first search rather than at boot: it is 121 polygons and
+   * a full grid pass server-side, and most sessions never open this panel. Once fetched it
+   * stays, keyed to nothing — the blocks are the grid's, not a window's.
+   */
+  const runSearch = useCallback(
+    async (goal: string) => {
+      const controller = new AbortController();
+      searchAbort.current = controller;
+
+      setSearching(true);
+      setSearchError(null);
+      setSearchResult(null);
+      setTrace([]);
+      setSearchStatus("starting the search");
+
+      try {
+        if (candidates.length === 0) {
+          const lattice = await api.candidates(selectedWindow ?? undefined);
+          setCandidates(lattice.candidates);
+        }
+
+        await searchStream(
+          { goal, window: selectedWindow },
+          (event) => {
+            setSearchStatus(event.message);
+            if (event.attempt) {
+              setTrace((current) => [...current, event.attempt!]);
+              setLitRegions(event.attempt.region_ids);
+            }
+            if (event.result) setSearchResult(event.result);
+          },
+          controller.signal,
+        );
+      } catch (error) {
+        // An abort is the user pressing Stop, not a failure worth a red panel.
+        if ((error as Error).name !== "AbortError") {
+          setSearchError((error as Error).message);
+        }
+      } finally {
+        setSearching(false);
+        setSearchStatus(null);
+        setLitRegions([]);
+        searchAbort.current = null;
+      }
+    },
+    [candidates.length, selectedWindow],
+  );
+
+  const stopSearch = useCallback(() => searchAbort.current?.abort(), []);
+
+  /**
+   * Take the search's winner into the ordinary flow: its polygon becomes the drawn one and
+   * its levers become the sliders.
+   *
+   * Deliberately *not* a second result path. The search's own numbers came from the same
+   * cores, but the user then has a polygon they can edit, re-run, compare and print — which
+   * is the product, and a search result that could only be looked at would be a dead end.
+   */
+  const applySearchPlan = useCallback(
+    (attempt: Attempt) => {
+      const regions = new Map(candidates.map((region) => [region.region_id, region]));
+      const chosen = attempt.region_ids
+        .map((id) => regions.get(id))
+        .filter((region): region is Candidate => region !== undefined);
+      if (chosen.length === 0) return;
+
+      // One region applies exactly. Several are a MultiPolygon server-side, which this
+      // hand-rolled single-ring draw state cannot hold — so the first is applied and the
+      // panel says so rather than silently dropping the rest.
+      draw.setPolygon(chosen[0]!.geometry.coordinates[0] as Position[]);
+
+      const planting = attempt.plan.actions.find((action) => action.kind === "plant_trees");
+      const restriction = attempt.plan.actions.find(
+        (action) => action.kind === "restrict_vehicles",
+      );
+      if (planting && "canopy_fraction_added" in planting && planting.canopy_fraction_added) {
+        setCanopy(planting.canopy_fraction_added);
+      }
+      setEmissions(restriction ? restriction.emission_fraction_removed : 0);
+      setPlan(null);
+      setPlanError(null);
+      setAgentOpen(false);
+    },
+    [candidates, draw],
+  );
+
+  // ----------------------------------------------------------- where it landed ---
+
+  /**
+   * Explain the pattern of the run currently on screen.
+   *
+   * Posts the *same body* `/simulate` was given, because the route re-runs the core: the
+   * pattern being described has to be the pattern being looked at, and the only way to
+   * guarantee that without trusting a client-supplied delta field is to send the request
+   * again rather than the result.
+   */
+  const explainPattern = useCallback(async () => {
+    if (!draw.geometry || !result) return;
+
+    setPatternBusy(true);
+    setPatternError(null);
+    try {
+      // The same 121 blocks the explanation is keyed to, so hovering a row can light one
+      // up on the map. Fetched once and reused, exactly as the agent panel does.
+      if (candidates.length === 0) {
+        setCandidates((await api.candidates(result.window)).candidates);
+      }
+      setPattern(
+        await api.explainSpatial(
+          plan
+            ? { ...plan.simulate_request, window: result.window }
+            : {
+                geometry: draw.geometry,
+                canopy_fraction_added: canopy,
+                emission_fraction_removed: emissions,
+                window: result.window,
+              },
+        ),
+      );
+    } catch (error) {
+      setPatternError((error as Error).message);
+      setPattern(null);
+    } finally {
+      setPatternBusy(false);
+    }
+  }, [draw.geometry, result, plan, canopy, emissions, candidates.length]);
+
+  // ------------------------------------------------------------ ask the record ---
+
+  const askEvidence = useCallback(async (question: string) => {
+    setEvidenceBusy(true);
+    setEvidenceError(null);
+    try {
+      setEvidenceAnswer(await api.ask(question));
+    } catch (error) {
+      // The message already carries the server's own reason, including the anchors a
+      // rejected answer invented. Showing it verbatim is the point: a guard that fired
+      // silently is indistinguishable from a feature that never worked.
+      setEvidenceError((error as Error).message);
+      setEvidenceAnswer(null);
+    } finally {
+      setEvidenceBusy(false);
+    }
+  }, []);
+
+  /**
+   * "Explain this" on a figure that is already on screen.
+   *
+   * The two worth wiring are the ones a reader most often disbelieves: the 2.5x hindcast
+   * correction, and the air validation. Opening the drawer with the question already asked
+   * is the difference between an answer and a search box.
+   */
+  const explainFigure = useCallback(
+    (question: string) => {
+      setEvidenceQuestion(question);
+      setEvidenceOpen(true);
+      setSheetOpen(true);
+      void askEvidence(question);
+    },
+    [askEvidence],
   );
 
   const resetScenario = useCallback(() => {
@@ -544,6 +759,11 @@ export default function App() {
         dividerLongitude={dividerLongitude}
         onSplitChange={setSplitFraction}
         onMapClick={handleMapClick}
+        // Only while something is using it. The lattice is scaffolding — for a search, or
+        // for a pattern breakdown whose rows highlight blocks — and leaving 121 outlines on
+        // the map afterwards would clutter the field they describe.
+        candidates={agentOpen || pattern ? candidates : undefined}
+        highlightedRegions={litRegions}
       />
 
       {/* ------------------------------------------------------------ top cluster --- */}
@@ -607,6 +827,24 @@ export default function App() {
                     {plainVariableLabel(v.name)}
                   </option>
                 ))}
+            </select>
+            <span className="h-4 w-px shrink-0 bg-white/10" />
+            {/* Urdu (Phase C). The rule parser has read Urdu since Phase 11, so a Lahore
+                resident could type a plan in Urdu and be answered only in English. It sits
+                in the top cluster rather than in a settings menu because it changes what
+                the next run comes back as, not a preference. */}
+            <select
+              value={lang}
+              onChange={(event) => setLang(event.target.value as "en" | "ur")}
+              className="w-auto shrink-0 bg-transparent font-mono text-xs text-white/70 outline-none"
+              aria-label="Brief language"
+            >
+              <option value="en" className="bg-[#0a0d12]">
+                EN
+              </option>
+              <option value="ur" className="bg-[#0a0d12]">
+                اردو
+              </option>
             </select>
           </div>
           {/* The window is part of the answer, not a detail: the same planting cools about
@@ -750,7 +988,7 @@ export default function App() {
         className={`pointer-events-auto z-30 flex flex-col gap-3 overflow-x-hidden
                     overflow-y-auto lg:absolute lg:inset-x-auto lg:top-5 lg:right-5 lg:bottom-auto
                     lg:z-10 lg:max-h-[calc(100dvh-2.5rem)] lg:w-96 ${
-                      result && sheetOpen
+                      (result || agentOpen || evidenceOpen) && sheetOpen
                         ? "absolute inset-x-0 bottom-0 max-h-[78dvh] rounded-t-2xl bg-[#0a0d12]/80 p-3 backdrop-blur-xl lg:rounded-none lg:bg-transparent lg:p-0 lg:backdrop-blur-none"
                         : "max-lg:hidden"
                     }`}
@@ -766,14 +1004,63 @@ export default function App() {
         </button>
 
         <AnimatePresence mode="popLayout">
+          {/* First in the rail while it is open: the search is what the user just asked
+              for, and it is also the thing that produces the polygon everything below
+              describes. */}
+          {agentOpen && (
+            <FloatingPanel key="agent">
+              <AgentPanel
+                trace={trace}
+                status={searchStatus}
+                result={searchResult}
+                running={searching}
+                error={searchError}
+                planner={planner}
+                onSearch={(goal) => void runSearch(goal)}
+                onStop={stopSearch}
+                onApply={applySearchPlan}
+              />
+            </FloatingPanel>
+          )}
+
+          {evidenceOpen && (
+            <FloatingPanel key="evidence">
+              <EvidencePanel
+                answer={evidenceAnswer}
+                busy={evidenceBusy}
+                error={evidenceError}
+                onAsk={(question) => void askEvidence(question)}
+                initialQuestion={evidenceQuestion}
+              />
+            </FloatingPanel>
+          )}
+
           {result && (
             <FloatingPanel key="plain">
               <PlainPanel brief={result.brief} />
 
+              {/* "Explain this" on the figure a reader most often disbelieves. The 2.5x
+                  correction is stated in every brief and justified in the plan; this is
+                  the shortest path between the two. */}
+              <button
+                type="button"
+                onClick={() =>
+                  explainFigure(
+                    "Why is the modelled cooling divided by 2.5 before it is quoted?",
+                  )
+                }
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg
+                           border border-white/8 py-1.5 text-[0.68rem] text-white/50
+                           hover:bg-white/8"
+              >
+                <BookOpen className="size-3" />
+                Why is this corrected by 2.5×?
+              </button>
+
               <button
                 type="button"
                 onClick={() => window.print()}
-                className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg
                            border border-white/12 py-2 text-xs text-white/70
                            hover:bg-white/10"
               >
@@ -804,6 +1091,13 @@ export default function App() {
 
                 <div className="mt-4 space-y-5 border-t border-white/8 pt-4">
                   <ResultPanel result={result} />
+                  <PatternPanel
+                    explanation={pattern}
+                    busy={patternBusy}
+                    error={patternError}
+                    onExplain={() => void explainPattern()}
+                    onHighlight={setLitRegions}
+                  />
                   <EquityPanel equity={result.equity} />
                   {result.air && (
                     <AirPanel
@@ -910,6 +1204,21 @@ export default function App() {
             />
           )}
 
+          {/* The search agent needs no polygon — that is D26's whole point — so this sits
+              beside "Draw zone" rather than behind it: the two are alternative ways in, not
+              a sequence. */}
+          {!draw.drawing && (
+            <ToolButton
+              key="agent"
+              icon={Sparkles}
+              label={agentOpen ? "Hide search" : "Search the tile"}
+              onClick={() => {
+                setAgentOpen((open) => !open);
+                setSheetOpen(true);
+              }}
+            />
+          )}
+
           {draw.drawing && (
             <motion.span
               key="count"
@@ -958,6 +1267,20 @@ export default function App() {
               onClick={() => void runSimulation()}
             />
           )}
+          {/* Needs neither a cube nor a polygon — the corpus is markdown in the repo — so
+              it is always available, including on a deployment whose Zarr store failed. */}
+          {!draw.drawing && (
+            <ToolButton
+              key="evidence"
+              icon={BookOpen}
+              label={evidenceOpen ? "Hide record" : "Ask the record"}
+              onClick={() => {
+                setEvidenceOpen((open) => !open);
+                setSheetOpen(true);
+              }}
+            />
+          )}
+
           {(draw.complete || draw.drawing) && (
             <ToolButton key="clear" icon={Trash2} label="Clear" onClick={resetScenario} />
           )}

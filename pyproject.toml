@@ -47,6 +47,20 @@ dependencies = [
     "langchain-core>=0.3",
     "langchain-groq>=0.2",
     "langchain-google-genai>=2.0",
+    # --- Intelligence: the intervention search agent (D17 reopened, D25) ---
+    # D17 refused LangGraph for the *planner* and that reasoning is untouched: parse then
+    # validate is two nodes with no cycle. The search agent is the case D17 named as its
+    # own reopening condition - propose, check, run, score, decide, and an edge back to
+    # propose when the validator refuses. `langgraph.graph` is imported directly by
+    # `agent/graph.py`. Nothing else in the tree uses it.
+    "langgraph>=0.2",
+    # --- Intelligence: policy document extraction (Phase D) ---
+    # Pure Python, no transitive dependencies. Used for exactly one thing: pulling the
+    # document's own text back out so an extracted quote can be checked against it. The
+    # *extraction* is the model reading the PDF natively - naive pypdf text on the Punjab
+    # Clean Air Action Plan comes out as "The P unja b Clea n A ir Act ion P la n", which
+    # is why `policy/extract.py` de-spaces before it compares and never parses meaning.
+    "pypdf>=5.0",
 ]
     
 [project.optional-dependencies]
@@ -101,7 +115,13 @@ ignore = ["ANN401"]  # allow typing.Any where genuinely needed
 # for text that is deliberately not English.
 "src/terrarium/dsl/planner.py" = ["RUF001", "RUF002", "RUF003"]
 "src/terrarium/dsl/test_planner.py" = ["RUF001", "RUF002", "RUF003"]
-"src/terrarium/dsl/observe.py" = ["RUF002"]
+# Phase C put Urdu into the other half of the DSL: `llm.py` carries the digit-folding
+# table (۰-۹, ٠-٩) that the faithfulness guard depends on, and `test_llm.py` asserts on
+# whole Urdu sentences. Same reasoning as the parser above — RUF001-003 are the right
+# warning for a stray Cyrillic 'а' in an English identifier and the wrong one for text
+# that is deliberately not English.
+"src/terrarium/dsl/llm.py" = ["RUF001", "RUF002", "RUF003"]
+"src/terrarium/dsl/test_llm.py" = ["RUF001", "RUF002", "RUF003"]
 
 [tool.mypy]
 python_version = "3.12"

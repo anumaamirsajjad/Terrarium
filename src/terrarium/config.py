@@ -249,7 +249,25 @@ class Settings(BaseSettings):
     # provider makes one withdrawal notice an outage.
     groq_api_key: str | None = None
     groq_model: str = "llama-3.3-70b-versatile"
+    # The search agent's model (D25/Phase A). A *reasoning* model rather than the planner's
+    # instruction-tuned one, because a search loop's proposal step is the one place in this
+    # project where thinking about what to try next is the whole job. Groq for the agent and
+    # Gemini for the document tasks is what `dsl.llm.resolve_adapter(settings, task=...)`
+    # routes on: latency compounds inside a cycle in a way it never does in a single call.
+    #
+    # Pinned, not aliased, for the reason `gemini_model` carries a paragraph about above.
+    # Treat it as a capability profile: if it is withdrawn, `groq_model` still answers and
+    # the agent still runs, one refusal-loop iteration slower.
+    groq_agent_model: str = "openai/gpt-oss-120b"
 
+    # Where policy PDFs land (Phase D). Downloaded once with the same discipline WorldPop
+    # gets - verify Content-Length, write through `.partial` - because the failure mode is
+    # identical: a short read is a valid-looking PDF with pages missing.
+    policy_dir: Path = DATA_DIR / "raw" / "policy"
+    # The evidence corpus (Phase B) is this repository's own markdown. No vector store and
+    # no embeddings: 240 KB of prose is a BM25 problem, and a section heading is a citation
+    # a reader can actually follow.
+    docs_root: Path = PROJECT_ROOT
 
     # Where `scripts/build_tile.py` writes by default.
     zarr_store: Path = DATA_DIR / "processed" / "cube.zarr"

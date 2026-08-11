@@ -31,6 +31,10 @@ function signed(value: number, digits = 2): string {
 
 export default function BriefDocument({ result, plan, tile, producedAt }: BriefDocumentProps) {
   const { brief, stats, context, equity, air } = result;
+  // Read off `source`, not off what the UI asked for: a translation that invented a figure
+  // is rejected server-side and the English template comes back, and right-aligning that
+  // would print a working guard as a layout bug.
+  const urdu = brief.plain.source.endsWith(":ur");
 
   return (
     <article className="doc" aria-label="Printable council brief">
@@ -97,6 +101,26 @@ export default function BriefDocument({ result, plan, tile, producedAt }: BriefD
             )}
           </tbody>
         </table>
+      </section>
+
+      {/* The plain-language version, printed alongside the technical one rather than
+          instead of it. It is the half a resident reads, and when the API answered in Urdu
+          it is the only half they can — which is why the Urdu font is imported for print as
+          well as for screen. Without it this section prints as boxes, and a PDF has no
+          system fallback to rescue it. */}
+      <section className={`doc__section${urdu ? " doc__section--urdu" : ""}`}>
+        <h2>In plain words</h2>
+        <div dir={urdu ? "rtl" : undefined} lang={urdu ? "ur" : undefined}>
+          <p>{brief.plain.headline}</p>
+          <ul>
+            {brief.plain.points.map((point) => (
+              <li key={point}>{point}</li>
+            ))}
+          </ul>
+        </div>
+        {/* Always English: the server never sends the caveat to a model, in either
+            direction, because it is the one sentence a rewrite has already damaged. */}
+        <p className="doc__note">{brief.plain.caveat}</p>
       </section>
 
       <section className="doc__section">

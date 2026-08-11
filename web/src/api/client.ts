@@ -301,6 +301,216 @@ export interface SimulateRequest {
   window?: string | null;
 }
 
+// --------------------------------------------------- the search agent (Phase A) ---
+
+/**
+ * One block of the lattice the agent chooses from.
+ *
+ * The model never emits coordinates (D26) — it names a `region_id` from this list, and the
+ * geometry here is what the map draws and what "Apply this plan" posts to `/simulate`.
+ */
+export interface Candidate {
+  region_id: string;
+  row0: number;
+  row1: number;
+  col0: number;
+  col1: number;
+  cells: number;
+  area_m2: number;
+  /** Canopy this block can still take, from the thermal core's own per-cell headroom. */
+  plantable_canopy_m2: number;
+  max_trees: number;
+  /** Null where the block is entirely no-data. */
+  mean_lst_c: number | null;
+  /** Summed — population is extensive and is never averaged. */
+  population: number;
+  emission_g_s: number;
+  geometry: GeoJsonPolygon;
+}
+
+export interface CandidatesResponse {
+  window: string;
+  block_cells: number;
+  candidates: Candidate[];
+}
+
+export interface Objective {
+  metric: "cooling" | "person_degrees" | "cost_effectiveness";
+  /** Compared against the hindcast-**corrected** figure, never the raw model output. */
+  target_cooling_c: number | null;
+  max_cost_usd: number | null;
+  window: string | null;
+  description: string;
+}
+
+export interface Outcome {
+  /** Raw model output, negative for cooling. */
+  mean_delta_inside_c: number;
+  /** After the 2.5x hindcast correction, stated positive. The figure to quote. */
+  expected_cooling_c: number;
+  person_degrees: number;
+  people_reached: number;
+  cost_usd: number;
+  tree_count: number;
+  area_km2: number;
+  delta_pm25: number | null;
+}
+
+/**
+ * One trip round the loop, kept whether it worked or not.
+ *
+ * A refused attempt matters more than a scored one for the trace: `reason` is the
+ * validator's own arithmetic, and it is what the next proposal was conditioned on.
+ */
+export interface Attempt {
+  step: number;
+  region_ids: string[];
+  plan: Plan;
+  status: "scored" | "refused";
+  /** Only two producers: the model, or the deterministic greedy control. */
+  proposer: "model" | "greedy";
+  reason: string | null;
+  score: number | null;
+  outcome: Outcome | null;
+}
+
+export interface SearchResult {
+  search_id: string;
+  goal: string;
+  objective: Objective;
+  window: string;
+  season: string;
+  best: Attempt | null;
+  /** The deterministic greedy control. **Not a fallback** — it is what the agent must beat. */
+  baseline: Attempt | null;
+  beat_baseline: boolean;
+  tried: Attempt[];
+  simulations_used: number;
+  llm_calls_used: number;
+  elapsed_s: number;
+  stopped_because: string;
+  /**
+   * The search narrated. **Empty when the model could not write it or drifted** — the
+   * numbers above came from the cores and are the result either way, so render them
+   * regardless.
+   */
+  report: string[];
+  /** The provider chain, or "unavailable". */
+  report_source: string;
+}
+
+/** What `GET /agent/search/{id}` returns. The stream is the primary interface. */
+export interface SearchResponse {
+  result: SearchResult;
+}
+
+export interface SearchEvent {
+  node: string;
+  message: string;
+  attempt: Attempt | null;
+  /** Present on the final event only. */
+  result: SearchResult | null;
+}
+
+export interface SearchBudget {
+  max_simulations: number;
+  max_llm_calls: number;
+  wall_clock_s: number;
+}
+
+export interface SearchRequest {
+  goal: string;
+  window?: string | null;
+  budget?: SearchBudget;
+}
+
+// --------------------------------------------- explain the map (Phase E) ---
+
+/**
+ * One block of the lattice, and what the cube says was in it.
+ *
+ * Every field is measured server-side. The description in `SpatialExplanation.summary` may
+ * only reorganise these figures into prose — a rewrite carrying a number that is not in
+ * this table is rejected before the response is built.
+ */
+export interface RegionExplanation {
+  region_id: string;
+  /** Hindcast-corrected and positive, like every other cooling figure the product ships. */
+  expected_cooling_c: number;
+  canopy_added: number;
+  headroom_km2: number;
+  residents: number;
+  /** 1 = least densely populated tenth of the tile's residents, 10 = most. Null if unknown. */
+  population_decile: number | null;
+  tree_cover_fraction: number;
+  water_fraction: number;
+  inside_polygon: boolean;
+  /**
+   * Changed without being drawn on. Real physics — the 500 m neighbourhood terms carry
+   * cooling past the polygon's edge — and the part of the map users most often call a bug.
+   */
+  spillover: boolean;
+}
+
+export interface SpatialExplanation {
+  window: string;
+  regions: RegionExplanation[];
+  /** Null when no model was reachable. The regions are still the answer. */
+  summary: string | null;
+  points: string[];
+  /** "table" when no model wrote the prose, which is a working deployment. */
+  source: string;
+}
+
+// -------------------------------------------------- ask the evidence (Phase B) ---
+
+/** One section of the project's own documentation. `anchor` is `file.md#heading-slug`. */
+export interface Section {
+  file: string;
+  heading: string;
+  anchor: string;
+  body: string;
+  level: number;
+}
+
+export interface Citation {
+  anchor: string;
+  file: string;
+  heading: string;
+}
+
+/**
+ * An answer from the repository's own record.
+ *
+ * Returned **only when the citation guard passed**. There is no half-answer: a model that
+ * cited something it was not shown has its whole answer discarded, and that arrives as a
+ * 502 whose `detail` carries `rejected_citations` and the passages — see `EvidenceFailure`.
+ */
+export interface Answer {
+  question: string;
+  answer: string;
+  /** Every one of these resolves to a passage below. Checked server-side. */
+  citations: Citation[];
+  /** What was retrieved. Always present, so the answer can be checked against it. */
+  passages: Section[];
+  /** The provider chain that wrote it. */
+  source: string;
+}
+
+/**
+ * The `detail` of a failed `/evidence/ask`.
+ *
+ * 422 when the corpus has nothing for the question; 502 when a model answered and the
+ * answer was thrown away; 503 when none is configured. The passages ride along either
+ * way, so a client can still show the evidence rather than only an apology.
+ */
+export interface EvidenceFailure {
+  message: string;
+  /** Non-empty when the answer was discarded for citing something it was not shown. */
+  rejected_citations: string[];
+  passages: Section[];
+}
+
 /** An API error that carries the server's own explanation. */
 export class ApiError extends Error {
   readonly status: number;
@@ -321,6 +531,18 @@ async function parseError(response: Response, path: string): Promise<ApiError> {
     if (Array.isArray(detail) && detail.length > 0) {
       const first = detail[0] as { msg?: unknown };
       if (typeof first.msg === "string") return new ApiError(response.status, first.msg);
+    }
+    // `/evidence/ask` sends a structured detail so a rejected answer can name the anchors
+    // it invented. Flattened into the message rather than dropped: "the model cited
+    // docs/INVENTED.md#x" is the whole reason the caller is seeing an error at all.
+    if (detail && typeof detail === "object") {
+      const failure = detail as Partial<EvidenceFailure>;
+      if (typeof failure.message === "string") {
+        const fabricated = failure.rejected_citations?.length
+          ? ` (${failure.rejected_citations.join(", ")})`
+          : "";
+        return new ApiError(response.status, `${failure.message}${fabricated}`);
+      }
     }
   } catch {
     // Fall through to the status line — the body was not JSON.
@@ -353,8 +575,13 @@ export const api = {
   layer: (name: string, window?: string) =>
     request<LayerResponse>(`/cube/layer/${name}${query({ window })}`),
 
-  simulate: (body: SimulateRequest) =>
-    request<SimulateResponse>("/simulate", {
+  /**
+   * `lang` is a *request*, not a guarantee. The server answers in English whenever no key
+   * is configured or the translation would have invented a figure, and says which it did
+   * through `brief.plain.source` — so read that, never this, to decide on `dir="rtl"`.
+   */
+  simulate: (body: SimulateRequest, lang?: "en" | "ur") =>
+    request<SimulateResponse>(`/simulate${query({ lang })}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -368,12 +595,98 @@ export const api = {
    * arithmetic — is the point: a plan that cannot fit must not come back as a small
    * delta that reads like a plan which merely worked badly.
    */
-  plan: (body: PlanRequest) =>
-    request<PlanResponse>("/plan", {
+  plan: (body: PlanRequest, lang?: "en" | "ur") =>
+    request<PlanResponse>(`/plan${query({ lang })}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+
+  /**
+   * Where the cooling landed and what was there. Takes the same body as `/simulate` and
+   * re-runs the core, so the pattern explained is the pattern that was shown.
+   */
+  explainSpatial: (body: SimulateRequest) =>
+    request<SpatialExplanation>("/explain/spatial", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  /**
+   * Ask the project's own documentation. Needs no cube, so it answers on a deployment
+   * whose Zarr store failed to load.
+   */
+  ask: (question: string) =>
+    request<Answer>("/evidence/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    }),
+
+  /** The lattice the agent searches over, for the map overlay. */
+  candidates: (window?: string) =>
+    request<CandidatesResponse>(`/agent/candidates${query({ window })}`),
+
+  /** A finished search, by id. Held in memory server-side; 404 after a restart. */
+  search: (searchId: string) =>
+    request<SearchResponse>(`/agent/search/${searchId}`).then((body) => body.result),
 };
+
+/**
+ * Run one search, calling `onEvent` per node transition.
+ *
+ * Not `EventSource`: that only does GET, and the goal and budget belong in a body. This
+ * reads the `fetch` stream and splits SSE frames by hand, which is about fifteen lines and
+ * avoids encoding a 500-character goal into a query string.
+ *
+ * The search takes tens of seconds, and rendering the trace as it arrives is the feature —
+ * a 40-second spinner is the thing this is written to avoid. `signal` aborts it.
+ */
+export async function searchStream(
+  body: SearchRequest,
+  onEvent: (event: SearchEvent) => void,
+  signal?: AbortSignal,
+): Promise<SearchResult | null> {
+  const response = await fetch(`${API_BASE}/agent/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!response.ok) throw await parseError(response, "/agent/search");
+  if (!response.body) throw new ApiError(500, "the search returned no stream");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: SearchResult | null = null;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE frames are separated by a blank line. A partial frame stays in the buffer —
+    // splitting on every newline would parse half a JSON object roughly once a run.
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const data = frame
+        .split("\n")
+        .find((line) => line.startsWith("data: "))
+        ?.slice(6);
+      if (data) {
+        const event = JSON.parse(data) as SearchEvent;
+        if (event.result) result = event.result;
+        onEvent(event);
+      }
+      boundary = buffer.indexOf("\n\n");
+    }
+  }
+
+  return result;
+}
 
 export { API_BASE };

@@ -44,6 +44,18 @@ const VERDICT: Record<PlainSummary["verdict"], { label: string; className: strin
   none: null,
 };
 
+/**
+ * Did the server actually answer in Urdu?
+ *
+ * Read off `source` rather than off the language the UI *asked* for, because those come
+ * apart on purpose: a translation that invented a figure is rejected server-side and the
+ * English template comes back with `source: "template"`. Setting `dir="rtl"` on English
+ * prose would right-align the fallback and make a working guard look like a rendering bug.
+ */
+function isUrdu(plain: PlainSummary): boolean {
+  return plain.source.endsWith(":ur");
+}
+
 export default function PlainPanel({ brief }: PlainPanelProps) {
   const { plain } = brief;
   const cooling = Math.abs(brief.expected_cooling_c);
@@ -51,6 +63,7 @@ export default function PlainPanel({ brief }: PlainPanelProps) {
   // rather than a small result. The headline sentence already says what happened.
   const measurable = cooling >= 0.005;
   const verdict = VERDICT[plain.verdict];
+  const urdu = isUrdu(plain);
 
   return (
     <section aria-labelledby="plain-heading">
@@ -75,16 +88,23 @@ export default function PlainPanel({ brief }: PlainPanelProps) {
         </span>
       )}
 
-      <p className="mt-3 text-sm leading-relaxed text-white/85">{plain.headline}</p>
+      {/* The translated block, and only it. The caveat below stays English because the
+          server never sends it to a model — see `_guarded_rewrite`. */}
+      <div dir={urdu ? "rtl" : undefined} lang={urdu ? "ur" : undefined}>
+        <p className="mt-3 text-sm leading-relaxed text-white/85">{plain.headline}</p>
 
-      <ul className="mt-4 space-y-2">
-        {plain.points.map((point) => (
-          <li key={point} className="flex gap-2 text-xs leading-relaxed text-white/65">
-            <span aria-hidden="true" className="mt-1.5 size-1 shrink-0 rounded-full bg-white/30" />
-            <span>{point}</span>
-          </li>
-        ))}
-      </ul>
+        <ul className="mt-4 space-y-2">
+          {plain.points.map((point) => (
+            <li key={point} className="flex gap-2 text-xs leading-relaxed text-white/65">
+              <span
+                aria-hidden="true"
+                className="mt-1.5 size-1 shrink-0 rounded-full bg-white/30"
+              />
+              <span>{point}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
 
       <p className="mt-4 flex gap-2 rounded-lg bg-white/5 p-3 text-[0.68rem] leading-relaxed text-white/50">
         <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />

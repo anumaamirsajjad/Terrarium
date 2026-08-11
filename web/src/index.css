@@ -16,10 +16,23 @@
 @import "tailwindcss";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
+/**
+ * Urdu (Phase C). Geist has no Arabic-script coverage at all, so an Urdu brief without
+ * this renders as tofu boxes — and, worse, so does the printed PDF, where there is no
+ * system fallback to rescue it. Self-hosted like the others, for the same D13 reason.
+ *
+ * Nastaliq rather than a Naskh face: it is what Urdu is actually read in, and a naskh
+ * rendering of an Urdu paragraph reads to a Lahore resident roughly the way a blackletter
+ * rendering of English would.
+ */
+@import "@fontsource/noto-nastaliq-urdu";
 
 @theme {
   --font-sans: "Geist Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, "Cascadia Code", monospace;
+  /* Latin first so digits, units and any untranslated technical term keep Geist's
+     metrics; Nastaliq only claims the Arabic-script runs it actually covers. */
+  --font-urdu: "Geist Variable", "Noto Nastaliq Urdu", serif;
 
   /* Substrate */
   --color-void: #05070a;
@@ -79,6 +92,20 @@ body {
   background: var(--bg);
   color: var(--fg);
   -webkit-font-smoothing: antialiased;
+}
+
+/**
+ * Any block the API answered in Urdu. Applied by `dir="rtl"` rather than by a language
+ * class, so it holds on screen and in the print stylesheet without either having to know
+ * which panels can be translated.
+ *
+ * Nastaliq's ascenders and descenders are dramatic, and at Geist's line height the strokes
+ * of consecutive lines collide. 2.1 is the smallest value where they do not.
+ */
+[dir="rtl"] {
+  font-family: var(--font-urdu);
+  line-height: 2.1;
+  text-align: right;
 }
 
 /**

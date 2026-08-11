@@ -12,8 +12,9 @@ on, which is exactly the kind of break that would reach production silently.
 
 from __future__ import annotations
 
+import importlib
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -176,6 +177,59 @@ def synthetic_runtime() -> Runtime:
         cube_path=Path("<synthetic>"),
         model_path=Path("<synthetic>"),
     )
+
+
+class ScriptedAdapter:
+    """A stand-in for a configured provider. Answers each call from a script.
+
+    The AI layer requires a key, so the routes that use it cannot be tested against a
+    keyless app any more — but no test may touch the network either. This is the seam that
+    resolves both: `resolve_adapter` is patched to return one of these, which satisfies
+    `require_model` and answers deterministically.
+
+    Repeats its last reply rather than raising when the script runs out: the graph decides
+    how many times to ask, and a test that ran dry would fail with a `StopIteration`
+    describing the fixture instead of the behaviour under test.
+
+    A reply may be a **callable taking the prompt**, which is what makes the evidence
+    tests possible at all: the citation guard now accepts only anchors the model was
+    actually shown, and which sections BM25 retrieves for a given question is not
+    something a test should be hardcoding. A reply computed from the prompt cites whatever
+    was really handed over.
+    """
+
+    name = "scripted:test"
+
+    def __init__(self, replies: Sequence[str | Callable[[str], str]]) -> None:
+        self.replies = list(replies)
+        self.prompts: list[str] = []
+
+    def complete_json(self, *, system: str, user: str) -> str:
+        self.prompts.append(user)
+        reply = self.replies[min(len(self.prompts) - 1, len(self.replies) - 1)]
+        return reply(user) if callable(reply) else reply
+
+
+@pytest.fixture
+def with_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[Sequence[str | Callable[[str], str]]], ScriptedAdapter]:
+    """Configure a scripted model everywhere `resolve_adapter` is reached from.
+
+    Patched per *importing module* rather than at the source, because each of them does
+    `from terrarium.dsl.llm import resolve_adapter` and therefore holds its own reference.
+    A single patch on `dsl.llm` would leave every one of them pointing at the real one.
+    """
+
+    def configure(replies: Sequence[str | Callable[[str], str]]) -> ScriptedAdapter:
+        adapter = ScriptedAdapter(replies)
+        for module in ("terrarium.api.deps", "terrarium.agent.nodes", "terrarium.evidence.answer"):
+            monkeypatch.setattr(
+                importlib.import_module(module), "resolve_adapter", lambda *_a, **_k: adapter
+            )
+        return adapter
+
+    return configure
 
 
 @pytest.fixture(scope="session")

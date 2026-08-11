@@ -1,9 +1,39 @@
 # The AI layer — five phases past the narrator
 
-**Status: planned, none of it built.** This document is what to build and why. Nothing here
-exists in the tree yet, and no dependency has been added for it. When a phase lands, add its
-row to `IMPLEMENTATION_PLAN.md`'s phase table and its decision to the register there; this
-file is the design, that file remains the record.
+**Status: all five phases built, 2026-08-11.** This document remains the *design* and the
+reasoning; `IMPLEMENTATION_PLAN.md` is the record, and phases A–E now have rows in its
+table with D25, D26 and D27 in its register. Read this for why, that for what shipped.
+
+**One premise below is now false, and it ran through everything.** This plan was written
+under "the key is optional", and every phase carried a deterministic stand-in to honour it.
+That constraint was lifted the same day the phases landed, and **D27 deleted the stand-ins**
+— the agent's regex goal parser and lattice sweep, its template report, `/evidence/ask`'s
+retrieval-only answer, and `translate`'s English fallback. The argument for deleting rather
+than keeping them is not that they were useless: it is that each was *a different procedure
+returning the same response shape*, so a run that silently became one reported a number the
+feature had not produced. Read the fallback paragraphs below as history.
+
+What survived unchanged is the half that was always doing the work — **the post-checks**.
+A guard is not a fallback, and none of them moved.
+
+Four things came out different from the design below, and each is noted in place:
+
+1. **`agent/evaluate.py` is a sixth file in the agent package**, not in A5's table. The
+   greedy control and the graph's `run` node have to be scored *identically* or "the agent
+   beat greedy" means nothing, so the core-running step is one function both import.
+2. **The proposer uses the plain urllib adapter, not tool calling.** The model returns a
+   `region_id` and a `Plan` as JSON, which is schema-filling — exactly what that seam is
+   for — and it keeps `dsl/test_llm.py`'s fake-adapter pattern usable for the graph tests.
+   The reasoning-model unblock in §Model choice is therefore not exercised yet; it becomes
+   available the moment the proposer wants tools.
+3. **The digit-folding table moved to `dsl/llm.py`** rather than being imported from
+   `dsl/planner.py`. Same table, one copy, as C required — but `planner` imports `llm`, so
+   the reverse import would have been a cycle. `planner._normalise` now calls
+   `llm.fold_digits`.
+4. **Phase C exposed a real defect in the existing guard.** `_NUMBER` matched the `2` in
+   `km2`, so a translation that correctly rendered "16.7 km²" in Urdu had "dropped a
+   headline figure" and was rejected. The regex now ignores a numeral glued to a letter,
+   which also silently strengthened the English guard.
 
 ---
 
